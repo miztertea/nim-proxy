@@ -14,7 +14,7 @@ use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use metrics::{counter, histogram};
+use metrics::{counter, gauge, histogram};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -26,6 +26,7 @@ struct Ctx {
     client: String,
     model: String,
     path: String,
+    started: Instant,
 }
 
 /// Statuses worth waiting out: rate limit and transient server-side trouble.
@@ -89,6 +90,14 @@ fn record_request(ctx: &Ctx, status: &str) {
         "status" => status.to_owned(),
     )
     .increment(1);
+    tracing::info!(
+        "{:<6} {} {} {} ({} ms)",
+        status,
+        ctx.client,
+        ctx.model,
+        ctx.path,
+        ctx.started.elapsed().as_millis()
+    );
 }
 
 fn record_tokens(ctx: &Ctx, prompt: Option<u64>, completion: Option<u64>, source: &str) {
@@ -219,6 +228,7 @@ pub async fn handle(
             .unwrap_or("none")
             .to_owned(),
         path: uri.path().to_owned(),
+        started: Instant::now(),
     };
 
     // Answer the model-catalog probe from cache: harnesses poll it and it
@@ -267,6 +277,8 @@ async fn buffered(
     body: Bytes,
     prefer: Option<usize>,
 ) -> Response {
+    let _active = crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
+    gauge!("nimproxy_active_requests").increment(1.0);
     let deadline = Instant::now() + state.cfg.max_wait;
     loop {
         let Some((lane, key)) = reserve_slot(&state, deadline, prefer, || true).await else {
@@ -313,6 +325,9 @@ async fn streaming(
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
     tokio::spawn(async move {
+        let _active =
+            crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
+        gauge!("nimproxy_active_requests").increment(1.0);
         let send = |b: &'static str| {
             let tx = tx.clone();
             async move { tx.send(Ok(Bytes::from(b))).await.is_ok() }

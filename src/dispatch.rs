@@ -74,9 +74,9 @@ async fn run(pool: Arc<Pool>, mut queue: mpsc::UnboundedReceiver<Waiter>) {
     }
 }
 
-/// Minimal drop-guard so the queue-depth gauge stays honest on every exit
-/// path (granted, expired, or abandoned).
-fn scopeguard<F: FnMut()>(f: F) -> impl Drop {
+/// Minimal drop-guard so gauges stay honest on every exit path (granted,
+/// expired, abandoned, or panicked).
+pub fn scopeguard<F: FnMut()>(f: F) -> impl Drop {
     struct Guard<F: FnMut()>(F);
     impl<F: FnMut()> Drop for Guard<F> {
         fn drop(&mut self) {

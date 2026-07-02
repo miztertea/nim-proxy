@@ -21,6 +21,9 @@ pub struct Config {
     pub max_wait: Duration,
     pub heartbeat: Duration,
     pub models_ttl: Duration,
+    /// Reference $/1M token prices for the dashboard's "dollars saved" figure.
+    pub price_in: f64,
+    pub price_out: f64,
 }
 
 pub struct AppState {
@@ -37,10 +40,41 @@ fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
 }
 
+const BANNER: &str = r#"
+     _  _ ___ __  __   ___ ___  _____  ____   __
+    | \| |_ _|  \/  | | _ \ _ \/ _ \ \/ /\ \ / /
+    | .` || || |\/| | |  _/   / (_) >  <  \ V /
+    |_|\_|___|_|  |_| |_| |_|_\\___/_/\_\  |_|
+"#;
+
+/// `nim-proxy --health`: probe our own /health endpoint and exit 0/1.
+/// Exists because the scratch image has no shell or curl for HEALTHCHECK.
+fn health_probe() -> ! {
+    use std::io::{Read, Write};
+    let port = env_or("PORT", "8000");
+    let ok = (|| -> std::io::Result<bool> {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port.parse().unwrap_or(8000)))?;
+        s.set_read_timeout(Some(Duration::from_secs(2)))?;
+        s.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+        let mut buf = [0u8; 32];
+        let n = s.read(&mut buf)?;
+        Ok(String::from_utf8_lossy(&buf[..n]).contains("200"))
+    })()
+    .unwrap_or(false);
+    std::process::exit(if ok { 0 } else { 1 });
+}
+
 #[tokio::main]
 async fn main() {
+    if std::env::args().any(|a| a == "--health") {
+        health_probe();
+    }
     dotenvy::dotenv().ok();
+    println!("{BANNER}    v{}\n", env!("CARGO_PKG_VERSION"));
     tracing_subscriber::fmt()
+        .compact()
+        .with_target(false)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "nim_proxy=info".into()),
@@ -72,11 +106,6 @@ async fn main() {
             .collect();
         (!entries.is_empty()).then(|| entries.into_iter().collect())
     };
-    match &clients {
-        Some(c) => tracing::info!(clients = c.len(), "client auth enabled"),
-        None => tracing::info!("local mode: no client auth required"),
-    }
-
     let rpm: usize = env_or("RPM_PER_KEY", "40").parse().expect("RPM_PER_KEY");
     let cfg = Config {
         base_url: env_or("NIM_BASE_URL", "https://integrate.api.nvidia.com")
@@ -85,18 +114,27 @@ async fn main() {
         max_wait: Duration::from_secs(env_or("MAX_WAIT_SECS", "900").parse().expect("MAX_WAIT_SECS")),
         heartbeat: Duration::from_secs(env_or("HEARTBEAT_SECS", "10").parse().expect("HEARTBEAT_SECS")),
         models_ttl: Duration::from_secs(env_or("MODELS_TTL_SECS", "600").parse().expect("MODELS_TTL_SECS")),
+        price_in: env_or("REF_PRICE_IN", "0.5").parse().expect("REF_PRICE_IN"),
+        price_out: env_or("REF_PRICE_OUT", "2.0").parse().expect("REF_PRICE_OUT"),
     };
     let port: u16 = env_or("PORT", "8000").parse().expect("PORT");
 
+    tracing::info!("upstream          {}", cfg.base_url);
     tracing::info!(
-        keys = keys.len(),
-        rpm,
-        base_url = %cfg.base_url,
-        "starting nim-proxy: {} lanes x {} rpm = {} rpm aggregate",
+        "lanes             {} keys x {} rpm = {} rpm aggregate",
         keys.len(),
         rpm,
         keys.len() * rpm
     );
+    tracing::info!(
+        "client auth       {}",
+        match &clients {
+            Some(c) => format!("required ({} clients)", c.len()),
+            None => "off (local mode)".to_owned(),
+        }
+    );
+    tracing::info!("patience          waits up to {}s per request, heartbeat every {}s",
+        cfg.max_wait.as_secs(), cfg.heartbeat.as_secs());
 
     let prometheus = PrometheusBuilder::new()
         .set_buckets_for_metric(
@@ -136,7 +174,36 @@ async fn main() {
         cfg,
     });
 
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let dash_config = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "lanes": state.pool.len(),
+        "rpm": rpm,
+        "price_in": state.cfg.price_in,
+        "price_out": state.cfg.price_out,
+        "auth": state.clients.is_some(),
+        "started": started,
+    })
+    .to_string();
+
+    let dash = || async {
+        (
+            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            include_str!("dashboard.html"),
+        )
+    };
     let app = Router::new()
+        .route("/", get(dash))
+        .route("/dash", get(dash))
+        .route(
+            "/dash/config.json",
+            get(move || async move {
+                ([(axum::http::header::CONTENT_TYPE, "application/json")], dash_config)
+            }),
+        )
         .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(move || async move { prometheus.render() }))
         .route("/v1/{*path}", any(proxy::handle))
@@ -144,7 +211,8 @@ async fn main() {
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
-    tracing::info!(%addr, "listening");
+    tracing::info!("dashboard         http://localhost:{port}/  (metrics at /metrics)");
+    tracing::info!("listening on      {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {

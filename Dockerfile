@@ -17,4 +17,6 @@ FROM scratch
 COPY --from=build /app/target/release/nim-proxy /nim-proxy
 USER 10001:10001
 EXPOSE 8000
+# The binary doubles as its own health probe (no shell/curl in scratch).
+HEALTHCHECK --interval=30s --timeout=3s --start-period=2s CMD ["/nim-proxy", "--health"]
 ENTRYPOINT ["/nim-proxy"]
