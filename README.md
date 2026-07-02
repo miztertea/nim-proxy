@@ -17,6 +17,7 @@ OpenCode ──► nim-proxy ──► integrate.api.nvidia.com
 ## How it works
 
 - **One lane per key.** Each API key gets an exact sliding-window limiter (40 requests per rolling 60 s — matching NIM's limiter, not a burstable token bucket). Every request is sent on the lane with the soonest free slot.
+- **One queue for all clients.** Point as many harnesses at the proxy as you like — several OpenCode instances, n8n flows, Codex, anything OpenAI-compatible. All connections share the same lane pool through a global FIFO dispatcher, so slots are granted strictly in arrival order: no client can starve another by winning wakeup races, and a client that disconnects while queued returns its slot to the pool.
 - **Heartbeats instead of failures.** For streaming requests (`"stream": true`, which is what OpenCode sends), the proxy commits to a `200 text/event-stream` response immediately and emits SSE comment lines (`: heartbeat`) — which every OpenAI client ignores — while it waits for a rate-limit slot or rides out upstream 429/500/502/503/504 responses. The harness never sees the error, so long-running agent tasks keep going.
 - **Strict pass-through.** Request and response bodies are untouched. You pick the model in your harness config; any model in the NIM catalog works. All `/v1/*` endpoints (chat completions, completions, embeddings, …) are forwarded.
 - **Local answers where possible.** `GET /v1/models` is cached (10 min default), so harness catalog polls don't burn rate budget.

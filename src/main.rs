@@ -1,3 +1,4 @@
+mod dispatch;
 mod pool;
 mod proxy;
 
@@ -10,6 +11,7 @@ use axum::Router;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
+use dispatch::Dispatcher;
 use pool::Pool;
 
 pub struct Config {
@@ -21,7 +23,8 @@ pub struct Config {
 
 pub struct AppState {
     pub cfg: Config,
-    pub pool: Pool,
+    pub pool: Arc<Pool>,
+    pub dispatch: Dispatcher,
     pub http: reqwest::Client,
     pub models_cache: Mutex<Option<(Instant, Bytes)>>,
 }
@@ -71,8 +74,10 @@ async fn main() {
         keys.len() * rpm
     );
 
+    let pool = Arc::new(Pool::new(keys, rpm));
     let state = Arc::new(AppState {
-        pool: Pool::new(keys, rpm),
+        dispatch: Dispatcher::new(pool.clone()),
+        pool,
         http: reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             // No overall timeout: generations stream for a long time.

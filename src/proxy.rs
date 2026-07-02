@@ -15,7 +15,6 @@ use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::pool::Reservation;
 use crate::AppState;
 
 /// Statuses worth waiting out: rate limit and transient server-side trouble.
@@ -33,21 +32,23 @@ fn backoff_for(resp: &reqwest::Response) -> Duration {
         .unwrap_or(Duration::from_secs(10))
 }
 
-/// Reserve a rate-limit slot, sleeping (in `tick`-sized chunks so callers can
-/// heartbeat between ticks) until one opens or the deadline passes.
+/// Join the global FIFO queue for a rate-limit slot, invoking `on_wait` every
+/// heartbeat interval so streaming callers can keep their client alive.
+/// Returns None if the queue rejects us (no slot before the deadline) or
+/// `on_wait` reports the client is gone.
 async fn reserve_slot(
     state: &AppState,
     deadline: Instant,
-    mut on_wait: impl FnMut(Duration) -> bool,
+    mut on_wait: impl FnMut() -> bool,
 ) -> Option<(usize, String)> {
+    let mut rx = state.dispatch.acquire(deadline);
     loop {
-        match state.pool.reserve() {
-            Reservation::Ready { lane, key } => return Some((lane, key)),
-            Reservation::Wait(wait) => {
-                if Instant::now() + wait > deadline || !on_wait(wait) {
+        tokio::select! {
+            slot = &mut rx => return slot.ok(),
+            _ = tokio::time::sleep(state.cfg.heartbeat) => {
+                if !on_wait() {
                     return None;
                 }
-                tokio::time::sleep(wait.min(state.cfg.heartbeat)).await;
             }
         }
     }
@@ -118,7 +119,7 @@ async fn buffered(
 ) -> Response {
     let deadline = Instant::now() + state.cfg.max_wait;
     loop {
-        let Some((lane, key)) = reserve_slot(&state, deadline, |_| true).await else {
+        let Some((lane, key)) = reserve_slot(&state, deadline, || true).await else {
             return gateway_timeout(&state);
         };
         let resp = match upstream_request(&state, &method, &path_query, &headers, &key, &body)
@@ -163,17 +164,10 @@ async fn streaming(
             return;
         }
         let deadline = Instant::now() + state.cfg.max_wait;
-        let mut last_beat = Instant::now();
         loop {
-            // Reserve a slot, heartbeating so the harness doesn't hang up.
-            let slot = reserve_slot(&state, deadline, |_| {
-                if last_beat.elapsed() >= state.cfg.heartbeat {
-                    last_beat = Instant::now();
-                    if tx.try_send(Ok(Bytes::from(": heartbeat\n\n"))).is_err() {
-                        return false; // client went away
-                    }
-                }
-                true
+            // Queue for a slot, heartbeating so the harness doesn't hang up.
+            let slot = reserve_slot(&state, deadline, || {
+                tx.try_send(Ok(Bytes::from(": heartbeat\n\n"))).is_ok()
             })
             .await;
             let Some((lane, key)) = slot else {
@@ -259,7 +253,7 @@ async fn models(state: Arc<AppState>) -> Response {
         }
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    let Some((lane, key)) = reserve_slot(&state, deadline, |_| true).await else {
+    let Some((lane, key)) = reserve_slot(&state, deadline, || true).await else {
         return gateway_timeout(&state);
     };
     let url = format!("{}/v1/models", state.cfg.base_url);

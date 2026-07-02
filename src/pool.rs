@@ -23,8 +23,13 @@ pub struct Pool {
 }
 
 pub enum Reservation {
-    /// Slot reserved; send the request with this key.
-    Ready { lane: usize, key: String },
+    /// Slot reserved; send the request with this key. `stamp` identifies the
+    /// reservation so an unused slot can be returned via [`Pool::release`].
+    Ready {
+        lane: usize,
+        key: String,
+        stamp: Instant,
+    },
     /// All lanes busy; soonest a slot frees up.
     Wait(Duration),
 }
@@ -71,11 +76,21 @@ impl Pool {
                 return Reservation::Ready {
                     lane: i,
                     key: lane.key.clone(),
+                    stamp: now,
                 };
             }
             best_wait = best_wait.min(ready_at - now);
         }
         Reservation::Wait(best_wait.min(WINDOW))
+    }
+
+    /// Return a reserved slot that was never spent on an upstream request
+    /// (e.g. the client hung up while queued).
+    pub fn release(&self, lane: usize, stamp: Instant) {
+        let mut sent = self.lanes[lane].sent.lock().unwrap();
+        if let Some(pos) = sent.iter().rposition(|t| *t == stamp) {
+            sent.remove(pos);
+        }
     }
 
     /// Bench a lane after the upstream told us to back off.
@@ -109,11 +124,22 @@ mod tests {
     }
 
     #[test]
+    fn released_slot_becomes_available_again() {
+        let pool = Pool::new(keys(1), 1);
+        let Reservation::Ready { lane, stamp, .. } = pool.reserve() else {
+            panic!("expected Ready");
+        };
+        assert!(matches!(pool.reserve(), Reservation::Wait(_)));
+        pool.release(lane, stamp);
+        assert!(matches!(pool.reserve(), Reservation::Ready { .. }));
+    }
+
+    #[test]
     fn penalized_lane_is_skipped() {
         let pool = Pool::new(keys(2), 10);
         pool.penalize(0, Duration::from_secs(30));
         match pool.reserve() {
-            Reservation::Ready { lane, key } => {
+            Reservation::Ready { lane, key, .. } => {
                 assert_eq!(lane, 1);
                 assert_eq!(key, "key1");
             }
