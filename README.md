@@ -49,7 +49,7 @@ Model IDs are passed through verbatim — use any ID from the [NIM catalog](http
     "nim": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "NVIDIA NIM (proxied)",
-      "options": { "baseURL": "http://localhost:8000/v1" },
+      "options": { "baseURL": "http://localhost:8000/v1", "timeout": false },
       "models": {
         "moonshotai/kimi-k2-instruct": { "name": "Kimi K2 Instruct" },
         "deepseek-ai/deepseek-r1": { "name": "DeepSeek R1" }
@@ -58,6 +58,8 @@ Model IDs are passed through verbatim — use any ID from the [NIM catalog](http
   }
 }
 ```
+
+Set `options.timeout: false` so OpenCode waits through the proxy's rate-limit heartbeats instead of aborting. For a complete config tuned for **GLM-5.2** (context, compaction, sampling), copy [`examples/opencode.json`](examples/opencode.json) — see [`examples/README.md`](examples/README.md) for the rationale behind each setting.
 
 **Codex CLI** — `~/.codex/config.toml`:
 
