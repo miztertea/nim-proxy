@@ -140,25 +140,47 @@ async fn mock_chat(
             sse(Body::from_stream(stream))
         }
         Behavior::Ok | Behavior::BadRequestIfInjected => {
+            // Echo the request's shape so e2e can exercise the quality metrics:
+            // a request that offers tools gets a tool_calls response, otherwise
+            // a normal stop. Usage always carries reasoning-token details.
+            let offers_tools = parsed.get("tools").is_some();
+            let usage = "\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":3}}";
             if wants_stream {
-                let chunks: Vec<Result<Bytes, std::io::Error>> = vec![
-                    Ok(Bytes::from(
+                let mut chunks: Vec<Result<Bytes, std::io::Error>> = Vec::new();
+                if offers_tools {
+                    chunks.push(Ok(Bytes::from(
+                        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"get_weather\"}}]}}]}\n\n",
+                    )));
+                    chunks.push(Ok(Bytes::from(
+                        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                    )));
+                } else {
+                    chunks.push(Ok(Bytes::from(
                         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n",
-                    )),
-                    Ok(Bytes::from(
-                        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"}}]}\n\n",
-                    )),
-                    Ok(Bytes::from(
-                        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2}}\n\n",
-                    )),
-                    Ok(Bytes::from("data: [DONE]\n\n")),
-                ];
+                    )));
+                    chunks.push(Ok(Bytes::from(
+                        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]}\n\n",
+                    )));
+                }
+                chunks.push(Ok(Bytes::from(format!(
+                    "data: {{\"choices\":[],{usage}}}\n\n"
+                ))));
+                chunks.push(Ok(Bytes::from("data: [DONE]\n\n")));
                 sse(Body::from_stream(futures_util::stream::iter(chunks)))
+            } else if offers_tools {
+                axum::Json(serde_json::json!({
+                    "id": "mock-1", "object": "chat.completion",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "tool_calls": [
+                        {"index": 0, "id": "c1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}}
+                    ]}, "finish_reason": "tool_calls"}],
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "completion_tokens_details": {"reasoning_tokens": 3}}
+                }))
+                .into_response()
             } else {
                 axum::Json(serde_json::json!({
                     "id": "mock-1", "object": "chat.completion",
                     "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello world"}, "finish_reason": "stop"}],
-                    "usage": {"prompt_tokens": 11, "completion_tokens": 2}
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "completion_tokens_details": {"reasoning_tokens": 3}}
                 }))
                 .into_response()
             }

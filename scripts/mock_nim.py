@@ -92,28 +92,55 @@ class Handler(BaseHTTPRequestHandler):
         if ARGS.delay_ms:
             time.sleep(ARGS.delay_ms / 1000)
 
+        # Echo request shape: a tool-offering request gets a tool_calls answer,
+        # otherwise a normal stop. Usage always carries reasoning-token details.
+        offers_tools = bool(req.get("tools"))
+        finish = "tool_calls" if offers_tools else "stop"
+        usage = {"prompt_tokens": 120, "completion_tokens": 4,
+                 "completion_tokens_details": {"reasoning_tokens": 12}}
+
         if req.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Connection", "close")
             self.end_headers()
-            for tok in ["Hello", " from", " mock", " NIM"]:
-                chunk = {"id": "c1", "object": "chat.completion.chunk", "choices": [
-                    {"index": 0, "delta": {"content": tok}, "finish_reason": None}]}
-                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+            if offers_tools:
+                tc = {"id": "c1", "object": "chat.completion.chunk", "choices": [
+                    {"index": 0, "delta": {"tool_calls": [
+                        {"index": 0, "function": {"name": "get_weather"}}]},
+                     "finish_reason": None}]}
+                self.wfile.write(f"data: {json.dumps(tc)}\n\n".encode())
                 self.wfile.flush()
                 time.sleep(ARGS.token_ms / 1000)
+            else:
+                for tok in ["Hello", " from", " mock", " NIM"]:
+                    chunk = {"id": "c1", "object": "chat.completion.chunk", "choices": [
+                        {"index": 0, "delta": {"content": tok}, "finish_reason": None}]}
+                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                    self.wfile.flush()
+                    time.sleep(ARGS.token_ms / 1000)
+            stop = {"id": "c1", "object": "chat.completion.chunk", "choices": [
+                {"index": 0, "delta": {}, "finish_reason": finish}]}
+            self.wfile.write(f"data: {json.dumps(stop)}\n\n".encode())
             final = {"id": "c1", "object": "chat.completion.chunk", "choices": [],
-                     "usage": {"prompt_tokens": 120, "completion_tokens": 4}}
+                     "usage": usage}
             self.wfile.write(f"data: {json.dumps(final)}\n\n".encode())
             self.wfile.write(b"data: [DONE]\n\n")
+        elif offers_tools:
+            self._json(200, {
+                "id": "c1", "object": "chat.completion",
+                "choices": [{"index": 0, "message": {"role": "assistant", "tool_calls": [
+                    {"index": 0, "id": "c1", "type": "function",
+                     "function": {"name": "get_weather", "arguments": "{}"}}]},
+                    "finish_reason": "tool_calls"}],
+                "usage": usage})
         else:
             self._json(200, {
                 "id": "c1", "object": "chat.completion",
                 "choices": [{"index": 0, "message": {"role": "assistant",
                              "content": "Hello from mock NIM"},
                              "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 120, "completion_tokens": 4}})
+                "usage": usage})
 
 
 def main():

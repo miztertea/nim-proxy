@@ -387,6 +387,112 @@ async fn metrics_report_traffic_tokens_and_affinity() {
 }
 
 #[tokio::test]
+async fn request_shape_and_quality_metrics_are_recorded() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    // A plain streaming request (finishes "stop").
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("hi", true))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    // A tool-using request with sampling params: the mock answers with a
+    // tool_calls delta and finish_reason "tool_calls".
+    let tool_req = serde_json::json!({
+        "model": "mock/model-a",
+        "stream": true,
+        "temperature": 0.7,
+        "max_tokens": 4096,
+        "tools": [{"type": "function", "function": {"name": "get_weather"}}],
+        "tool_choice": "auto",
+        "messages": [
+            {"role": "system", "content": "you are a test"},
+            {"role": "user", "content": "weather?"}
+        ]
+    });
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&tool_req)
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // Request shape.
+    assert!(
+        metrics.contains(r#"nimproxy_stream_requests_total{model="mock/model-a",stream="true"}"#),
+        "stream flag counted: {metrics}"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_request_messages_count{model="mock/model-a"}"#),
+        "conversation depth histogram present"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_request_tools_count{model="mock/model-a"}"#),
+        "tools-offered histogram present"
+    );
+    assert!(
+        metrics.contains("nimproxy_request_temperature_count"),
+        "temperature histogram present"
+    );
+    assert!(
+        metrics.contains("nimproxy_request_max_tokens_count"),
+        "max_tokens histogram present"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_tool_choice_total{mode="auto"}"#),
+        "tool_choice mode counted"
+    );
+
+    // Response quality.
+    assert!(
+        metrics.contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="stop"}"#),
+        "stop finish recorded: {metrics}"
+    );
+    assert!(
+        metrics
+            .contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="tool_calls"}"#),
+        "tool_calls finish recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_tool_calls_total{model="mock/model-a"}"#),
+        "tool-call volume recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_reasoning_tokens_total{model="mock/model-a"}"#),
+        "reasoning tokens recorded"
+    );
+
+    // Cardinality stays bounded: the stream label is a two-value enum.
+    for line in metrics
+        .lines()
+        .filter(|l| l.starts_with("nimproxy_stream_requests_total{"))
+    {
+        assert!(
+            line.contains(r#"stream="true""#) || line.contains(r#"stream="false""#),
+            "stream label bounded to true/false: {line}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn history_records_snapshots_and_survives_restart() {
     let dir = std::env::temp_dir().join(format!("nimproxy-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
