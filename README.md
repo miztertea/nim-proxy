@@ -87,13 +87,13 @@ Clients then send `Authorization: Bearer 8f3k...` (in OpenCode, set `apiKey` in 
 
 ## Dashboard
 
-The proxy serves its own dashboard at `GET /` — a single embedded HTML file, no Grafana, no config, works offline. Three views, light and dark mode, live-updating every 3 s:
+The proxy serves its own dashboard at `GET /` — a single embedded HTML file, no Grafana, no config, works offline. Three views, light and dark mode:
 
-- **Models** — dollars saved vs reference API pricing (`REF_PRICE_IN`/`REF_PRICE_OUT`, $/1M tokens), tokens generated, average TTFT and tokens/sec per model, average reply length, tokens-per-minute chart by model.
-- **Proxy** — total/active/queued requests, requests-per-minute and load charts, average queue wait and upstream latency, per-client usage table.
-- **Keys** — per-lane utilization meters (trailing 60 s vs the RPM cap), request share, and 429/bench counts per key.
+- **Models** — dollars saved vs reference API pricing (`REF_PRICE_IN`/`REF_PRICE_OUT`, $/1M tokens) with a cumulative savings chart, tokens generated, TTFT median/p95 over time, tokens/sec, average reply length, and tokens-per-minute by model.
+- **Proxy** — capacity-used and success-rate gauges, total/active/queued requests, requests-per-minute, outcomes (ok/errors/disconnects), load charts, an hour-of-day activity heatmap, and a per-client usage table.
+- **Keys** — per-lane utilization meters (trailing 60 s vs the RPM cap), 429s-per-minute by lane, request share, and bench counts per key.
 
-Charts accumulate in the browser (~20 min of history); the long-term source of truth is `/metrics`.
+**Time ranges & history.** The filter row offers Live (pausable, refreshes every 3 s) plus 1h/6h/24h/7d/30d presets and a custom range with calendar date-time pickers. Range views are served from the proxy's own history: a ~4 KB metrics snapshot every 5 minutes, kept `HISTORY_DAYS` days (default 30, `0` = forever) in `DATA_DIR` (a Docker volume in the compose file; ~35 MB per 30 days). In a range view every tile and table reports totals *for that window* — instant usage reports. If `DATA_DIR` isn't writable the proxy logs a warning and keeps history in memory only.
 
 ## Metrics
 

@@ -1,4 +1,5 @@
 mod dispatch;
+mod history;
 mod pool;
 mod proxy;
 
@@ -174,10 +175,36 @@ async fn main() {
         cfg,
     });
 
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let unix_now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    };
+    let started = unix_now();
+
+    // Metrics history: 5-minute snapshots, HISTORY_DAYS retention (0 = keep
+    // forever), persisted to DATA_DIR when writable.
+    let history_days: u64 = env_or("HISTORY_DAYS", "30").parse().expect("HISTORY_DAYS");
+    let data_dir = env_or("DATA_DIR", "data");
+    let hist = Arc::new(history::History::load(
+        (!data_dir.is_empty()).then(|| data_dir.into()),
+        history_days,
+    ));
+    {
+        let hist = hist.clone();
+        let prom = prometheus.clone();
+        // Undocumented test knob; the 5-minute default is the contract.
+        let sample_secs: u64 = env_or("HISTORY_SAMPLE_SECS", &history::SAMPLE_SECS.to_string())
+            .parse()
+            .expect("HISTORY_SAMPLE_SECS");
+        tokio::spawn(async move {
+            loop {
+                hist.append(unix_now(), prom.render());
+                tokio::time::sleep(Duration::from_secs(sample_secs.max(1))).await;
+            }
+        });
+    }
     let dash_config = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "lanes": state.pool.len(),
@@ -202,6 +229,23 @@ async fn main() {
             "/dash/config.json",
             get(move || async move {
                 ([(axum::http::header::CONTENT_TYPE, "application/json")], dash_config)
+            }),
+        )
+        .route(
+            "/api/history",
+            get(move |q: axum::extract::Query<std::collections::HashMap<String, String>>| {
+                let hist = hist.clone();
+                async move {
+                    let now = unix_now();
+                    let get = |k: &str, d: u64| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
+                    let (from, to) = (get("from", now.saturating_sub(86400)), get("to", now));
+                    let body: Vec<serde_json::Value> = hist
+                        .range(from, to, 288)
+                        .into_iter()
+                        .map(|(t, m)| serde_json::json!({"t": t, "m": m}))
+                        .collect();
+                    axum::Json(body)
+                }
             }),
         )
         .route("/health", get(|| async { "ok" }))

@@ -11,10 +11,14 @@ COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
 
 COPY src ./src
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release && mkdir /app/data
 
 FROM scratch
 COPY --from=build /app/target/release/nim-proxy /nim-proxy
+# Empty dir owned by the runtime user: a named volume mounted at /data
+# inherits this ownership on first use, so history can persist.
+COPY --from=build --chown=10001:10001 /app/data /data
+ENV DATA_DIR=/data
 USER 10001:10001
 EXPOSE 8000
 # The binary doubles as its own health probe (no shell/curl in scratch).

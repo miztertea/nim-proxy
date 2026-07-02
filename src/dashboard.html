@@ -10,6 +10,7 @@
   --ink-1: #0b0b0b; --ink-2: #52514e; --ink-3: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
   --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300; --s5: #4a3aa7; --s6: #e34948;
+  --q-lo: #86b6ef; --q-hi: #1c5cab;
   --meter-track: #cde2fb;
   --good: #0ca30c; --critical: #d03b3b;
 }
@@ -19,6 +20,7 @@
     --ink-1: #ffffff; --ink-2: #c3c2b7; --ink-3: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
     --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300; --s5: #9085e9; --s6: #e66767;
+    --q-lo: #9ec5f4; --q-hi: #3987e5;
     --meter-track: #0d366b;
   }
 }
@@ -36,30 +38,55 @@ h1 { font-size: 18px; font-weight: 650; margin: 0; letter-spacing: 0.2px; }
 .live { display: inline-flex; align-items: center; gap: 6px; }
 .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
 .live.down .dot { background: var(--critical); }
-nav { display: flex; gap: 4px; padding: 14px 28px 0; }
+.live.idle .dot { background: var(--ink-3); }
+.bar {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 14px 28px 0;
+}
+.bar .group { display: flex; gap: 2px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+.bar button {
+  border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; font-weight: 550;
+  padding: 5px 11px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+.bar button:hover { color: var(--ink-1); }
+.bar button[aria-pressed="true"] { background: var(--plane); color: var(--ink-1); box-shadow: inset 0 0 0 1px var(--border); }
+.bar input[type="datetime-local"] {
+  font: inherit; font-size: 12.5px; color: var(--ink-1); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px;
+}
+.bar .apply { background: var(--s1); color: #fff; border-radius: 7px; }
+#custom { display: none; gap: 6px; align-items: center; }
+#custom.show { display: flex; }
+#rangeinfo { color: var(--ink-3); font-size: 12.5px; }
+nav { display: flex; gap: 4px; padding: 12px 28px 0; }
 nav button {
   border: 0; background: none; color: var(--ink-2); font: inherit; font-weight: 550;
   padding: 7px 14px; border-radius: 8px; cursor: pointer;
 }
 nav button:hover { background: var(--surface-1); }
 nav button[aria-selected="true"] { background: var(--surface-1); color: var(--ink-1); box-shadow: inset 0 0 0 1px var(--border); }
-main { padding: 16px 28px 40px; max-width: 1180px; }
+main { padding: 16px 28px 40px; max-width: 1220px; }
 section[hidden] { display: none; }
-.tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; align-items: stretch; }
 .tile {
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px 16px 10px; min-width: 128px; flex: 0 1 auto;
+  padding: 12px 16px 10px; min-width: 126px; flex: 0 1 auto;
 }
 .tile .label { color: var(--ink-3); font-size: 12px; }
 .tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
 .tile.hero .value { font-size: 48px; font-weight: 650; line-height: 1.1; }
 .tile .unit { color: var(--ink-2); font-size: 13px; font-weight: 500; margin-left: 2px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.gauge { display: flex; flex-direction: column; align-items: center; padding: 12px 20px 8px; }
+.gauge svg { display: block; }
+.gauge .label { margin-top: -4px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
 .card {
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
-  padding: 14px 16px;
+  padding: 14px 16px; min-width: 0;
 }
-.card h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 0 0 10px; }
+.card.wide { grid-column: 1 / -1; }
+.card h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; }
+.card h2 .toggle { border: 1px solid var(--border); background: none; color: var(--ink-3); font-size: 11px; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
 .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
@@ -68,13 +95,13 @@ th { text-align: left; color: var(--ink-3); font-size: 11.5px; font-weight: 550;
 td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr:last-child td { border-bottom: 0; }
-.swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 7px; vertical-align: baseline; }
+.swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 7px; }
 .empty { color: var(--ink-3); padding: 26px 0; text-align: center; font-size: 13px; }
 .meter { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
 .meter .name { width: 64px; color: var(--ink-2); font-size: 12.5px; flex: none; }
 .meter .track { flex: 1; height: 16px; background: var(--meter-track); border-radius: 0 4px 4px 0; overflow: hidden; }
 .meter .fill { display: block; height: 100%; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
-.meter .val { width: 46px; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--ink-1); }
+.meter .val { width: 46px; font-variant-numeric: tabular-nums; font-size: 12.5px; }
 #tooltip {
   position: fixed; pointer-events: none; z-index: 10; display: none;
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
@@ -93,27 +120,57 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
   <span class="sub" id="uptime"></span>
   <span class="sub" id="verinfo"></span>
 </header>
+
+<div class="bar">
+  <div class="group" id="ranges">
+    <button data-range="live" aria-pressed="true">Live</button>
+    <button data-range="3600">1h</button>
+    <button data-range="21600">6h</button>
+    <button data-range="86400">24h</button>
+    <button data-range="604800">7d</button>
+    <button data-range="2592000">30d</button>
+    <button data-range="custom">Custom</button>
+  </div>
+  <button id="pause" class="group" style="padding:7px 12px" title="Pause live refresh">&#10074;&#10074;</button>
+  <span id="custom">
+    <input type="datetime-local" id="from"> <span class="sub">to</span>
+    <input type="datetime-local" id="to">
+    <button class="apply" id="applyRange">Apply</button>
+  </span>
+  <span id="rangeinfo"></span>
+</div>
+
 <nav role="tablist">
   <button role="tab" data-tab="models" aria-selected="true">Models</button>
   <button role="tab" data-tab="proxy" aria-selected="false">Proxy</button>
   <button role="tab" data-tab="keys" aria-selected="false">Keys</button>
 </nav>
+
 <main>
   <section id="tab-models">
     <div class="tiles">
-      <div class="tile hero"><div class="label">Dollars saved (vs reference pricing)</div><div class="value" id="m-saved">$0.00</div></div>
+      <div class="tile hero"><div class="label" id="savedLabel">Dollars saved (vs reference pricing)</div><div class="value" id="m-saved">$0.00</div></div>
       <div class="tile"><div class="label">Completion tokens</div><div class="value" id="m-ctok">0</div></div>
       <div class="tile"><div class="label">Prompt tokens</div><div class="value" id="m-ptok">0</div></div>
       <div class="tile"><div class="label">Avg TTFT</div><div class="value" id="m-ttft">–</div></div>
       <div class="tile"><div class="label">Avg speed</div><div class="value" id="m-tps">–</div></div>
     </div>
     <div class="cards">
-      <div class="card" style="grid-column: 1 / -1">
+      <div class="card wide">
         <h2>Completion tokens per minute, by model</h2>
         <div id="chart-modeltok"></div>
         <div class="legend" id="legend-modeltok"></div>
       </div>
-      <div class="card" style="grid-column: 1 / -1">
+      <div class="card">
+        <h2>Time to first token</h2>
+        <div id="chart-ttft"></div>
+        <div class="legend" id="legend-ttft"></div>
+      </div>
+      <div class="card">
+        <h2>Dollars saved, cumulative</h2>
+        <div id="chart-saved"></div>
+      </div>
+      <div class="card wide">
         <h2>Per model</h2>
         <div id="table-models"></div>
       </div>
@@ -122,12 +179,14 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
 
   <section id="tab-proxy" hidden>
     <div class="tiles">
-      <div class="tile"><div class="label">Requests</div><div class="value" id="p-reqs">0</div></div>
+      <div class="tile gauge"><div id="g-cap"></div><div class="label">Capacity used</div></div>
+      <div class="tile gauge"><div id="g-ok"></div><div class="label">Success rate</div></div>
+      <div class="tile"><div class="label" id="reqsLabel">Requests</div><div class="value" id="p-reqs">0</div></div>
       <div class="tile"><div class="label">Requests/min</div><div class="value" id="p-rpm">0</div></div>
       <div class="tile"><div class="label">Active now</div><div class="value" id="p-active">0</div></div>
       <div class="tile"><div class="label">Queued</div><div class="value" id="p-queued">0</div></div>
       <div class="tile"><div class="label">Avg queue wait</div><div class="value" id="p-wait">–</div></div>
-      <div class="tile"><div class="label">Avg upstream latency</div><div class="value" id="p-lat">–</div></div>
+      <div class="tile"><div class="label">Avg upstream</div><div class="value" id="p-lat">–</div></div>
     </div>
     <div class="cards">
       <div class="card">
@@ -135,11 +194,20 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <div id="chart-reqrate"></div>
       </div>
       <div class="card">
+        <h2>Outcomes per minute</h2>
+        <div id="chart-outcomes"></div>
+        <div class="legend" id="legend-outcomes"></div>
+      </div>
+      <div class="card">
         <h2>In flight &amp; queued</h2>
         <div id="chart-load"></div>
         <div class="legend" id="legend-load"></div>
       </div>
-      <div class="card" style="grid-column: 1 / -1">
+      <div class="card">
+        <h2>Activity by hour <button class="toggle" id="heatToggle">table</button></h2>
+        <div id="heatmap"></div>
+      </div>
+      <div class="card wide">
         <h2>Per client</h2>
         <div id="table-clients"></div>
       </div>
@@ -158,7 +226,12 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <h2>Lane utilization, trailing 60s</h2>
         <div id="meters"></div>
       </div>
-      <div class="card" style="grid-column: 1 / -1">
+      <div class="card">
+        <h2>Rate-limit hits per minute</h2>
+        <div id="chart-benches"></div>
+        <div class="legend" id="legend-benches"></div>
+      </div>
+      <div class="card wide">
         <h2>Per lane</h2>
         <div id="table-lanes"></div>
       </div>
@@ -172,6 +245,11 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
 const $ = id => document.getElementById(id);
 const SLOTS = ['--s1','--s2','--s3','--s4','--s5','--s6'];
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+// Sequential blue ramp for the heatmap (light: light→dark = more).
+const RAMP = dark
+  ? ['#0d366b','#104281','#184f95','#1c5cab','#256abf','#2a78d6','#3987e5']
+  : ['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'];
 
 /* ---------- formatting ---------- */
 const fmt = n => !isFinite(n) ? '–'
@@ -197,7 +275,7 @@ function parseProm(text) {
     const labels = {};
     if (m[2]) for (const kv of m[2].matchAll(/([a-zA-Z_][\w]*)="((?:[^"\\]|\\.)*)"/g))
       labels[kv[1]] = kv[2].replace(/\\(["\\n])/g, x => x[1] === 'n' ? '\n' : x[1]);
-    rows.push({ name: m[1], labels, value: parseFloat(m[3]) });
+    rows.push({ name: m[1], labels, value: m[3] === '+Inf' ? Infinity : parseFloat(m[3]) });
   }
   return rows;
 }
@@ -208,15 +286,61 @@ const groups = (rows, name, key, f) => {
     out.set(r.labels[key] ?? '', (out.get(r.labels[key] ?? '') || 0) + r.value);
   return out;
 };
+/* cumulative histogram buckets [{le, count}], summed across label filter */
+function buckets(rows, name, f) {
+  const m = new Map();
+  for (const r of rows) if (r.name === name + '_bucket' && (!f || f(r.labels))) {
+    const le = r.labels.le === '+Inf' ? Infinity : parseFloat(r.labels.le);
+    m.set(le, (m.get(le) || 0) + r.value);
+  }
+  return [...m.entries()].sort((a,b) => a[0]-b[0]).map(([le, count]) => ({ le, count }));
+}
+/* quantile from windowed (delta) buckets via linear interpolation */
+function quantile(bs, q) {
+  const total = bs.length ? bs[bs.length-1].count : 0;
+  if (total <= 0) return NaN;
+  const target = total * q;
+  let prev = { le: 0, count: 0 };
+  for (const b of bs) {
+    if (b.count >= target) {
+      const hi = b.le === Infinity ? prev.le || 1 : b.le;
+      return prev.le + (hi - prev.le) * (target - prev.count) / Math.max(1, b.count - prev.count);
+    }
+    prev = b;
+  }
+  return prev.le;
+}
+const deltaBuckets = (cur, prev) => cur.map((b, i) => ({ le: b.le, count: b.count - (prev[i]?.count || 0) }));
 
-/* ---------- history (client-side ring, ~20 min at 3s) ---------- */
+/* ---------- state: live ring or fetched range, same shape ---------- */
 const POLL_MS = 3000, KEEP = 400;
-const hist = [];  // {t, reqs, queued, active, laneReqs:Map, modelTok:Map}
+let samples = [];              // [{t(ms), rows}]
+let mode = { kind: 'live', paused: false, from: 0, to: 0 };
+let cfg = { lanes: 0, rpm: 40, price_in: 0.5, price_out: 2.0, started: Date.now()/1000, version: '' };
+let heatAsTable = false;
 
-/* rate per minute between two snapshots of a cumulative counter */
 function rate(cur, prev, curT, prevT) {
   if (prev === undefined || cur < prev || curT <= prevT) return 0;
   return (cur - prev) / ((curT - prevT) / 60000);
+}
+/* pairwise series over samples from a per-sample extractor */
+const rateSeries = get => samples.slice(1).map((s, i) =>
+  ({ t: s.t, v: rate(get(s), get(samples[i]), s.t, samples[i].t) }));
+
+/* windowed total: whole view in range mode, lifetime in live mode */
+const windowed = get => {
+  if (!samples.length) return 0;
+  const last = get(samples[samples.length-1]);
+  return mode.kind === 'live' ? last : Math.max(0, last - get(samples[0]));
+};
+/* windowed per-key map: cumulative in live mode, delta over view in range mode */
+function wgroups(name, key, f) {
+  const cur = groups(samples[samples.length-1].rows, name, key, f);
+  if (mode.kind !== 'live') {
+    const base = groups(samples[0].rows, name, key, f);
+    for (const [k, v] of cur) cur.set(k, Math.max(0, v - (base.get(k) || 0)));
+  }
+  return cur;
 }
 
 /* ---------- tooltip ---------- */
@@ -229,36 +353,37 @@ function showTip(x, y, html) {
 }
 const hideTip = () => tip.style.display = 'none';
 
-/* ---------- line chart: hairline grid, 2px lines, hover crosshair ---------- */
+/* ---------- line chart ---------- */
 function lineChart(el, series, unitFmt) {
   el.innerHTML = '';
   const live = series.filter(s => s.pts.length > 1);
-  if (!live.length) { el.innerHTML = '<div class="empty">No traffic yet</div>'; return; }
+  if (!live.length) { el.innerHTML = '<div class="empty">No data in this window</div>'; return; }
   const W = el.clientWidth || 500, H = 190, PL = 42, PR = 14, PT = 10, PB = 22;
   const t0 = Math.min(...live.map(s => s.pts[0].t));
   const t1 = Math.max(...live.map(s => s.pts[s.pts.length-1].t));
-  let vmax = Math.max(1, ...live.flatMap(s => s.pts.map(p => p.v)));
-  const step = Math.pow(10, Math.floor(Math.log10(vmax)));
-  vmax = Math.ceil(vmax / (step/2)) * (step/2);
+  let vmax = Math.max(1e-6, ...live.flatMap(s => s.pts.map(p => p.v)));
+  if (vmax >= 0.5) { const step = Math.pow(10, Math.floor(Math.log10(vmax))); vmax = Math.ceil(vmax / (step/2)) * (step/2); }
   const X = t => PL + (W-PL-PR) * (t - t0) / Math.max(1, t1 - t0);
   const Y = v => PT + (H-PT-PB) * (1 - v / vmax);
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.setAttribute('width', '100%'); svg.setAttribute('height', H);
   let g = '';
   for (let i = 0; i <= 3; i++) {
     const v = vmax * i / 3, y = Y(v);
     g += `<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="${css('--grid')}" stroke-width="1"/>`;
-    g += `<text x="${PL-6}" y="${y+3.5}" text-anchor="end">${fmt(v)}</text>`;
+    g += `<text x="${PL-6}" y="${y+3.5}" text-anchor="end">${unitFmt(v)}</text>`;
   }
-  const tlab = t => new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const span = t1 - t0;
+  const tlab = t => span > 36e5 * 26
+    ? new Date(t).toLocaleDateString([], {month:'short', day:'numeric'})
+    : new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   g += `<text x="${PL}" y="${H-6}">${tlab(t0)}</text><text x="${W-PR}" y="${H-6}" text-anchor="end">${tlab(t1)}</text>`;
   for (const s of live) {
-    const d = s.pts.map((p,i) => `${i?'L':'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+    const d = s.pts.map((p,i) => `${i?'L':'M'}${X(p.t).toFixed(1)},${Y(Math.min(p.v, vmax)).toFixed(1)}`).join('');
     g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     const e = s.pts[s.pts.length-1];
-    g += `<circle cx="${X(e.t)}" cy="${Y(e.v)}" r="4" fill="${s.color}" stroke="${css('--surface-1')}" stroke-width="2"/>`;
+    g += `<circle cx="${X(e.t)}" cy="${Y(Math.min(e.v, vmax))}" r="4" fill="${s.color}" stroke="${css('--surface-1')}" stroke-width="2"/>`;
   }
   g += `<line id="xh" x1="0" y1="${PT}" x2="0" y2="${H-PB}" stroke="${css('--axis')}" stroke-width="1" visibility="hidden"/>`;
   svg.innerHTML = g;
@@ -269,7 +394,7 @@ function lineChart(el, series, unitFmt) {
     const mx = (ev.clientX - r.left) * W / r.width;
     const t = t0 + (mx - PL) / Math.max(1e-9, W-PL-PR) * (t1 - t0);
     xh.setAttribute('x1', mx); xh.setAttribute('x2', mx); xh.setAttribute('visibility', 'visible');
-    let html = `<div class="t">${new Date(t).toLocaleTimeString()}</div>`;
+    let html = `<div class="t">${new Date(t).toLocaleString()}</div>`;
     for (const s of live) {
       let best = s.pts[0];
       for (const p of s.pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
@@ -286,7 +411,58 @@ function legend(el, series) {
     : '';
 }
 
-/* ---------- color-follows-entity: slot per model, first seen, never recycled ---------- */
+/* ---------- arc gauge: a meter bent into 270 degrees ---------- */
+function arcGauge(el, ratio, text) {
+  const R = 40, C = 48, SW = 9, start = 135, sweep = 270;
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const arc = (from, deg, color) => {
+    const p = a => { const r = (a-90) * Math.PI/180; return `${C + R*Math.cos(r)},${C + R*Math.sin(r)}`; };
+    const large = deg > 180 ? 1 : 0;
+    return `<path d="M${p(from)} A${R},${R} 0 ${large} 1 ${p(from+deg)}" fill="none" stroke="${color}" stroke-width="${SW}" stroke-linecap="round"/>`;
+  };
+  el.innerHTML = `<svg width="96" height="86" viewBox="0 0 96 90" role="img" aria-label="${text}">
+    ${arc(start, sweep, css('--meter-track'))}
+    ${clamped > 0.005 ? arc(start, sweep * clamped, css('--s1')) : ''}
+    <text x="${C}" y="${C+5}" text-anchor="middle" style="font-size:17px;font-weight:650;fill:${css('--ink-1')}">${text}</text>
+  </svg>`;
+}
+
+/* ---------- activity heatmap: weekday x hour, sequential ramp ---------- */
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+function heatmap(el, matrix, vmax) {
+  if (!vmax) { el.innerHTML = '<div class="empty">No data in this window</div>'; return; }
+  if (heatAsTable) {
+    let t = '<table><tr><th></th>' + [0,6,12,18].map(h => `<th class="num">${h}:00</th>`).join('') + '</tr>';
+    for (let d = 0; d < 7; d++)
+      t += `<tr><td>${DAYS[d]}</td>` + [0,6,12,18].map(h =>
+        `<td class="num">${fmt(matrix[d].slice(h, h+6).reduce((a,b) => a+b, 0))}</td>`).join('') + '</tr>';
+    el.innerHTML = t + '</table>';
+    return;
+  }
+  const CW = 13, CH = 17, GAP = 2, PL = 34, PT = 14;
+  const W = PL + 24*(CW+GAP), H = PT + 7*(CH+GAP) + 4;
+  let g = '';
+  for (let d = 0; d < 7; d++) {
+    g += `<text x="${PL-6}" y="${PT + d*(CH+GAP) + CH - 4}" text-anchor="end">${DAYS[d]}</text>`;
+    for (let h = 0; h < 24; h++) {
+      const v = matrix[d][h];
+      const color = v ? RAMP[Math.min(RAMP.length-1, Math.floor(v/vmax*(RAMP.length-0.001)))] : css('--grid');
+      g += `<rect x="${PL + h*(CW+GAP)}" y="${PT + d*(CH+GAP)}" width="${CW}" height="${CH}" rx="3" fill="${color}" data-d="${d}" data-h="${h}"/>`;
+    }
+  }
+  for (const h of [0, 6, 12, 18]) g += `<text x="${PL + h*(CW+GAP)}" y="${PT-4}">${h}:00</text>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px">${g}</svg>`;
+  el.querySelector('svg').addEventListener('mousemove', ev => {
+    const c = ev.target.closest('rect');
+    if (!c) { hideTip(); return; }
+    const d = +c.dataset.d, h = +c.dataset.h;
+    showTip(ev.clientX, ev.clientY,
+      `<div class="t">${DAYS[d]} ${h}:00–${h+1}:00</div><div class="row"><span>requests</span><b>${fmt(matrix[d][h])}</b></div>`);
+  });
+  el.querySelector('svg').addEventListener('mouseleave', hideTip);
+}
+
+/* ---------- color-follows-entity ---------- */
 const modelSlots = new Map();
 function slotFor(model) {
   if (!modelSlots.has(model) && modelSlots.size < SLOTS.length) modelSlots.set(model, SLOTS[modelSlots.size]);
@@ -294,88 +470,133 @@ function slotFor(model) {
 }
 
 /* ---------- render ---------- */
-let cfg = { lanes: 0, rpm: 40, price_in: 0.5, price_out: 2.0, started: Date.now()/1000, version: '' };
+function render() {
+  if (!samples.length) return;
+  const last = samples[samples.length-1], rows = last.rows;
+  const windowLabel = mode.kind === 'live' ? '' : ' in range';
+  $('savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
+  $('reqsLabel').textContent = `Requests${windowLabel}`;
 
-function render(rows) {
-  const now = Date.now();
-  const prev = hist[hist.length-1];
-  const snap = {
-    t: now,
-    reqs: sum(rows, 'nimproxy_requests_total'),
-    queued: sum(rows, 'nimproxy_queue_depth'),
-    active: sum(rows, 'nimproxy_active_requests'),
-    laneReqs: groups(rows, 'nimproxy_lane_requests_total', 'lane'),
-    modelTok: groups(rows, 'nimproxy_completion_tokens_total', 'model'),
-  };
-  hist.push(snap); if (hist.length > KEEP) hist.shift();
-
-  /* ----- models tab ----- */
-  const ptok = groups(rows, 'nimproxy_prompt_tokens_total', 'model');
-  const ctok = snap.modelTok;
-  const reqModels = groups(rows, 'nimproxy_requests_total', 'model', l => l.path === '/v1/chat/completions');
+  /* ----- models ----- */
+  const ptok = wgroups('nimproxy_prompt_tokens_total', 'model');
+  const ctok = wgroups('nimproxy_completion_tokens_total', 'model');
+  const reqModels = wgroups('nimproxy_requests_total', 'model', l => l.path === '/v1/chat/completions');
   const models = [...new Set([...ctok.keys(), ...ptok.keys(), ...reqModels.keys()])].filter(m => m !== 'none');
   models.sort((a,b) => (ctok.get(b)||0) - (ctok.get(a)||0));
   let saved = 0, allP = 0, allC = 0;
   for (const m of models) {
-    allP += ptok.get(m)||0; allC += ctok.get(m)||0;
-    saved += (ptok.get(m)||0)/1e6*cfg.price_in + (ctok.get(m)||0)/1e6*cfg.price_out;
+    const p = ptok.get(m) || 0, c = ctok.get(m) || 0;
+    allP += p; allC += c;
+    saved += p/1e6*cfg.price_in + c/1e6*cfg.price_out;
   }
   $('m-saved').textContent = money(saved);
   $('m-ctok').textContent = fmt(allC);
   $('m-ptok').textContent = fmt(allP);
-  const ttftSum = sum(rows, 'nimproxy_ttft_seconds_sum'), ttftN = sum(rows, 'nimproxy_ttft_seconds_count');
-  $('m-ttft').textContent = ttftN ? secs(ttftSum/ttftN) : '–';
-  const tpsSum = sum(rows, 'nimproxy_tokens_per_second_sum'), tpsN = sum(rows, 'nimproxy_tokens_per_second_count');
-  $('m-tps').textContent = tpsN ? fmt(tpsSum/tpsN) + ' tok/s' : '–';
+  const wsum = name => windowed(s => sum(s.rows, name));
+  const ttftS = wsum('nimproxy_ttft_seconds_sum'), ttftN = wsum('nimproxy_ttft_seconds_count');
+  $('m-ttft').textContent = ttftN ? secs(ttftS/ttftN) : '–';
+  const tpsS = wsum('nimproxy_tokens_per_second_sum'), tpsN = wsum('nimproxy_tokens_per_second_count');
+  $('m-tps').textContent = tpsN ? fmt(tpsS/tpsN) + ' tok/s' : '–';
 
   const top = models.slice(0, 5);
   const tokSeries = top.map(m => ({
     name: m.split('/').pop(), color: css(slotFor(m)),
-    pts: hist.slice(1).map((h,i) => ({ t: h.t, v: rate(h.modelTok.get(m)||0, hist[i].modelTok.get(m), h.t, hist[i].t) })),
+    pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total', l => l.model === m)),
   }));
   lineChart($('chart-modeltok'), tokSeries, fmt);
   legend($('legend-modeltok'), tokSeries);
 
-  const okByModel = groups(rows, 'nimproxy_requests_total', 'model', l => l.status === '200');
-  const ttftS = groups(rows, 'nimproxy_ttft_seconds_sum', 'model'), ttftC = groups(rows, 'nimproxy_ttft_seconds_count', 'model');
-  const tpsS = groups(rows, 'nimproxy_tokens_per_second_sum', 'model'), tpsC = groups(rows, 'nimproxy_tokens_per_second_count', 'model');
+  /* TTFT p50/p95 from bucket deltas between consecutive snapshots */
+  const bAt = s => buckets(s.rows, 'nimproxy_ttft_seconds');
+  const qSeries = [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
+    name, color,
+    pts: samples.slice(1).map((s, i) => {
+      const d = deltaBuckets(bAt(s), bAt(samples[i]));
+      return { t: s.t, v: quantile(d, q) };
+    }).filter(p => isFinite(p.v)),
+  }));
+  lineChart($('chart-ttft'), qSeries, secs);
+  legend($('legend-ttft'), qSeries);
+
+  /* cumulative dollars within the view */
+  const base = samples[0];
+  const savedAt = s => {
+    let v = 0;
+    v += (sum(s.rows, 'nimproxy_prompt_tokens_total') - (mode.kind === 'live' ? 0 : sum(base.rows, 'nimproxy_prompt_tokens_total'))) / 1e6 * cfg.price_in;
+    v += (sum(s.rows, 'nimproxy_completion_tokens_total') - (mode.kind === 'live' ? 0 : sum(base.rows, 'nimproxy_completion_tokens_total'))) / 1e6 * cfg.price_out;
+    return Math.max(0, v);
+  };
+  lineChart($('chart-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
+
+  const okByModel = wgroups('nimproxy_requests_total', 'model', l => l.status === '200');
+  const ttftMS = wgroups('nimproxy_ttft_seconds_sum', 'model'), ttftMC = wgroups('nimproxy_ttft_seconds_count', 'model');
+  const tpsMS = wgroups('nimproxy_tokens_per_second_sum', 'model'), tpsMC = wgroups('nimproxy_tokens_per_second_count', 'model');
   $('table-models').innerHTML = !models.length ? '<div class="empty">No traffic yet</div>' :
     `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">Avg reply</th><th class="num">Saved</th></tr>` +
     models.map(m => {
       const c = ctok.get(m)||0, ok = okByModel.get(m)||0;
       return `<tr><td>${modelSlots.has(m) ? `<i class="swatch" style="background:${css(slotFor(m))}"></i>` : ''}${m}</td>` +
         `<td class="num">${fmt(reqModels.get(m)||0)}</td><td class="num">${fmt(c)}</td>` +
-        `<td class="num">${ttftC.get(m) ? secs(ttftS.get(m)/ttftC.get(m)) : '–'}</td>` +
-        `<td class="num">${tpsC.get(m) ? fmt(tpsS.get(m)/tpsC.get(m)) : '–'}</td>` +
+        `<td class="num">${ttftMC.get(m) ? secs(ttftMS.get(m)/ttftMC.get(m)) : '–'}</td>` +
+        `<td class="num">${tpsMC.get(m) ? fmt(tpsMS.get(m)/tpsMC.get(m)) : '–'}</td>` +
         `<td class="num">${ok ? fmt(c/ok) + ' tok' : '–'}</td>` +
         `<td class="num">${money((ptok.get(m)||0)/1e6*cfg.price_in + c/1e6*cfg.price_out)}</td></tr>`;
     }).join('') + '</table>';
 
-  /* ----- proxy tab ----- */
-  $('p-reqs').textContent = fmt(snap.reqs);
-  $('p-rpm').textContent = prev ? fmt(rate(snap.reqs, prev.reqs, snap.t, prev.t)) : '0';
-  $('p-active').textContent = fmt(snap.active);
-  $('p-queued').textContent = fmt(snap.queued);
-  const qwS = sum(rows, 'nimproxy_queue_wait_seconds_sum'), qwN = sum(rows, 'nimproxy_queue_wait_seconds_count');
+  /* ----- proxy ----- */
+  const reqPts = rateSeries(s => sum(s.rows, 'nimproxy_requests_total'));
+  // Trailing-60s average in live mode so the gauge doesn't jump on 3s bursts.
+  const recent = reqPts.filter(p => p.t >= (reqPts[reqPts.length-1]?.t || 0) - 60000);
+  const curRpm = recent.length ? recent.reduce((a,p) => a+p.v, 0) / recent.length : 0;
+  const avgRpm = reqPts.length ? reqPts.reduce((a,p) => a+p.v, 0) / reqPts.length : 0;
+  const capacity = Math.max(1, cfg.lanes * cfg.rpm);
+  const capRatio = (mode.kind === 'live' ? curRpm : avgRpm) / capacity;
+  arcGauge($('g-cap'), capRatio, Math.round(capRatio * 100) + '%');
+  const wreq = windowed(s => sum(s.rows, 'nimproxy_requests_total'));
+  const wok = windowed(s => sum(s.rows, 'nimproxy_requests_total', l => l.status === '200'));
+  arcGauge($('g-ok'), wreq ? wok/wreq : 1, wreq ? Math.round(wok/wreq*100) + '%' : '–');
+
+  $('p-reqs').textContent = fmt(wreq);
+  $('p-rpm').textContent = fmt(curRpm);
+  $('p-active').textContent = fmt(sum(rows, 'nimproxy_active_requests'));
+  $('p-queued').textContent = fmt(sum(rows, 'nimproxy_queue_depth'));
+  const qwS = wsum('nimproxy_queue_wait_seconds_sum'), qwN = wsum('nimproxy_queue_wait_seconds_count');
   $('p-wait').textContent = qwN ? secs(qwS/qwN) : '–';
-  const upS = sum(rows, 'nimproxy_upstream_seconds_sum') + ttftSum;
-  const upN = sum(rows, 'nimproxy_upstream_seconds_count') + ttftN;
+  const upS = wsum('nimproxy_upstream_seconds_sum') + ttftS;
+  const upN = wsum('nimproxy_upstream_seconds_count') + ttftN;
   $('p-lat').textContent = upN ? secs(upS/upN) : '–';
 
-  lineChart($('chart-reqrate'), [{
-    name: 'requests/min', color: css('--s1'),
-    pts: hist.slice(1).map((h,i) => ({ t: h.t, v: rate(h.reqs, hist[i].reqs, h.t, hist[i].t) })),
-  }], fmt);
+  lineChart($('chart-reqrate'), [{ name: 'requests/min', color: css('--s1'), pts: reqPts }], fmt);
+  const outcomeSeries = [
+    { name: 'ok', color: css('--s1'), f: l => l.status === '200' },
+    { name: 'errors', color: css('--s6'), f: l => l.status !== '200' && l.status !== 'disconnect' },
+    { name: 'disconnects', color: css('--s3'), f: l => l.status === 'disconnect' },
+  ].map(({name, color, f}) => ({ name, color, pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', f)) }));
+  lineChart($('chart-outcomes'), outcomeSeries, fmt);
+  legend($('legend-outcomes'), outcomeSeries);
+
   const loadSeries = [
-    { name: 'active', color: css('--s1'), pts: hist.map(h => ({ t: h.t, v: h.active })) },
-    { name: 'queued', color: css('--s3'), pts: hist.map(h => ({ t: h.t, v: h.queued })) },
+    { name: 'active', color: css('--s1'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_active_requests') })) },
+    { name: 'queued', color: css('--s3'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_queue_depth') })) },
   ];
   lineChart($('chart-load'), loadSeries, fmt);
   legend($('legend-load'), loadSeries);
 
-  const cReq = groups(rows, 'nimproxy_requests_total', 'client');
-  const cP = groups(rows, 'nimproxy_prompt_tokens_total', 'client');
-  const cC = groups(rows, 'nimproxy_completion_tokens_total', 'client');
+  /* heatmap: requests bucketed by local weekday x hour */
+  const matrix = DAYS.map(() => Array(24).fill(0));
+  let hmax = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const d = new Date(samples[i].t);
+    const day = (d.getDay() + 6) % 7;
+    const v = Math.max(0, sum(samples[i].rows, 'nimproxy_requests_total') - sum(samples[i-1].rows, 'nimproxy_requests_total'));
+    matrix[day][d.getHours()] += v;
+    hmax = Math.max(hmax, matrix[day][d.getHours()]);
+  }
+  heatmap($('heatmap'), matrix, hmax);
+
+  const cReq = wgroups('nimproxy_requests_total', 'client');
+  const cP = wgroups('nimproxy_prompt_tokens_total', 'client');
+  const cC = wgroups('nimproxy_completion_tokens_total', 'client');
   const clients = [...cReq.keys()].sort((a,b) => (cC.get(b)||0) - (cC.get(a)||0));
   $('table-clients').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
     `<table><tr><th>Client</th><th class="num">Requests</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Saved</th></tr>` +
@@ -385,64 +606,144 @@ function render(rows) {
       `<td class="num">${money((cP.get(c)||0)/1e6*cfg.price_in + (cC.get(c)||0)/1e6*cfg.price_out)}</td></tr>`
     ).join('') + '</table>';
 
-  /* ----- keys tab ----- */
+  /* ----- keys ----- */
   $('k-lanes').textContent = cfg.lanes;
-  $('k-cap').innerHTML = fmt(cfg.lanes * cfg.rpm) + '<span class="unit">rpm</span>';
-  $('k-429').textContent = fmt(sum(rows, 'nimproxy_lane_benched_total', l => l.status === '429'));
-  $('k-5xx').textContent = fmt(sum(rows, 'nimproxy_lane_benched_total', l => l.status !== '429'));
+  $('k-cap').innerHTML = fmt(capacity) + '<span class="unit">rpm</span>';
+  $('k-429').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429')));
+  $('k-5xx').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')));
 
-  const cutoff = now - 60000;
-  const base = hist.find(h => h.t >= cutoff) || hist[0];
+  const cutoff = last.t - 60000;
+  const base60 = samples.find(s => s.t >= cutoff) || samples[0];
+  const laneNow = wgroups('nimproxy_lane_requests_total', 'lane');
+  const laneBase = groups(base60.rows, 'nimproxy_lane_requests_total', 'lane');
   let meters = '', laneRows = '';
-  const totalLane = [...snap.laneReqs.values()].reduce((a,b) => a+b, 0) || 1;
+  const totalLane = [...laneNow.values()].reduce((a,b) => a+b, 0) || 1;
+  const lane429 = wgroups('nimproxy_lane_benched_total', 'lane', l => l.status === '429');
+  const laneOther = wgroups('nimproxy_lane_benched_total', 'lane', l => l.status !== '429');
+  const laneCum = groups(rows, 'nimproxy_lane_requests_total', 'lane');
   for (let i = 0; i < cfg.lanes; i++) {
-    const k = String(i), cur = snap.laneReqs.get(k) || 0;
-    const inWindow = Math.max(0, cur - (base.laneReqs.get(k) || 0));
+    const k = String(i), cur = laneNow.get(k) || 0;
+    const inWindow = Math.max(0, (laneCum.get(k) || 0) - (laneBase.get(k) || 0));
     const util = Math.min(1, inWindow / cfg.rpm);
     meters += `<div class="meter"><span class="name">Key ${i+1}</span>` +
       `<span class="track"><span class="fill" style="width:${(util*100).toFixed(0)}%"></span></span>` +
       `<span class="val">${Math.round(util*100)}%</span></div>`;
-    const b429 = sum(rows, 'nimproxy_lane_benched_total', l => l.lane === k && l.status === '429');
-    const bOther = sum(rows, 'nimproxy_lane_benched_total', l => l.lane === k && l.status !== '429');
+    const b429 = lane429.get(k) || 0;
+    const bOther = laneOther.get(k) || 0;
     laneRows += `<tr><td>Key ${i+1}</td><td class="num">${fmt(cur)}</td>` +
       `<td class="num">${(cur/totalLane*100).toFixed(0)}%</td>` +
       `<td class="num">${fmt(inWindow)} / ${cfg.rpm}</td>` +
       `<td class="num">${fmt(b429)}</td><td class="num">${fmt(bOther)}</td></tr>`;
   }
   $('meters').innerHTML = meters || '<div class="empty">No lanes configured</div>';
+  const benchSeries = Array.from({length: Math.min(cfg.lanes, 6)}, (_, i) => ({
+    name: `Key ${i+1}`, color: css(SLOTS[i]),
+    pts: rateSeries(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.lane === String(i) && l.status === '429')),
+  }));
+  lineChart($('chart-benches'), benchSeries, fmt);
+  legend($('legend-benches'), benchSeries);
   $('table-lanes').innerHTML =
     `<table><tr><th>Lane</th><th class="num">Requests</th><th class="num">Share</th><th class="num">Last 60s</th><th class="num">429s</th><th class="num">Other benches</th></tr>${laneRows}</table>`;
 }
 
-/* ---------- polling ---------- */
-async function poll() {
+/* ---------- data sources ---------- */
+async function pollLive() {
+  if (mode.kind !== 'live' || mode.paused) return;
   try {
     const rows = parseProm(await (await fetch('/metrics')).text());
-    render(rows);
-    $('live').classList.remove('down');
+    samples.push({ t: Date.now(), rows });
+    if (samples.length > KEEP) samples.shift();
+    render();
+    $('live').className = 'live';
     $('liveText').textContent = 'live';
     $('uptime').textContent = 'up ' + ago(Date.now()/1000 - cfg.started);
   } catch {
-    $('live').classList.add('down');
+    $('live').className = 'live down';
     $('liveText').textContent = 'offline';
   }
 }
-(async () => {
-  try { cfg = await (await fetch('/dash/config.json')).json(); } catch {}
-  $('verinfo').textContent = `v${cfg.version} · ${cfg.lanes} lanes · auth ${cfg.auth ? 'on' : 'off'}`;
-  await poll();
-  setInterval(poll, POLL_MS);
-})();
 
-/* ---------- tabs ---------- */
+async function loadRange(from, to) {
+  mode = { kind: 'range', paused: false, from, to };
+  $('live').className = 'live idle';
+  $('liveText').textContent = 'history';
+  $('rangeinfo').textContent =
+    new Date(from*1000).toLocaleString() + ' – ' + new Date(to*1000).toLocaleString();
+  try {
+    const data = await (await fetch(`/api/history?from=${from}&to=${to}`)).json();
+    samples = data.map(p => ({ t: p.t * 1000, rows: parseProm(p.m) }));
+    if (samples.length < 2) {
+      for (const el of document.querySelectorAll('main .card > div[id]'))
+        if (el.id.startsWith('chart-') || el.id === 'heatmap')
+          el.innerHTML = '<div class="empty">Not enough history in this window yet — snapshots land every 5 minutes</div>';
+      if (samples.length) render();
+      return;
+    }
+    render();
+  } catch {
+    $('rangeinfo').textContent = 'failed to load history';
+  }
+}
+
+function goLive() {
+  mode = { kind: 'live', paused: false, from: 0, to: 0 };
+  samples = [];
+  $('rangeinfo').textContent = '';
+  $('pause').innerHTML = '&#10074;&#10074;';
+  pollLive();
+}
+
+/* ---------- controls ---------- */
+for (const b of document.querySelectorAll('#ranges button')) {
+  b.addEventListener('click', () => {
+    for (const o of document.querySelectorAll('#ranges button')) o.setAttribute('aria-pressed', o === b);
+    const r = b.dataset.range;
+    $('custom').classList.toggle('show', r === 'custom');
+    if (r === 'live') goLive();
+    else if (r !== 'custom') {
+      const now = Math.floor(Date.now()/1000);
+      loadRange(now - parseInt(r), now);
+    }
+  });
+}
+$('applyRange').addEventListener('click', () => {
+  const f = new Date($('from').value).getTime()/1000, t = new Date($('to').value).getTime()/1000;
+  if (isFinite(f) && isFinite(t) && t > f) loadRange(Math.floor(f), Math.floor(t));
+});
+$('pause').addEventListener('click', () => {
+  if (mode.kind !== 'live') return;
+  mode.paused = !mode.paused;
+  $('pause').innerHTML = mode.paused ? '&#9654;' : '&#10074;&#10074;';
+  $('liveText').textContent = mode.paused ? 'paused' : 'live';
+  $('live').className = mode.paused ? 'live idle' : 'live';
+  if (!mode.paused) pollLive();
+});
+$('heatToggle').addEventListener('click', () => {
+  heatAsTable = !heatAsTable;
+  $('heatToggle').textContent = heatAsTable ? 'chart' : 'table';
+  render();
+});
 for (const b of document.querySelectorAll('nav button')) {
   b.addEventListener('click', () => {
     for (const o of document.querySelectorAll('nav button')) o.setAttribute('aria-selected', o === b);
     for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'tab-' + b.dataset.tab;
     location.hash = b.dataset.tab;
+    render();
   });
   if (location.hash === '#' + b.dataset.tab) b.click();
 }
+
+/* ---------- boot ---------- */
+(async () => {
+  try { cfg = await (await fetch('/dash/config.json')).json(); } catch {}
+  $('verinfo').textContent = `v${cfg.version} · ${cfg.lanes} lanes · auth ${cfg.auth ? 'on' : 'off'}`;
+  const pad = n => String(n).padStart(2, '0');
+  const toLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  $('to').value = toLocal(new Date());
+  $('from').value = toLocal(new Date(Date.now() - 86400e3));
+  await pollLive();
+  setInterval(pollLive, POLL_MS);
+})();
 </script>
 </body>
 </html>
