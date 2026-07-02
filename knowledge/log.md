@@ -27,6 +27,19 @@ agent-behavior + model-quality signal was in hand but unread.
   Harnesses view distinguishes both with distinct fingerprints, zero JS errors.
   Cardinality bounding is unit- and e2e-tested.
 
+### Pre-merge hardening pass (same PR)
+
+Before merge: security scan (dedicated dashboard-XSS audit + a full
+`/security-review` of the branch) found **zero** vulnerabilities — every new
+`innerHTML` value is escaped, every new label is a bounded enum / histogram, and
+no route left the admin gate. Documentation swept and confirmed current (six
+views, metric table, env vars). Test coverage extended to the buffered
+`relay()` quality path, an unknown-`finish_reason`→`other` clamp, JSON mode, and
+non-`auto` `tool_choice` (now **29 unit + 21 e2e**). The load harness gained
+tool/JSON/sampling variety and a corrected boot command (`INSECURE_NO_AUTH`);
+re-run at 80×3 = 240 requests → 0 failures, 0 upstream rate violations, balanced
+across all keys, with the new metric series confirmed populated.
+
 ## [2026-07-02] ingest — Dashboard reporting polish
 
 Client-side only (no server change, security invariants untouched); surfaces

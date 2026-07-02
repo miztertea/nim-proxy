@@ -492,6 +492,100 @@ async fn request_shape_and_quality_metrics_are_recorded() {
     }
 }
 
+/// The buffered (non-streaming) path extracts finish_reason, reasoning tokens,
+/// and tool-call count from `relay()`; an unknown finish_reason collapses to
+/// `other`; JSON mode and non-`auto` tool_choice are recorded. These paths are
+/// distinct from the streaming assertions above.
+#[tokio::test]
+async fn buffered_quality_and_edge_cases_are_recorded() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let post = |body: serde_json::Value| {
+        let proxy = &proxy;
+        async move {
+            let r = client()
+                .post(proxy.url("/v1/chat/completions"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 200);
+            r.text().await.unwrap();
+        }
+    };
+
+    // Buffered tool call: mock answers with message.tool_calls + finish tool_calls.
+    post(serde_json::json!({
+        "model": "mock/model-a", "stream": false, "tool_choice": "required",
+        "tools": [{"type": "function", "function": {"name": "run"}}],
+        "messages": [{"role": "user", "content": "go"}]
+    }))
+    .await;
+
+    // Buffered JSON mode.
+    post(serde_json::json!({
+        "model": "mock/model-a", "stream": false,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": "as json"}]
+    }))
+    .await;
+
+    // Unknown upstream finish_reason must collapse to "other".
+    mock.state.push(Behavior::OddFinish);
+    post(serde_json::json!({
+        "model": "mock/model-a", "stream": false,
+        "messages": [{"role": "user", "content": "hi"}]
+    }))
+    .await;
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // Buffered quality extraction (from relay()).
+    assert!(
+        metrics
+            .contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="tool_calls"}"#),
+        "buffered tool_calls finish recorded: {metrics}"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_tool_calls_total{model="mock/model-a"}"#),
+        "buffered tool-call count recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_reasoning_tokens_total{model="mock/model-a"}"#),
+        "buffered reasoning tokens recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_upstream_seconds_count{model="mock/model-a"}"#),
+        "upstream latency recorded on the buffered path"
+    );
+
+    // Edge cases.
+    assert!(
+        metrics.contains(r#"nimproxy_tool_choice_total{mode="required"}"#),
+        "non-auto tool_choice mode recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_json_mode_total{client="local"}"#),
+        "JSON mode recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="other"}"#),
+        "unknown finish_reason collapsed to other: {metrics}"
+    );
+    assert!(
+        !metrics.contains(r#"reason="banana""#),
+        "raw upstream finish_reason never becomes a label"
+    );
+}
+
 #[tokio::test]
 async fn history_records_snapshots_and_survives_restart() {
     let dir = std::env::temp_dir().join(format!("nimproxy-test-{}", std::process::id()));

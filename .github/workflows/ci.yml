@@ -24,6 +24,16 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Tests (unit + integration)
         run: cargo test
+      - name: Dashboard JS syntax
+        run: |
+          python3 - <<'PY' > "$RUNNER_TEMP/dash.js"
+          import re, pathlib
+          html = pathlib.Path("src/dashboard.html").read_text()
+          m = re.search(r"<script>\n(.*)</script>", html, re.S)
+          assert m, "no <script> block found in src/dashboard.html"
+          print(m.group(1))
+          PY
+          node --check "$RUNNER_TEMP/dash.js"
 
   audit:
     name: cargo audit

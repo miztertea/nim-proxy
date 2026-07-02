@@ -30,6 +30,9 @@ pub enum Behavior {
     BadRequestIfInjected,
     /// Send headers + one chunk, then stall forever.
     Hang,
+    /// Buffered response with an unknown `finish_reason` — exercises the
+    /// server-side clamp that collapses odd values to `other`.
+    OddFinish,
 }
 
 pub struct Hit {
@@ -132,6 +135,12 @@ async fn mock_chat(
             .unwrap(),
         Behavior::BadRequest => bad_request(),
         Behavior::BadRequestIfInjected if injected => bad_request(),
+        Behavior::OddFinish => axum::Json(serde_json::json!({
+            "id": "mock-1", "object": "chat.completion",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "banana"}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 2}
+        }))
+        .into_response(),
         Behavior::Hang => {
             let stream = futures_util::stream::once(async {
                 Ok::<_, std::io::Error>(Bytes::from("data: {\"choices\":[]}\n\n"))

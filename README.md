@@ -220,12 +220,12 @@ inject into the exposition format or explode the registry.
 Three layers, all runnable locally:
 
 ```sh
-cargo test          # 26 unit + 19 end-to-end tests (real binary vs scripted mock NIM)
+cargo test          # 29 unit + 21 end-to-end tests (real binary vs scripted mock NIM)
 ```
 
-The e2e suite covers auth (API keys, admin password / session cookie / Bearer, fail-closed boot posture), 429 ride-out with key failover, Retry-After timing, pacing enforcement, fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, label-injection sanitizing, security headers, metrics accuracy, history persistence across restart, and SIGTERM.
+The e2e suite covers auth (API keys, admin password / session cookie / Bearer, fail-closed boot posture), 429 ride-out with key failover, Retry-After timing, pacing enforcement, fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, label-injection sanitizing, security headers, metrics accuracy (incl. request-shape & response-quality signal on both the streaming and buffered paths, and the finish-reason cardinality clamp), history persistence across restart, and SIGTERM.
 
-Load test (100 concurrent clients against a mock that *strictly enforces* NIM's per-key window and counts violations):
+Load test (100 concurrent clients — a mix of plain, tool-offering, and JSON-mode calls — against a mock that *strictly enforces* NIM's per-key window and counts violations):
 
 ```sh
 python3 scripts/mock_nim.py --enforce --rpm 40 --port 9999 &
