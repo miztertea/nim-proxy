@@ -27,6 +27,10 @@ pub struct Config {
     pub models_ttl: Duration,
     /// Abort a stream when the upstream sends nothing for this long (0 = off).
     pub stream_idle: Duration,
+    /// Overall deadline for a non-streaming upstream request (connect + body).
+    /// Streaming has no overall cap (generation can be long) — it relies on
+    /// `stream_idle` instead. Bounds a stalled buffered read holding a slot.
+    pub request_timeout: Duration,
     /// Never modify request bodies (disables stream_options usage injection).
     pub strict_passthrough: bool,
     /// Reference $/1M token prices for the dashboard's "dollars saved" figure.
@@ -186,6 +190,10 @@ async fn main() {
     }
 
     let rpm: usize = env_or("RPM_PER_KEY", "40").parse().expect("RPM_PER_KEY");
+    if rpm == 0 {
+        eprintln!("RPM_PER_KEY must be >= 1 (0 would stall every lane).");
+        std::process::exit(1);
+    }
     let cfg = Config {
         base_url: env_or("NIM_BASE_URL", "https://integrate.api.nvidia.com")
             .trim_end_matches('/')
@@ -209,6 +217,11 @@ async fn main() {
             env_or("STREAM_IDLE_SECS", "300")
                 .parse()
                 .expect("STREAM_IDLE_SECS"),
+        ),
+        request_timeout: Duration::from_secs(
+            env_or("REQUEST_TIMEOUT_SECS", "300")
+                .parse()
+                .expect("REQUEST_TIMEOUT_SECS"),
         ),
         strict_passthrough: env_or("STRICT_PASSTHROUGH", "false")
             .parse()

@@ -546,7 +546,10 @@ async fn buffered(
             return gateway_timeout(&state);
         };
         let sent_at = Instant::now();
+        // A non-streaming request gets an overall timeout so a stalled body read
+        // can't pin an in-flight slot forever (streaming has no such cap).
         let resp = match upstream_request(&state, &method, &path_query, &headers, &key, &body)
+            .timeout(state.cfg.request_timeout)
             .send()
             .await
         {
@@ -798,7 +801,16 @@ async fn relay(resp: reqwest::Response, ctx: &Ctx) -> Response {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/json")
         .to_owned();
-    let body = resp.bytes().await.unwrap_or_default();
+    let body = match resp.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            // Body stalled past the request timeout, or the connection dropped
+            // mid-body. Surface a clear gateway error rather than a truncated
+            // "success" with an empty body.
+            tracing::warn!(error = %e, "upstream body read failed");
+            return bad_gateway();
+        }
+    };
     if status.is_success() {
         if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
             if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
@@ -887,6 +899,17 @@ fn overloaded(state: &AppState) -> Response {
         axum::Json(body),
     )
         .into_response()
+}
+
+fn bad_gateway() -> Response {
+    let body = serde_json::json!({
+        "error": {
+            "message": "upstream response failed or timed out",
+            "type": "proxy_error",
+            "code": "bad_gateway"
+        }
+    });
+    (StatusCode::BAD_GATEWAY, axum::Json(body)).into_response()
 }
 
 fn gateway_timeout(state: &AppState) -> Response {

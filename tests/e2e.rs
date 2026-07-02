@@ -586,6 +586,172 @@ async fn buffered_quality_and_edge_cases_are_recorded() {
     );
 }
 
+// ---------- correctness & security hardening (PR 6a) ----------
+
+/// A malformed percent-escape with a multibyte char (`%€`) in the login body
+/// must not panic the pre-auth handler (it used to slice a &str on a non-char
+/// boundary). The request should come back as a normal "incorrect password".
+#[tokio::test]
+async fn login_handles_malformed_urlencoded_without_panic() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(
+        &mock.url,
+        &[
+            ("INSECURE_NO_AUTH", "false"),
+            ("ADMIN_PASSWORD", "s3cret"),
+            ("PROXY_API_KEYS", "k"),
+        ],
+    )
+    .await;
+
+    let resp = client()
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("password=%a\u{20ac}")
+        .send()
+        .await
+        .unwrap();
+    // No panic / connection reset: a clean 401 login page with the error.
+    assert_eq!(resp.status(), 401);
+    assert!(resp.text().await.unwrap().contains("Incorrect password"));
+}
+
+/// Repeated failed logins trip the throttle: a burst past the failure cap
+/// returns 429 + Retry-After, even for a subsequently-correct password.
+#[tokio::test]
+async fn login_throttles_after_repeated_failures() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(
+        &mock.url,
+        &[
+            ("INSECURE_NO_AUTH", "false"),
+            ("ADMIN_PASSWORD", "s3cret"),
+            ("PROXY_API_KEYS", "k"),
+        ],
+    )
+    .await;
+
+    // The cap is 10 failures per window; 11 wrong attempts trips it.
+    for _ in 0..11 {
+        let r = client()
+            .post(proxy.url("/login"))
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body("password=wrong")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 401); // wrong password re-renders the form (401)
+    }
+    // Now throttled: even the correct password is refused with 429 + Retry-After.
+    let r = client()
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("password=s3cret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 429);
+    assert_eq!(r.headers().get("retry-after").unwrap(), "60");
+}
+
+/// A buffered request against an upstream that sends headers then stalls the
+/// body must not hang forever holding an in-flight slot — the request timeout
+/// surfaces a gateway error instead.
+#[tokio::test]
+async fn buffered_request_times_out_on_hung_upstream() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = start_proxy(&mock.url, &[("REQUEST_TIMEOUT_SECS", "1")]).await;
+
+    let started = Instant::now();
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 502, "hung body surfaces as bad_gateway");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "returned promptly, did not hang"
+    );
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "bad_gateway");
+}
+
+/// Past the in-flight cap the proxy sheds load with 503 instead of growing the
+/// queue unbounded.
+#[tokio::test]
+async fn overloaded_requests_are_shed_with_503() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = std::sync::Arc::new(
+        start_proxy(
+            &mock.url,
+            &[("MAX_INFLIGHT", "1"), ("REQUEST_TIMEOUT_SECS", "30")],
+        )
+        .await,
+    );
+
+    // Occupy the single in-flight slot with a buffered request whose body hangs.
+    let hog = {
+        let proxy = proxy.clone();
+        tokio::spawn(async move {
+            let _ = client()
+                .post(proxy.url("/v1/chat/completions"))
+                .json(&chat_body("hog", false))
+                .send()
+                .await;
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("shed-me", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        503,
+        "second request shed at the in-flight cap"
+    );
+    assert_eq!(resp.headers().get("retry-after").unwrap(), "5");
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "overloaded");
+    hog.abort();
+}
+
+/// An unreachable upstream exercises the connection-error arm: the lane is
+/// benched with status "connect" and the request fails fast at the deadline.
+#[tokio::test]
+async fn upstream_connection_error_is_benched() {
+    // Nothing listens on port 1 → every connect attempt fails.
+    let proxy = start_proxy("http://127.0.0.1:1", &[("MAX_WAIT_SECS", "2")]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 504, "connect failures exhaust to a 504");
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains(r#"nimproxy_lane_benched_total{lane="0",status="connect"}"#),
+        "connection error benched the lane: {metrics}"
+    );
+}
+
 #[tokio::test]
 async fn history_records_snapshots_and_survives_restart() {
     let dir = std::env::temp_dir().join(format!("nimproxy-test-{}", std::process::id()));
