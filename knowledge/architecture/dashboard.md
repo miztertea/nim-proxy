@@ -24,11 +24,22 @@ values; live views report lifetime totals. Pause suspends the live poll.
   tooltip hover layer, legend for ≥2 series, table twin for everything.
 - Categorical palette is the validated 6-slot set (CVD-checked in both
   modes); slots assign to models first-seen and never recycle.
-- Quantile lines (TTFT, queue wait) interpolate from histogram bucket deltas;
-  the two quantiles use an ordinal same-hue pair, not two categorical slots.
+- Quantile lines (TTFT, queue wait, generation speed) interpolate from
+  histogram bucket deltas; the two quantiles use an ordinal same-hue pair, not
+  two categorical slots. Generation speed filters to `source="usage"` buckets
+  so the trend reflects real reported throughput, not the ~1-token-per-event
+  estimate used when upstream omits usage.
 - The capacity gauge uses a **trailing-60s average**: the raw 3s pairwise
   rate honestly read 133% during a cold-start burst drain, which is
   math-correct but reads as broken.
+- Gauges are **colored by threshold**, not just numbered: capacity goes blue →
+  amber (≥70%) → red (≥90%) as lanes saturate; success rate goes green → amber
+  (<99%) → red (<90%). The dial itself signals health at a glance.
+- The Proxy tab pairs the outcomes-per-minute line chart with a ranked
+  **non-success-outcome table** (every recorded status that isn't 200 —
+  `429`/`400`/`504`/`disconnect`/`stall`/`stream_error`/… — mapped to a
+  plain-language reason with count and share), so *why* requests failed is
+  legible, not just how many.
 - Heatmap (weekday × hour) uses the sequential blue ramp with a table toggle.
 - Model cards derive identity from the id namespace
   ([schema research](../research/nim-models-endpoint-schema.md)): LobeHub CDN

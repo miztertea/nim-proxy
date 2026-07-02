@@ -97,8 +97,8 @@ curl http://localhost:8000/v1/chat/completions \
 
 Served at `GET /` — a single embedded HTML file, no Grafana, no config. Three views, light and dark mode:
 
-- **Models** — ranked model cards (publisher logos with offline fallback, requests, tokens, TTFT, tok/s, error rate, dollars saved), TTFT median/p95 over time, tokens-per-minute by model, cumulative savings, full table.
-- **Proxy** — capacity-used and success-rate gauges, request/outcome/load charts, queue-wait median/p95, hour-of-day activity heatmap, per-client leaderboard.
+- **Models** — ranked model cards (publisher logos with offline fallback, requests, tokens, TTFT, tok/s, error rate, dollars saved), TTFT and generation-speed (tok/s) median/p95 over time, tokens-per-minute by model, cumulative savings, full table.
+- **Proxy** — capacity-used and success-rate gauges (colored by threshold — amber as lanes saturate, red when overloaded or failing), request/outcome/load charts, a ranked non-success-outcome breakdown, queue-wait median/p95, hour-of-day activity heatmap, per-client leaderboard.
 - **Keys** — per-lane utilization meters, 429s-per-minute by lane, conversation stickiness, per-lane table.
 
 **Time ranges & history.** The filter row offers Live (pausable, 3 s refresh) plus 1h/6h/24h/7d/30d presets and a custom calendar date-time range. Range views are served from the proxy's own history: a ~4 KB metrics snapshot every 5 minutes, kept `HISTORY_DAYS` days (default 30, `0` = forever) in `DATA_DIR` (a Docker volume in the compose file; ~35 MB per 30 days). In a range view every tile, card, and table reports totals *for that window* — instant usage reports.

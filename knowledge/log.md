@@ -6,6 +6,26 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-02] ingest — Dashboard reporting polish
+
+Client-side only (no server change, security invariants untouched); surfaces
+data already collected but previously under-shown. See
+[dashboard](architecture/dashboard.md).
+
+- **Generation speed (tok/s) median/p95 trend** on the Models tab — the
+  `nimproxy_tokens_per_second` histogram was only ever shown as one average
+  tile. Same bucket-delta quantile machinery as TTFT, filtered to
+  `source="usage"` so estimates don't drag the trend down.
+- **Non-success outcomes table** on the Proxy tab — ranks every recorded
+  non-200 status by count with a plain-language reason and share, so the
+  status detail already in `nimproxy_requests_total` is legible instead of
+  lumped into one "errors/min" line.
+- **Threshold-colored gauges** — capacity (blue→amber≥70%→red≥90%) and success
+  rate (green→amber<99%→red<90%) so the dials signal, not just count.
+- Verified in headless Chromium against the mock: both new elements render with
+  live data, gauges take the amber band under induced load/errors, zero JS
+  page errors.
+
 ## [2026-07-02] ingest — Security hardening (v0.3.0)
 
 A security review of the merged proxy found a stored-XSS chain (client-supplied
