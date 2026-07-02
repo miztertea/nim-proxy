@@ -1,0 +1,458 @@
+//! End-to-end tests: the real proxy binary against a scriptable mock NIM.
+
+mod support;
+
+use std::time::{Duration, Instant};
+
+use support::{chat_body, read_sse, start_mock, start_proxy, Behavior};
+
+fn client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+#[tokio::test]
+async fn local_mode_needs_no_auth() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["choices"][0]["message"]["content"], "hello world");
+}
+
+#[tokio::test]
+async fn auth_mode_rejects_bad_tokens_and_accepts_good_ones() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[("PROXY_API_KEYS", "alice:sekrit")]).await;
+
+    let missing = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 401);
+    let body: serde_json::Value = missing.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "unauthorized");
+
+    let wrong = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth("nope")
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 401);
+
+    let ok = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth("sekrit")
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200);
+    assert_eq!(
+        mock.state.hit_count(),
+        1,
+        "only the authorized call reached upstream"
+    );
+}
+
+#[tokio::test]
+async fn streaming_rides_out_429s_with_lane_failover() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::RateLimited(1));
+    mock.state.push(Behavior::RateLimited(1));
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "SSE committed despite upstream 429s");
+    let body = read_sse(resp).await;
+    assert!(
+        body.contains(": retrying"),
+        "client saw retry comments: {body}"
+    );
+    assert!(body.contains("hello"), "stream delivered data: {body}");
+    assert!(body.contains("data: [DONE]"));
+
+    let keys = mock.state.hit_keys();
+    assert_eq!(keys.len(), 3, "two 429s then a success");
+    assert_ne!(keys[0], keys[1], "429 failed over to a different key");
+}
+
+#[tokio::test]
+async fn retry_after_is_honored_when_only_one_lane_exists() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::RateLimited(1));
+    let proxy = start_proxy(&mock.url, &[("NIM_API_KEYS", "only-key")]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(mock.state.hit_count(), 2);
+    let gap = mock.state.hit_gap(0, 1);
+    assert!(
+        gap >= Duration::from_millis(900),
+        "waited Retry-After, gap {gap:?}"
+    );
+}
+
+#[tokio::test]
+async fn buffered_retries_5xx_then_returns_verbatim_body() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::ServerError(503));
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["usage"]["prompt_tokens"], 11);
+    assert_eq!(mock.state.hit_count(), 2);
+}
+
+#[tokio::test]
+async fn non_retryable_error_is_relayed_buffered_and_surfaced_in_stream() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::BadRequest);
+    let proxy = start_proxy(&mock.url, &[("STRICT_PASSTHROUGH", "true")]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400, "buffered 400 relayed verbatim");
+    assert!(resp.text().await.unwrap().contains("bad stream_options"));
+
+    mock.state.push(Behavior::BadRequest);
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "stream already committed to 200");
+    let body = read_sse(resp).await;
+    assert!(
+        body.contains("proxy_error"),
+        "error surfaced in-stream: {body}"
+    );
+}
+
+#[tokio::test]
+async fn saturation_fails_fast_with_504() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(
+        &mock.url,
+        &[
+            ("NIM_API_KEYS", "only-key"),
+            ("RPM_PER_KEY", "2"),
+            ("MAX_WAIT_SECS", "2"),
+        ],
+    )
+    .await;
+
+    for _ in 0..2 {
+        let r = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("hi", false))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
+    let third = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(third.status(), 504, "no slot within MAX_WAIT_SECS");
+    let v: serde_json::Value = third.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "rate_limited");
+    assert_eq!(
+        mock.state.hit_count(),
+        2,
+        "pacer let exactly RPM_PER_KEY through"
+    );
+}
+
+#[tokio::test]
+async fn conversation_affinity_pins_a_conversation_to_one_key() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    for _ in 0..3 {
+        let r = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("same conversation", false))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
+    let keys = mock.state.hit_keys();
+    assert_eq!(keys[0], keys[1]);
+    assert_eq!(keys[1], keys[2], "conversation stayed on one key: {keys:?}");
+
+    for i in 0..12 {
+        let r = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body(&format!("distinct conversation {i}"), false))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
+    let distinct: std::collections::HashSet<String> = mock.state.hit_keys().into_iter().collect();
+    assert!(
+        distinct.len() >= 2,
+        "distinct conversations spread across keys"
+    );
+}
+
+#[tokio::test]
+async fn models_catalog_is_cached_and_auth_gated() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[("PROXY_API_KEYS", "alice:sekrit")]).await;
+
+    let unauth = client().get(proxy.url("/v1/models")).send().await.unwrap();
+    assert_eq!(unauth.status(), 401);
+
+    for _ in 0..3 {
+        let r = client()
+            .get(proxy.url("/v1/models"))
+            .bearer_auth("sekrit")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["data"][0]["id"], "mock/model-a");
+    }
+    assert_eq!(
+        mock.state
+            .models_hits
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "catalog served from cache after first fetch"
+    );
+}
+
+#[tokio::test]
+async fn usage_injection_asks_for_usage_and_backs_off_on_rejection() {
+    // Default: stream_options injected.
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    read_sse(resp).await;
+    {
+        let hits = mock.state.hits.lock().unwrap();
+        assert_eq!(
+            hits[0].body["stream_options"]["include_usage"], true,
+            "proxy injected stream_options"
+        );
+    }
+
+    // Model that 400s on stream_options: retried untouched, then remembered.
+    let mock2 = start_mock().await;
+    mock2.state.push(Behavior::BadRequestIfInjected);
+    let proxy2 = start_proxy(&mock2.url, &[]).await;
+    let resp = client()
+        .post(proxy2.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    let body = read_sse(resp).await;
+    assert!(body.contains("data: [DONE]"), "recovered after 400: {body}");
+    {
+        let hits = mock2.state.hits.lock().unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].body.get("stream_options").is_some());
+        assert!(hits[1].body.get("stream_options").is_none());
+    }
+    // Next request for the same model: no injection attempt at all.
+    let resp = client()
+        .post(proxy2.url("/v1/chat/completions"))
+        .json(&chat_body("again", true))
+        .send()
+        .await
+        .unwrap();
+    read_sse(resp).await;
+    {
+        let hits = mock2.state.hits.lock().unwrap();
+        assert!(
+            hits[2].body.get("stream_options").is_none(),
+            "model remembered"
+        );
+    }
+
+    // STRICT_PASSTHROUGH disables injection entirely.
+    let mock3 = start_mock().await;
+    let proxy3 = start_proxy(&mock3.url, &[("STRICT_PASSTHROUGH", "true")]).await;
+    let resp = client()
+        .post(proxy3.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    read_sse(resp).await;
+    let hits = mock3.state.hits.lock().unwrap();
+    assert!(hits[0].body.get("stream_options").is_none());
+}
+
+#[tokio::test]
+async fn stalled_upstream_stream_errors_out_within_idle_timeout() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = start_proxy(&mock.url, &[("STREAM_IDLE_SECS", "1")]).await;
+
+    let started = Instant::now();
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    let body = read_sse(resp).await;
+    assert!(body.contains("stalled"), "stall surfaced: {body}");
+    assert!(started.elapsed() < Duration::from_secs(10), "did not hang");
+}
+
+#[tokio::test]
+async fn metrics_report_traffic_tokens_and_affinity() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[("PROXY_API_KEYS", "alice:sekrit")]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth("sekrit")
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    read_sse(resp).await;
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(metrics.contains(r#"nimproxy_requests_total{"#), "{metrics}");
+    assert!(metrics.contains(r#"client="alice""#));
+    assert!(metrics.contains(r#"model="mock/model-a""#));
+    assert!(
+        metrics.contains(r#"nimproxy_completion_tokens_total{client="alice",model="mock/model-a",source="usage"} 2"#),
+        "exact usage counted: {metrics}"
+    );
+    assert!(metrics.contains("nimproxy_affinity_total"));
+}
+
+#[tokio::test]
+async fn history_records_snapshots_and_survives_restart() {
+    let dir = std::env::temp_dir().join(format!("nimproxy-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mock = start_mock().await;
+    let envs = [
+        ("DATA_DIR", dir.to_str().unwrap()),
+        ("HISTORY_SAMPLE_SECS", "1"),
+    ];
+
+    let proxy = start_proxy(&mock.url, &envs).await;
+    // Drive traffic so snapshots have metric series in them.
+    let r = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let points: Vec<serde_json::Value> = client()
+        .get(proxy.url("/api/history"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(points.len() >= 2, "sampler ran: {} points", points.len());
+    let last = points.last().unwrap()["m"].as_str().unwrap();
+    assert!(last.contains("nimproxy"), "snapshots carry metrics: {last}");
+    let before = points.len();
+    drop(proxy);
+
+    // Restart on the same DATA_DIR: history is reloaded from disk.
+    let proxy = start_proxy(&mock.url, &envs).await;
+    let points: Vec<serde_json::Value> = client()
+        .get(proxy.url("/api/history"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        points.len() >= before,
+        "history persisted across restart ({} >= {before})",
+        points.len()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn sigterm_shuts_down_cleanly() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let status = proxy.terminate();
+    assert!(status.success(), "clean exit on SIGTERM, got {status:?}");
+}
+
+#[tokio::test]
+async fn dashboard_and_config_are_served() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let dash = client().get(proxy.url("/")).send().await.unwrap();
+    assert_eq!(dash.status(), 200);
+    assert!(dash.text().await.unwrap().contains("NIM"));
+    let cfg: serde_json::Value = client()
+        .get(proxy.url("/dash/config.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cfg["lanes"], 3);
+    assert_eq!(cfg["auth"], false);
+}
