@@ -1,0 +1,34 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "nim": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "NVIDIA NIM (via nim-proxy)",
+      "options": {
+        "baseURL": "http://localhost:8000/v1",
+        "apiKey": "{env:NIM_PROXY_KEY}",
+        "timeout": false
+      },
+      "models": {
+        "z-ai/glm-5.2": {
+          "name": "GLM-5.2 (NIM)",
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          },
+          "options": {
+            "temperature": 0.6,
+            "top_p": 0.95
+          }
+        }
+      }
+    }
+  },
+  "model": "nim/z-ai/glm-5.2",
+  "small_model": "nim/z-ai/glm-5.2",
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 24000
+  }
+}
