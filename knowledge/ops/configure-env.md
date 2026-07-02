@@ -28,6 +28,7 @@ config files, no reload.
 | `HEARTBEAT_SECS` | `10` | A client's idle timeout is unusually aggressive |
 | `MODELS_TTL_SECS` | `600` | Rarely |
 | `STREAM_IDLE_SECS` | `300` | Models that legitimately pause >5 min mid-stream (0 disables) |
+| `REQUEST_TIMEOUT_SECS` | `300` | Overall deadline for a non-streaming upstream request; bounds a stalled buffered body read (streaming uses `STREAM_IDLE_SECS`) |
 | `STRICT_PASSTHROUGH` | `false` | You want zero body modification (loses exact token counts) |
 | `REF_PRICE_IN` / `REF_PRICE_OUT` | `0.5` / `2.0` | Different reference $/1M-token prices for "saved" |
 | `HISTORY_DAYS` | `30` | Longer/shorter report horizon (0 = forever; ~35 MB / 30 days) |

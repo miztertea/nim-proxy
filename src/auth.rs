@@ -21,8 +21,9 @@ use crate::AppState;
 const COOKIE: &str = "nimproxy_session";
 const SESSION_TTL_SECS: u64 = 12 * 3600;
 
-/// Constant-time string equality (avoids leaking length-prefix matches via
-/// timing). Distinct lengths compare unequal without early return.
+/// Constant-time byte equality (avoids leaking content via timing). `subtle`
+/// short-circuits only on a *length* mismatch — that leaks the secret's length,
+/// which is acceptable; the bytes themselves are always compared in full.
 pub fn ct_eq(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
@@ -110,7 +111,7 @@ impl Admin {
     fn note_failure(&self) -> bool {
         let mut t = self.throttle.lock().unwrap();
         let n = now();
-        if n - t.window_start >= THROTTLE_WINDOW_SECS {
+        if n.saturating_sub(t.window_start) >= THROTTLE_WINDOW_SECS {
             t.window_start = n;
             t.failures = 0;
         }
@@ -120,7 +121,8 @@ impl Admin {
 
     fn is_throttled(&self) -> bool {
         let t = self.throttle.lock().unwrap();
-        now() - t.window_start < THROTTLE_WINDOW_SECS && t.failures > THROTTLE_MAX_FAILURES
+        now().saturating_sub(t.window_start) < THROTTLE_WINDOW_SECS
+            && t.failures > THROTTLE_MAX_FAILURES
     }
 
     fn cookie(&self, headers: &HeaderMap, token: &str, max_age: i64) -> String {
@@ -351,14 +353,17 @@ fn form_field(body: &str, field: &str) -> Option<String> {
 }
 
 fn url_decode(s: &str) -> String {
-    let bytes = s.replace('+', " ");
-    let bytes = bytes.as_bytes();
+    let src = s.replace('+', " ");
+    let bytes = src.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
+        // Decode a "%XX" escape purely from bytes — never re-slice the &str,
+        // which would panic if the window lands inside a multibyte char.
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(b);
+            let (hi, lo) = (bytes[i + 1], bytes[i + 2]);
+            if let (Some(h), Some(l)) = (hex_val(hi), hex_val(lo)) {
+                out.push(h << 4 | l);
                 i += 3;
                 continue;
             }
@@ -367,6 +372,16 @@ fn url_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Value of a single ASCII hex digit, or None.
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn login_html(error: bool) -> Response {
@@ -496,5 +511,22 @@ mod tests {
             form_field("a=1&password=p%40ss", "password").as_deref(),
             Some("p@ss")
         );
+    }
+
+    #[test]
+    fn url_decode_survives_multibyte_and_malformed_escapes() {
+        // A multibyte char right after '%' must not panic (a '%XX' window that
+        // lands on a non-char-boundary of the original &str). Reachable pre-auth
+        // via POST /login, so this must never crash the handler.
+        assert_eq!(url_decode("%\u{20ac}"), "%\u{20ac}"); // "%€"
+        assert_eq!(url_decode("%a\u{20ac}"), "%a\u{20ac}"); // "%a€"
+        assert_eq!(url_decode("caf\u{e9}%20x"), "caf\u{e9} x"); // valid escape amid UTF-8
+                                                                // Malformed / truncated escapes pass through untouched.
+        assert_eq!(url_decode("%"), "%");
+        assert_eq!(url_decode("%z"), "%z");
+        assert_eq!(url_decode("%zz"), "%zz");
+        assert_eq!(url_decode("100%"), "100%");
+        // Well-formed escapes still decode, and '+' still becomes space.
+        assert_eq!(url_decode("p%40ss+word"), "p@ss word");
     }
 }

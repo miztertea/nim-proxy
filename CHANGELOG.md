@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **Unauthenticated panic in the login handler.** A percent-escape followed by a
+  multibyte UTF-8 character (e.g. `password=%€`) in the `POST /login` body sliced a
+  `&str` on a non-char boundary and panicked. Percent-decoding is now byte-safe.
+- **No timeout on non-streaming upstream reads.** A buffered request whose upstream
+  sent headers then stalled the body could hang forever, pinning an in-flight slot.
+  Non-streaming requests now honor `REQUEST_TIMEOUT_SECS` (default 300s) and surface a
+  `502` on a stalled/failed body read. Streaming still uses `STREAM_IDLE_SECS`.
+- **`RPM_PER_KEY=0` wedged the dispatcher** (out-of-bounds index in the pacer). Now
+  rejected at startup.
+- Login throttle window uses saturating subtraction (robust to clock adjustments).
+
+### Added
+
+- `REQUEST_TIMEOUT_SECS` config (default 300).
+
+### Changed
+
+- Regression tests for all of the above; coverage raised to ~90%.
 
 ## [0.4.0] - 2026-07-02
 

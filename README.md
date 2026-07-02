@@ -171,6 +171,7 @@ All via environment variables (or `.env`). Only `NIM_API_KEYS` is required.
 | `HEARTBEAT_SECS` | `10` | SSE keepalive interval while waiting |
 | `MODELS_TTL_SECS` | `600` | `/v1/models` cache lifetime |
 | `STREAM_IDLE_SECS` | `300` | Abort a stream after this much upstream silence (0 = off) |
+| `REQUEST_TIMEOUT_SECS` | `300` | Overall deadline for a non-streaming upstream request (bounds a stalled buffered read) |
 | `STRICT_PASSTHROUGH` | `false` | Never modify request bodies (disables usage injection) |
 | `REF_PRICE_IN` / `REF_PRICE_OUT` | `0.5` / `2.0` | $/1M-token reference prices for "dollars saved" |
 | `HISTORY_DAYS` | `30` | Metrics-history retention in days (0 = forever) |
