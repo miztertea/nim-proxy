@@ -39,6 +39,15 @@ Two scratch-specific problems and their solutions:
 Verified by running the static binary under `env -i` (empty environment):
 serves traffic with zero filesystem/env dependencies beyond its own config.
 
+**Gotcha found by CI (first real Docker build):** on the alpine builder the
+*host* is musl, so a global `RUSTFLAGS="-C target-feature=+crt-static"` also
+hits proc-macro crates — which must be dylibs — failing with "cannot produce
+proc-macro … does not support these crate types". The fix is passing
+`--target x86_64-unknown-linux-musl` explicitly even though it equals the
+host triple: with a `--target` set, cargo stops applying RUSTFLAGS to host
+units. The Dockerfile comments this so nobody "simplifies" it away. (Local
+glibc-host cross-builds never hit this, which is why it survived until CI.)
+
 ## Consequences
 
 - No exec-ing into the container for debugging — logs and `/metrics` are the

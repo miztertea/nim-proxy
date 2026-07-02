@@ -4,17 +4,23 @@
 FROM rust:1-alpine AS build
 RUN apk add --no-cache musl-dev gcc
 ENV RUSTFLAGS="-C target-feature=+crt-static"
+# The explicit --target below looks redundant (alpine's host IS musl) but is
+# load-bearing: with a --target set, cargo stops applying RUSTFLAGS to host
+# units like proc-macros, which must stay dylibs and can't be crt-static.
+ARG TARGET=x86_64-unknown-linux-musl
 WORKDIR /app
 
 # Cache the dependency build separately from source changes.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
+RUN mkdir src && echo "fn main() {}" > src/main.rs \
+    && cargo build --release --target $TARGET && rm -rf src
 
 COPY src ./src
-RUN touch src/main.rs && cargo build --release && mkdir /app/data
+RUN touch src/main.rs && cargo build --release --target $TARGET \
+    && cp target/$TARGET/release/nim-proxy /app/nim-proxy && mkdir /app/data
 
 FROM scratch
-COPY --from=build /app/target/release/nim-proxy /nim-proxy
+COPY --from=build /app/nim-proxy /nim-proxy
 # Empty dir owned by the runtime user: a named volume mounted at /data
 # inherits this ownership on first use, so history can persist.
 COPY --from=build --chown=10001:10001 /app/data /data

@@ -6,6 +6,13 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-02] ingest — CI caught the musl proc-macro trap
+
+First real Docker build (in CI — this environment has no daemon) failed:
+global crt-static RUSTFLAGS broke proc-macro dylibs on the musl-host alpine
+builder. Fixed with an explicit `--target`; details appended to
+[distroless-scratch-image](decisions/distroless-scratch-image.md).
+
 ## [2026-07-02] ingest — Initial bundle
 
 Compiled the founding conversation into the knowledge base: project purpose
