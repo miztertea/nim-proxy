@@ -435,17 +435,17 @@ async fn request_shape_and_quality_metrics_are_recorded() {
         .await
         .unwrap();
 
-    // Request shape.
+    // Request shape (labeled by client — harness behavior).
     assert!(
-        metrics.contains(r#"nimproxy_stream_requests_total{model="mock/model-a",stream="true"}"#),
+        metrics.contains(r#"nimproxy_stream_requests_total{client="local",stream="true"}"#),
         "stream flag counted: {metrics}"
     );
     assert!(
-        metrics.contains(r#"nimproxy_request_messages_count{model="mock/model-a"}"#),
+        metrics.contains(r#"nimproxy_request_messages_count{client="local"}"#),
         "conversation depth histogram present"
     );
     assert!(
-        metrics.contains(r#"nimproxy_request_tools_count{model="mock/model-a"}"#),
+        metrics.contains(r#"nimproxy_request_tools_count{client="local"}"#),
         "tools-offered histogram present"
     );
     assert!(

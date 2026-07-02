@@ -10,7 +10,27 @@ timestamp: 2026-07-02T00:00:00Z
 
 One self-contained HTML file compiled into the binary (`include_str!`), no
 build step, no config, no external assets except optional CDN logos with an
-offline monogram fallback. Three tabs (Models / Proxy / Keys), light + dark.
+offline monogram fallback. Six persona-aligned tabs, light + dark, each ordered
+**at-a-glance → trends → detail**:
+
+- **Overview** (landing, balanced) — hero KPIs + threshold gauges, request/
+  token/savings sparklines, a health strip, top models & harnesses.
+- **Models** (benchmarker) — cards + TTFT/tok/s/TPOT/upstream quantile charts,
+  truncation breakdown, reasoning-vs-output share, per-model table.
+- **Compare** (benchmarker) — head-to-head scorecard, best-in-column
+  highlighted, via the `scorecard()` helper; a tok/s bar race via `barRows()`.
+- **Harnesses** (agent analyst) — per-client tool intensity, conversation
+  depth, sampling fingerprint, streaming mix, leaderboard. Driven by the
+  per-client request-shape metrics
+  ([request-shape-metrics](../decisions/request-shape-metrics.md)).
+- **Proxy** (operator) — gauges, outcome/load charts, non-success breakdown,
+  reliability & security panel, request-types panel, heatmap, per-client table.
+- **Keys** (capacity) — lane meters, 429/min, stickiness, live headroom,
+  keys-for-peak sizing.
+
+Colors follow the entity: the first six take the validated categorical slots,
+beyond that a stable hash-to-hue (`colorFor`) keeps every model/harness a
+consistent color instead of dropping to none.
 
 **Data flow**: Live mode polls `/metrics` every 3s into a browser-side ring
 (~20 min); range mode fetches `/api/history` once and rebuilds the same

@@ -14,8 +14,8 @@ auth posture and input sanitizing before editing.
 
 ## Working on the code
 
-- `cargo test` runs 13 unit + 15 end-to-end tests (the e2e suite launches the
-  real binary against a scriptable mock; see `tests/support/mod.rs`).
+- `cargo test` runs the unit suite plus an end-to-end suite that launches the
+  real binary against a scriptable mock (see `tests/support/mod.rs`).
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must stay clean
   (CI enforces both).
 - Rate-limit changes must pass the load harness:

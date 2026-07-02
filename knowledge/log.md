@@ -6,6 +6,27 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-02] decision + ingest — Benchmarking observability (v0.4.0)
+
+Turned the proxy into a benchmarking / agent-observability tool. The request
+body is already deserialized and every SSE event already scanned, so the
+agent-behavior + model-quality signal was in hand but unread.
+
+- **New decision** → [request-shape-metrics](decisions/request-shape-metrics.md):
+  capture request shape (messages, tools, sampling params, stream/JSON mode) and
+  response quality (finish_reason/truncation, tool calls, reasoning tokens, mean
+  TPOT) as bounded-cardinality metrics — **counts and sizes, never content**.
+  Shape is labeled by *client* (harness behavior), quality by *model*. Enums
+  (`finish_reason`, `tool_choice` mode, `stream`) are clamped server-side.
+- **Dashboard** rebuilt from three tabs to six persona-aligned views (Overview,
+  Models, Compare, Harnesses, Proxy, Keys); see
+  [dashboard](architecture/dashboard.md). Added `scorecard()`/`barRows()`
+  helpers and a hash-to-hue color fallback past the six categorical slots.
+- **Verified** in headless Chromium against a mock driving two named harnesses
+  (opencode: tool-heavy/deep; codex: plain): all six tabs populate, the
+  Harnesses view distinguishes both with distinct fingerprints, zero JS errors.
+  Cardinality bounding is unit- and e2e-tested.
+
 ## [2026-07-02] ingest — Dashboard reporting polish
 
 Client-side only (no server change, security invariants untouched); surfaces

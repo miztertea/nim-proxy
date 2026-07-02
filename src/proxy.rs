@@ -222,19 +222,21 @@ fn is_json_mode(v: &serde_json::Value) -> bool {
 /// Counts and sizes only — never message content. All heavy values go to
 /// histograms, never labels, so cardinality stays bounded.
 fn record_shape(ctx: &Ctx, parsed: Option<&serde_json::Value>, wants_stream: bool) {
+    // Labeled by client: request shape reflects the harness, not the model —
+    // this is what powers the Harnesses view ("what is each agent doing").
     counter!(
         "nimproxy_stream_requests_total",
-        "model" => ctx.model.clone(),
+        "client" => ctx.client.clone(),
         "stream" => if wants_stream { "true" } else { "false" }.to_owned(),
     )
     .increment(1);
     let Some(v) = parsed else { return };
     if let Some(msgs) = v.get("messages").and_then(|m| m.as_array()) {
-        histogram!("nimproxy_request_messages", "model" => ctx.model.clone())
+        histogram!("nimproxy_request_messages", "client" => ctx.client.clone())
             .record(msgs.len() as f64);
     }
     if let Some(n) = count_tools(v) {
-        histogram!("nimproxy_request_tools", "model" => ctx.model.clone()).record(n as f64);
+        histogram!("nimproxy_request_tools", "client" => ctx.client.clone()).record(n as f64);
         counter!("nimproxy_tool_choice_total", "mode" => tool_choice_mode(v).to_owned())
             .increment(1);
     }
@@ -243,13 +245,13 @@ fn record_shape(ctx: &Ctx, parsed: Option<&serde_json::Value>, wants_stream: boo
         .and_then(|x| x.as_u64())
         .or_else(|| v.get("max_completion_tokens").and_then(|x| x.as_u64()))
     {
-        histogram!("nimproxy_request_max_tokens").record(mt as f64);
+        histogram!("nimproxy_request_max_tokens", "client" => ctx.client.clone()).record(mt as f64);
     }
     if let Some(t) = v.get("temperature").and_then(|x| x.as_f64()) {
-        histogram!("nimproxy_request_temperature").record(t);
+        histogram!("nimproxy_request_temperature", "client" => ctx.client.clone()).record(t);
     }
     if is_json_mode(v) {
-        counter!("nimproxy_json_mode_total", "model" => ctx.model.clone()).increment(1);
+        counter!("nimproxy_json_mode_total", "client" => ctx.client.clone()).increment(1);
     }
 }
 
