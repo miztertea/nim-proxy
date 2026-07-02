@@ -102,6 +102,23 @@ tr:last-child td { border-bottom: 0; }
 .meter .track { flex: 1; height: 16px; background: var(--meter-track); border-radius: 0 4px 4px 0; overflow: hidden; }
 .meter .fill { display: block; height: 100%; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
 .meter .val { width: 46px; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.modelcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.mcard { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 12px; position: relative; }
+.mcard .rank { position: absolute; top: 12px; right: 14px; color: var(--ink-3); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.mcard .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mcard .logo {
+  width: 36px; height: 36px; border-radius: 9px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 650; font-size: 13px; color: #fff; letter-spacing: 0.3px;
+  background: var(--plane); border: 1px solid var(--border);
+}
+.mcard .logo img { width: 22px; height: 22px; }
+.mcard .name { font-weight: 600; line-height: 1.25; font-size: 13.5px; overflow-wrap: anywhere; }
+.mcard .pub { color: var(--ink-3); font-size: 11.5px; }
+.mcard .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px 10px; margin-top: 12px; }
+.mcard .stat .l { color: var(--ink-3); font-size: 10.5px; }
+.mcard .stat .v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.medal { margin-right: 6px; }
 #tooltip {
   position: fixed; pointer-events: none; z-index: 10; display: none;
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
@@ -155,6 +172,7 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
       <div class="tile"><div class="label">Avg TTFT</div><div class="value" id="m-ttft">–</div></div>
       <div class="tile"><div class="label">Avg speed</div><div class="value" id="m-tps">–</div></div>
     </div>
+    <div class="modelcards" id="modelcards"></div>
     <div class="cards">
       <div class="card wide">
         <h2>Completion tokens per minute, by model</h2>
@@ -204,6 +222,11 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <div class="legend" id="legend-load"></div>
       </div>
       <div class="card">
+        <h2>Queue wait</h2>
+        <div id="chart-qwait"></div>
+        <div class="legend" id="legend-qwait"></div>
+      </div>
+      <div class="card">
         <h2>Activity by hour <button class="toggle" id="heatToggle">table</button></h2>
         <div id="heatmap"></div>
       </div>
@@ -220,6 +243,7 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
       <div class="tile"><div class="label">Aggregate capacity</div><div class="value" id="k-cap">0<span class="unit">rpm</span></div></div>
       <div class="tile"><div class="label">Rate-limit hits (429)</div><div class="value" id="k-429">0</div></div>
       <div class="tile"><div class="label">Other benches</div><div class="value" id="k-5xx">0</div></div>
+      <div class="tile"><div class="label">Conversation stickiness</div><div class="value" id="k-sticky">–</div></div>
     </div>
     <div class="cards">
       <div class="card">
@@ -362,6 +386,7 @@ function lineChart(el, series, unitFmt) {
   const t0 = Math.min(...live.map(s => s.pts[0].t));
   const t1 = Math.max(...live.map(s => s.pts[s.pts.length-1].t));
   let vmax = Math.max(1e-6, ...live.flatMap(s => s.pts.map(p => p.v)));
+  if (vmax <= 1e-6) vmax = 1; // all-zero series: show a 0..1 scale
   if (vmax >= 0.5) { const step = Math.pow(10, Math.floor(Math.log10(vmax))); vmax = Math.ceil(vmax / (step/2)) * (step/2); }
   const X = t => PL + (W-PL-PR) * (t - t0) / Math.max(1, t1 - t0);
   const Y = v => PT + (H-PT-PB) * (1 - v / vmax);
@@ -462,6 +487,51 @@ function heatmap(el, matrix, vmax) {
   el.querySelector('svg').addEventListener('mouseleave', hideTip);
 }
 
+/* ---------- model cards: publisher identity from the model id namespace.
+   Logos come from the LobeHub AI-icons CDN when online; the brand-colored
+   monogram is the offline fallback. ---------- */
+const PUBLISHERS = {
+  'meta': { name: 'Meta', slug: 'meta-color', color: '#0668E1' },
+  'deepseek-ai': { name: 'DeepSeek', slug: 'deepseek-color', color: '#4D6BFE' },
+  'moonshotai': { name: 'Moonshot AI', slug: 'moonshot', color: '#1B1B1F' },
+  'nvidia': { name: 'NVIDIA', slug: 'nvidia-color', color: '#76B900' },
+  'qwen': { name: 'Qwen', slug: 'qwen-color', color: '#615CED' },
+  'mistralai': { name: 'Mistral AI', slug: 'mistral-color', color: '#FA520F' },
+  'google': { name: 'Google', slug: 'gemma-color', color: '#2E96FF' },
+  'microsoft': { name: 'Microsoft', slug: 'microsoft-color', color: '#00A4EF' },
+  'openai': { name: 'OpenAI', slug: 'openai', color: '#10A37F' },
+  'ibm': { name: 'IBM', slug: 'ibm-color', color: '#0F62FE' },
+  'ibm-granite': { name: 'IBM Granite', slug: 'ibm-color', color: '#0F62FE' },
+  'upstage': { name: 'Upstage', slug: 'upstage-color', color: '#805CFB' },
+  'zhipuai': { name: 'Zhipu AI', slug: 'zhipu-color', color: '#3859FF' },
+  'minimaxai': { name: 'MiniMax', slug: 'minimax-color', color: '#F23F5D' },
+  'baichuan-inc': { name: 'Baichuan', slug: 'baichuan-color', color: '#FF6933' },
+  '01-ai': { name: '01.AI', slug: 'yi-color', color: '#003425' },
+  'writer': { name: 'Writer', slug: 'writer', color: '#160E1B' },
+  'snowflake': { name: 'Snowflake', slug: 'snowflake-color', color: '#29B5E8' },
+  'databricks': { name: 'Databricks', slug: 'databricks-color', color: '#FF3621' },
+  'openclaw': { name: 'OpenClaw', slug: 'openclaw', color: '#4A5568' },
+};
+function publisher(model) {
+  const ns = model.includes('/') ? model.split('/')[0] : '';
+  const p = PUBLISHERS[ns.toLowerCase()];
+  if (p) return p;
+  const name = ns || 'unknown';
+  return { name, slug: null, color: '#52514E' };
+}
+function prettyName(model) {
+  const raw = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    .replace(/\bAi\b/g, 'AI').replace(/\bIt\b/g, 'IT');
+}
+function logoHtml(pub) {
+  const initials = pub.name.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/)
+    .map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+  const mono = `this.parentElement.style.background='${pub.color}';this.parentElement.style.border='0';this.parentElement.textContent='${initials}'`;
+  if (!pub.slug) return `<span class="logo" style="background:${pub.color};border:0">${initials}</span>`;
+  return `<span class="logo"><img alt="" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/${pub.slug}.svg" onerror="${mono}"></span>`;
+}
+
 /* ---------- color-follows-entity ---------- */
 const modelSlots = new Map();
 function slotFor(model) {
@@ -529,10 +599,35 @@ function render() {
   lineChart($('chart-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
 
   const okByModel = wgroups('nimproxy_requests_total', 'model', l => l.status === '200');
+  const errByModel = wgroups('nimproxy_requests_total', 'model',
+    l => l.status !== '200' && l.status !== 'disconnect');
   const ttftMS = wgroups('nimproxy_ttft_seconds_sum', 'model'), ttftMC = wgroups('nimproxy_ttft_seconds_count', 'model');
   const tpsMS = wgroups('nimproxy_tokens_per_second_sum', 'model'), tpsMC = wgroups('nimproxy_tokens_per_second_count', 'model');
+  const errPct = m => {
+    const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0);
+    return t ? `${(e / t * 100).toFixed(e ? 1 : 0)}%` : '–';
+  };
+
+  /* ranked model cards */
+  $('modelcards').innerHTML = models.slice(0, 8).map((m, i) => {
+    const pub = publisher(m), c = ctok.get(m) || 0;
+    const statCell = (l, v) => `<span class="stat"><span class="l">${l}</span><br><span class="v">${v}</span></span>`;
+    return `<div class="mcard"><span class="rank">#${i + 1}</span>
+      <div class="brand">${logoHtml(pub)}
+        <div><div class="name">${prettyName(m)}</div><div class="pub">${pub.name}</div></div>
+      </div>
+      <div class="stats">
+        ${statCell('requests', fmt(reqModels.get(m) || 0))}
+        ${statCell('tokens out', fmt(c))}
+        ${statCell('saved', money((ptok.get(m) || 0) / 1e6 * cfg.price_in + c / 1e6 * cfg.price_out))}
+        ${statCell('TTFT', ttftMC.get(m) ? secs(ttftMS.get(m) / ttftMC.get(m)) : '–')}
+        ${statCell('tok/s', tpsMC.get(m) ? fmt(tpsMS.get(m) / tpsMC.get(m)) : '–')}
+        ${statCell('errors', errPct(m))}
+      </div></div>`;
+  }).join('');
+
   $('table-models').innerHTML = !models.length ? '<div class="empty">No traffic yet</div>' :
-    `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">Avg reply</th><th class="num">Saved</th></tr>` +
+    `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">Avg reply</th><th class="num">Errors</th><th class="num">Saved</th></tr>` +
     models.map(m => {
       const c = ctok.get(m)||0, ok = okByModel.get(m)||0;
       return `<tr><td>${modelSlots.has(m) ? `<i class="swatch" style="background:${css(slotFor(m))}"></i>` : ''}${m}</td>` +
@@ -540,6 +635,7 @@ function render() {
         `<td class="num">${ttftMC.get(m) ? secs(ttftMS.get(m)/ttftMC.get(m)) : '–'}</td>` +
         `<td class="num">${tpsMC.get(m) ? fmt(tpsMS.get(m)/tpsMC.get(m)) : '–'}</td>` +
         `<td class="num">${ok ? fmt(c/ok) + ' tok' : '–'}</td>` +
+        `<td class="num">${errPct(m)}</td>` +
         `<td class="num">${money((ptok.get(m)||0)/1e6*cfg.price_in + c/1e6*cfg.price_out)}</td></tr>`;
     }).join('') + '</table>';
 
@@ -582,6 +678,18 @@ function render() {
   lineChart($('chart-load'), loadSeries, fmt);
   legend($('legend-load'), loadSeries);
 
+  /* queue wait quantiles, same machinery as TTFT */
+  const qwAt = s => buckets(s.rows, 'nimproxy_queue_wait_seconds');
+  const qwSeries = [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
+    name, color,
+    pts: samples.slice(1).map((s, i) => {
+      const d = deltaBuckets(qwAt(s), qwAt(samples[i]));
+      return { t: s.t, v: quantile(d, q) };
+    }).filter(p => isFinite(p.v)),
+  }));
+  lineChart($('chart-qwait'), qwSeries, secs);
+  legend($('legend-qwait'), qwSeries);
+
   /* heatmap: requests bucketed by local weekday x hour */
   const matrix = DAYS.map(() => Array(24).fill(0));
   let hmax = 0;
@@ -598,10 +706,11 @@ function render() {
   const cP = wgroups('nimproxy_prompt_tokens_total', 'client');
   const cC = wgroups('nimproxy_completion_tokens_total', 'client');
   const clients = [...cReq.keys()].sort((a,b) => (cC.get(b)||0) - (cC.get(a)||0));
+  const MEDALS = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
   $('table-clients').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
     `<table><tr><th>Client</th><th class="num">Requests</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Saved</th></tr>` +
-    clients.map(c =>
-      `<tr><td>${c}</td><td class="num">${fmt(cReq.get(c)||0)}</td><td class="num">${fmt(cP.get(c)||0)}</td>` +
+    clients.map((c, i) =>
+      `<tr><td>${MEDALS[i] ? `<span class="medal">${MEDALS[i]}</span>` : ''}${c}</td><td class="num">${fmt(cReq.get(c)||0)}</td><td class="num">${fmt(cP.get(c)||0)}</td>` +
       `<td class="num">${fmt(cC.get(c)||0)}</td>` +
       `<td class="num">${money((cP.get(c)||0)/1e6*cfg.price_in + (cC.get(c)||0)/1e6*cfg.price_out)}</td></tr>`
     ).join('') + '</table>';
@@ -611,6 +720,9 @@ function render() {
   $('k-cap').innerHTML = fmt(capacity) + '<span class="unit">rpm</span>';
   $('k-429').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429')));
   $('k-5xx').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')));
+  const sticky = windowed(s => sum(s.rows, 'nimproxy_affinity_total', l => l.result === 'sticky'));
+  const spill = windowed(s => sum(s.rows, 'nimproxy_affinity_total', l => l.result === 'spill'));
+  $('k-sticky').textContent = sticky + spill ? Math.round(sticky / (sticky + spill) * 100) + '%' : '–';
 
   const cutoff = last.t - 60000;
   const base60 = samples.find(s => s.t >= cutoff) || samples[0];

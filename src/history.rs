@@ -42,7 +42,10 @@ impl History {
             match fs::OpenOptions::new().create(true).append(true).open(&path) {
                 Ok(_) => Some(path),
                 Err(e) => {
-                    tracing::warn!("history persistence disabled ({}: {e}); keeping in-memory only", path.display());
+                    tracing::warn!(
+                        "history persistence disabled ({}: {e}); keeping in-memory only",
+                        path.display()
+                    );
                     None
                 }
             }
@@ -51,7 +54,11 @@ impl History {
         tracing::info!(
             "history           {} snapshots loaded, retention {}",
             points.len(),
-            if days == 0 { "infinite".to_owned() } else { format!("{days} days") }
+            if days == 0 {
+                "infinite".to_owned()
+            } else {
+                format!("{days} days")
+            }
         );
         Self {
             points: Mutex::new(points),

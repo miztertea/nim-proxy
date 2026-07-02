@@ -6,10 +6,17 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use metrics::gauge;
+use metrics::{counter, gauge};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::pool::{Pool, Reservation};
+
+/// Minimum gap between consecutive slot grants. Caps burst *concurrency*
+/// (a cold pool can grant lanes*rpm slots instantly — hundreds of
+/// simultaneous connects look like a stampede to the upstream and skew
+/// arrival timing) without capping throughput: 25ms = 2,400 grants/min,
+/// far beyond any realistic key pool's aggregate RPM.
+const GRANT_GAP: Duration = Duration::from_millis(25);
 
 pub struct Dispatcher {
     queue: mpsc::UnboundedSender<Waiter>,
@@ -56,9 +63,22 @@ async fn run(pool: Arc<Pool>, mut queue: mpsc::UnboundedReceiver<Waiter>) {
                 break; // client hung up while queued
             }
             match pool.reserve(waiter.prefer) {
-                Reservation::Ready { lane, key, stamp } => {
+                Reservation::Ready {
+                    lane,
+                    key,
+                    stamp,
+                    sticky,
+                } => {
+                    let affinity = match waiter.prefer {
+                        None => "none",
+                        Some(_) if sticky => "sticky",
+                        Some(_) => "spill",
+                    };
+                    counter!("nimproxy_affinity_total", "result" => affinity).increment(1);
                     if waiter.reply.send((lane, key)).is_err() {
                         pool.release(lane, stamp);
+                    } else {
+                        tokio::time::sleep(GRANT_GAP).await;
                     }
                     break;
                 }

@@ -22,6 +22,10 @@ pub struct Config {
     pub max_wait: Duration,
     pub heartbeat: Duration,
     pub models_ttl: Duration,
+    /// Abort a stream when the upstream sends nothing for this long (0 = off).
+    pub stream_idle: Duration,
+    /// Never modify request bodies (disables stream_options usage injection).
+    pub strict_passthrough: bool,
     /// Reference $/1M token prices for the dashboard's "dollars saved" figure.
     pub price_in: f64,
     pub price_out: f64,
@@ -35,6 +39,8 @@ pub struct AppState {
     pub models_cache: Mutex<Option<(Instant, Bytes)>>,
     /// token -> client name. None = local mode, no client auth.
     pub clients: Option<HashMap<String, String>>,
+    /// Models that rejected stream_options injection; never inject for them again.
+    pub no_inject: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -112,11 +118,33 @@ async fn main() {
         base_url: env_or("NIM_BASE_URL", "https://integrate.api.nvidia.com")
             .trim_end_matches('/')
             .to_owned(),
-        max_wait: Duration::from_secs(env_or("MAX_WAIT_SECS", "900").parse().expect("MAX_WAIT_SECS")),
-        heartbeat: Duration::from_secs(env_or("HEARTBEAT_SECS", "10").parse().expect("HEARTBEAT_SECS")),
-        models_ttl: Duration::from_secs(env_or("MODELS_TTL_SECS", "600").parse().expect("MODELS_TTL_SECS")),
+        max_wait: Duration::from_secs(
+            env_or("MAX_WAIT_SECS", "900")
+                .parse()
+                .expect("MAX_WAIT_SECS"),
+        ),
+        heartbeat: Duration::from_secs(
+            env_or("HEARTBEAT_SECS", "10")
+                .parse()
+                .expect("HEARTBEAT_SECS"),
+        ),
+        models_ttl: Duration::from_secs(
+            env_or("MODELS_TTL_SECS", "600")
+                .parse()
+                .expect("MODELS_TTL_SECS"),
+        ),
+        stream_idle: Duration::from_secs(
+            env_or("STREAM_IDLE_SECS", "300")
+                .parse()
+                .expect("STREAM_IDLE_SECS"),
+        ),
+        strict_passthrough: env_or("STRICT_PASSTHROUGH", "false")
+            .parse()
+            .expect("STRICT_PASSTHROUGH"),
         price_in: env_or("REF_PRICE_IN", "0.5").parse().expect("REF_PRICE_IN"),
-        price_out: env_or("REF_PRICE_OUT", "2.0").parse().expect("REF_PRICE_OUT"),
+        price_out: env_or("REF_PRICE_OUT", "2.0")
+            .parse()
+            .expect("REF_PRICE_OUT"),
     };
     let port: u16 = env_or("PORT", "8000").parse().expect("PORT");
 
@@ -134,8 +162,11 @@ async fn main() {
             None => "off (local mode)".to_owned(),
         }
     );
-    tracing::info!("patience          waits up to {}s per request, heartbeat every {}s",
-        cfg.max_wait.as_secs(), cfg.heartbeat.as_secs());
+    tracing::info!(
+        "patience          waits up to {}s per request, heartbeat every {}s",
+        cfg.max_wait.as_secs(),
+        cfg.heartbeat.as_secs()
+    );
 
     let prometheus = PrometheusBuilder::new()
         .set_buckets_for_metric(
@@ -172,6 +203,7 @@ async fn main() {
             .build()
             .expect("http client"),
         models_cache: Mutex::new(None),
+        no_inject: std::sync::Mutex::new(std::collections::HashSet::new()),
         cfg,
     });
 
@@ -228,25 +260,31 @@ async fn main() {
         .route(
             "/dash/config.json",
             get(move || async move {
-                ([(axum::http::header::CONTENT_TYPE, "application/json")], dash_config)
+                (
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    dash_config,
+                )
             }),
         )
         .route(
             "/api/history",
-            get(move |q: axum::extract::Query<std::collections::HashMap<String, String>>| {
-                let hist = hist.clone();
-                async move {
-                    let now = unix_now();
-                    let get = |k: &str, d: u64| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
-                    let (from, to) = (get("from", now.saturating_sub(86400)), get("to", now));
-                    let body: Vec<serde_json::Value> = hist
-                        .range(from, to, 288)
-                        .into_iter()
-                        .map(|(t, m)| serde_json::json!({"t": t, "m": m}))
-                        .collect();
-                    axum::Json(body)
-                }
-            }),
+            get(
+                move |q: axum::extract::Query<std::collections::HashMap<String, String>>| {
+                    let hist = hist.clone();
+                    async move {
+                        let now = unix_now();
+                        let get =
+                            |k: &str, d: u64| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
+                        let (from, to) = (get("from", now.saturating_sub(86400)), get("to", now));
+                        let body: Vec<serde_json::Value> = hist
+                            .range(from, to, 288)
+                            .into_iter()
+                            .map(|(t, m)| serde_json::json!({"t": t, "m": m}))
+                            .collect();
+                        axum::Json(body)
+                    }
+                },
+            ),
         )
         .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(move || async move { prometheus.render() }))
@@ -260,7 +298,23 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+            // Docker sends SIGTERM on stop; terminals send SIGINT.
+            let ctrl_c = tokio::signal::ctrl_c();
+            #[cfg(unix)]
+            {
+                let mut term =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("SIGTERM handler");
+                tokio::select! {
+                    _ = ctrl_c => {}
+                    _ = term.recv() => {}
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = ctrl_c.await;
+            }
+            tracing::info!("shutting down");
         })
         .await
         .expect("server");

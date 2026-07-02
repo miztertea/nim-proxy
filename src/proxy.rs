@@ -245,8 +245,31 @@ pub async fn handle(
         .unwrap_or(false);
     let prefer = parsed.as_ref().and_then(|v| affinity(v, state.pool.len()));
 
+    // Usage injection: streamed responses only report exact token usage when
+    // asked via stream_options, so ask on the client's behalf. `fallback`
+    // keeps the untouched body for a one-shot retry if the model rejects it.
+    let mut body = body;
+    let mut fallback = None;
+    if wants_stream && !state.cfg.strict_passthrough && uri.path() == "/v1/chat/completions" {
+        let injectable = parsed
+            .as_ref()
+            .is_some_and(|v| v.is_object() && v.get("stream_options").is_none())
+            && !state.no_inject.lock().unwrap().contains(&ctx.model);
+        if injectable {
+            let mut v = parsed.clone().unwrap();
+            v["stream_options"] = serde_json::json!({ "include_usage": true });
+            fallback = Some(std::mem::replace(
+                &mut body,
+                Bytes::from(serde_json::to_vec(&v).expect("serialize injected body")),
+            ));
+        }
+    }
+
     if wants_stream {
-        streaming(state, ctx, method, path_query, headers, body, prefer).await
+        streaming(
+            state, ctx, method, path_query, headers, body, prefer, fallback,
+        )
+        .await
     } else {
         buffered(state, ctx, method, path_query, headers, body, prefer).await
     }
@@ -260,7 +283,10 @@ pub async fn handle(
 fn affinity(body: &serde_json::Value, lanes: usize) -> Option<usize> {
     let messages = body.get("messages")?.as_array()?;
     let mut h = DefaultHasher::new();
-    body.get("model").and_then(|m| m.as_str()).unwrap_or("").hash(&mut h);
+    body.get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .hash(&mut h);
     for msg in messages.iter().take(2) {
         msg.to_string().hash(&mut h);
     }
@@ -313,14 +339,16 @@ async fn buffered(
 /// Streaming: commit to a 200 SSE response immediately and emit `: heartbeat`
 /// comment lines (ignored by every OpenAI SSE client) while we wait for a
 /// slot or ride out 429/5xx, then pipe the upstream stream through.
+#[allow(clippy::too_many_arguments)]
 async fn streaming(
     state: Arc<AppState>,
     ctx: Ctx,
     method: Method,
     path_query: String,
     headers: HeaderMap,
-    body: Bytes,
+    mut body: Bytes,
     prefer: Option<usize>,
+    mut fallback: Option<Bytes>,
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
@@ -346,7 +374,9 @@ async fn streaming(
             let Some((lane, key)) = slot else {
                 record_request(&ctx, "504");
                 let _ = tx
-                    .send(Ok(sse_error("proxy timed out waiting for an upstream slot")))
+                    .send(Ok(sse_error(
+                        "proxy timed out waiting for an upstream slot",
+                    )))
                     .await;
                 return;
             };
@@ -364,10 +394,21 @@ async fn streaming(
                 }
             };
 
+            // A 400 right after we injected stream_options usually means this
+            // model rejects the field: remember that and retry untouched.
+            if resp.status() == reqwest::StatusCode::BAD_REQUEST && fallback.is_some() {
+                tracing::info!(model = %ctx.model, "model rejected stream_options; retrying without injection");
+                state.no_inject.lock().unwrap().insert(ctx.model.clone());
+                body = fallback.take().unwrap();
+                continue;
+            }
+
             if retryable(resp.status()) {
                 if Instant::now() >= deadline {
                     record_request(&ctx, "504");
-                    let _ = tx.send(Ok(sse_error("upstream unavailable, retries exhausted"))).await;
+                    let _ = tx
+                        .send(Ok(sse_error("upstream unavailable, retries exhausted")))
+                        .await;
                     return;
                 }
                 let backoff = backoff_for(&resp);
@@ -396,7 +437,22 @@ async fn streaming(
             let mut scan = SseScan::default();
             let mut first_chunk: Option<Instant> = None;
             let mut chunks = resp.bytes_stream();
-            while let Some(chunk) = chunks.next().await {
+            loop {
+                // A stalled upstream would otherwise hold the client forever.
+                let next = if state.cfg.stream_idle.is_zero() {
+                    chunks.next().await
+                } else {
+                    match tokio::time::timeout(state.cfg.stream_idle, chunks.next()).await {
+                        Ok(n) => n,
+                        Err(_) => {
+                            tracing::warn!(model = %ctx.model, idle = ?state.cfg.stream_idle, "upstream stream stalled");
+                            record_request(&ctx, "stall");
+                            let _ = tx.send(Ok(sse_error("upstream stream stalled"))).await;
+                            return;
+                        }
+                    }
+                };
+                let Some(chunk) = next else { break };
                 match chunk {
                     Ok(b) => {
                         if first_chunk.is_none() {
@@ -421,7 +477,11 @@ async fn streaming(
 
             // Token accounting: exact when the upstream reported usage,
             // otherwise estimate ~1 token per SSE event.
-            let source = if scan.completion.is_some() { "usage" } else { "estimate" };
+            let source = if scan.completion.is_some() {
+                "usage"
+            } else {
+                "estimate"
+            };
             let completion = scan.completion.or(Some(scan.events));
             record_tokens(&ctx, scan.prompt, completion, source);
             if let (Some(first), Some(c)) = (first_chunk, completion) {
@@ -444,14 +504,14 @@ async fn streaming(
         .unwrap()
 }
 
-/// /v1/models, cached so harness catalog polls cost zero rate budget.
+/// /v1/models, cached so harness catalog polls cost zero rate budget. The
+/// lock is held across the refresh so concurrent misses make one upstream
+/// call (followers see the fresh cache when they get the lock).
 async fn models(state: Arc<AppState>) -> Response {
-    {
-        let cache = state.models_cache.lock().await;
-        if let Some((at, body)) = cache.as_ref() {
-            if at.elapsed() < state.cfg.models_ttl {
-                return json_response(StatusCode::OK, body.clone());
-            }
+    let mut cache = state.models_cache.lock().await;
+    if let Some((at, body)) = cache.as_ref() {
+        if at.elapsed() < state.cfg.models_ttl {
+            return json_response(StatusCode::OK, body.clone());
         }
     }
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -462,7 +522,7 @@ async fn models(state: Arc<AppState>) -> Response {
     match state.http.get(url).bearer_auth(&key).send().await {
         Ok(resp) if resp.status().is_success() => {
             let body = resp.bytes().await.unwrap_or_default();
-            *state.models_cache.lock().await = Some((Instant::now(), body.clone()));
+            *cache = Some((Instant::now(), body.clone()));
             json_response(StatusCode::OK, body)
         }
         Ok(resp) => {
