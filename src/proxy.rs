@@ -3,6 +3,7 @@
 //! and SSE comment heartbeats so agent harnesses (OpenCode etc.) keep the
 //! connection open instead of aborting while we wait for a slot.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -39,9 +40,10 @@ fn backoff_for(resp: &reqwest::Response) -> Duration {
 async fn reserve_slot(
     state: &AppState,
     deadline: Instant,
+    prefer: Option<usize>,
     mut on_wait: impl FnMut() -> bool,
 ) -> Option<(usize, String)> {
-    let mut rx = state.dispatch.acquire(deadline);
+    let mut rx = state.dispatch.acquire(deadline, prefer);
     loop {
         tokio::select! {
             slot = &mut rx => return slot.ok(),
@@ -97,16 +99,33 @@ pub async fn handle(
         return models(state).await;
     }
 
-    let wants_stream = serde_json::from_slice::<serde_json::Value>(&body)
-        .ok()
+    let parsed = serde_json::from_slice::<serde_json::Value>(&body).ok();
+    let wants_stream = parsed
+        .as_ref()
         .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
         .unwrap_or(false);
+    let prefer = parsed.as_ref().and_then(|v| affinity(v, state.pool.len()));
 
     if wants_stream {
-        streaming(state, method, path_query, headers, body).await
+        streaming(state, method, path_query, headers, body, prefer).await
     } else {
-        buffered(state, method, path_query, headers, body).await
+        buffered(state, method, path_query, headers, body, prefer).await
     }
+}
+
+/// Sticky-lane hint: hash the conversation's identity (model, system prompt,
+/// and first user message — stable across every turn of an agent session) so
+/// a conversation keeps hitting the same key while it has capacity, keeping
+/// any upstream prefix cache warm. Purely an optimization; correctness never
+/// depends on which key serves a request.
+fn affinity(body: &serde_json::Value, lanes: usize) -> Option<usize> {
+    let messages = body.get("messages")?.as_array()?;
+    let mut h = DefaultHasher::new();
+    body.get("model").and_then(|m| m.as_str()).unwrap_or("").hash(&mut h);
+    for msg in messages.iter().take(2) {
+        msg.to_string().hash(&mut h);
+    }
+    Some((h.finish() % lanes as u64) as usize)
 }
 
 /// Non-streaming: pace, retry, and return the upstream response verbatim.
@@ -116,10 +135,11 @@ async fn buffered(
     path_query: String,
     headers: HeaderMap,
     body: Bytes,
+    prefer: Option<usize>,
 ) -> Response {
     let deadline = Instant::now() + state.cfg.max_wait;
     loop {
-        let Some((lane, key)) = reserve_slot(&state, deadline, || true).await else {
+        let Some((lane, key)) = reserve_slot(&state, deadline, prefer, || true).await else {
             return gateway_timeout(&state);
         };
         let resp = match upstream_request(&state, &method, &path_query, &headers, &key, &body)
@@ -152,6 +172,7 @@ async fn streaming(
     path_query: String,
     headers: HeaderMap,
     body: Bytes,
+    prefer: Option<usize>,
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
@@ -166,7 +187,7 @@ async fn streaming(
         let deadline = Instant::now() + state.cfg.max_wait;
         loop {
             // Queue for a slot, heartbeating so the harness doesn't hang up.
-            let slot = reserve_slot(&state, deadline, || {
+            let slot = reserve_slot(&state, deadline, prefer, || {
                 tx.try_send(Ok(Bytes::from(": heartbeat\n\n"))).is_ok()
             })
             .await;
@@ -253,7 +274,7 @@ async fn models(state: Arc<AppState>) -> Response {
         }
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    let Some((lane, key)) = reserve_slot(&state, deadline, || true).await else {
+    let Some((lane, key)) = reserve_slot(&state, deadline, None, || true).await else {
         return gateway_timeout(&state);
     };
     let url = format!("{}/v1/models", state.cfg.base_url);

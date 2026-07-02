@@ -17,6 +17,7 @@ pub struct Dispatcher {
 struct Waiter {
     reply: oneshot::Sender<(usize, String)>,
     deadline: Instant,
+    prefer: Option<usize>,
 }
 
 impl Dispatcher {
@@ -30,9 +31,17 @@ impl Dispatcher {
     /// or errors if no slot can open before `deadline`. Dropping the receiver
     /// leaves the queue; a slot granted to an abandoned waiter is returned to
     /// the pool.
-    pub fn acquire(&self, deadline: Instant) -> oneshot::Receiver<(usize, String)> {
+    pub fn acquire(
+        &self,
+        deadline: Instant,
+        prefer: Option<usize>,
+    ) -> oneshot::Receiver<(usize, String)> {
         let (reply, rx) = oneshot::channel();
-        let _ = self.queue.send(Waiter { reply, deadline });
+        let _ = self.queue.send(Waiter {
+            reply,
+            deadline,
+            prefer,
+        });
         rx
     }
 }
@@ -43,7 +52,7 @@ async fn run(pool: Arc<Pool>, mut queue: mpsc::UnboundedReceiver<Waiter>) {
             if waiter.reply.is_closed() {
                 break; // client hung up while queued
             }
-            match pool.reserve() {
+            match pool.reserve(waiter.prefer) {
                 Reservation::Ready { lane, key, stamp } => {
                     if waiter.reply.send((lane, key)).is_err() {
                         pool.release(lane, stamp);
@@ -77,8 +86,8 @@ mod tests {
     async fn grants_slots_in_order_while_capacity_remains() {
         let d = Dispatcher::new(pool(2, 1));
         let deadline = Instant::now() + Duration::from_secs(5);
-        let a = d.acquire(deadline).await.expect("first slot");
-        let b = d.acquire(deadline).await.expect("second slot");
+        let a = d.acquire(deadline, None).await.expect("first slot");
+        let b = d.acquire(deadline, None).await.expect("second slot");
         assert_eq!(a.0, 0);
         assert_eq!(b.0, 1);
     }
@@ -87,8 +96,8 @@ mod tests {
     async fn fails_fast_when_no_slot_can_open_before_deadline() {
         let d = Dispatcher::new(pool(1, 1));
         let deadline = Instant::now() + Duration::from_millis(200);
-        d.acquire(deadline).await.expect("first slot");
+        d.acquire(deadline, None).await.expect("first slot");
         // Lane is at capacity for ~60s, far past the deadline.
-        assert!(d.acquire(deadline).await.is_err());
+        assert!(d.acquire(deadline, None).await.is_err());
     }
 }

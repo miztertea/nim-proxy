@@ -52,13 +52,44 @@ impl Pool {
         self.lanes.len()
     }
 
-    /// Try to reserve a request slot on the lane that is available soonest.
-    /// Reserving records the send timestamp immediately, so concurrent
-    /// callers can't oversubscribe a lane.
-    pub fn reserve(&self) -> Reservation {
-        let now = Instant::now();
-        let mut best_wait = Duration::MAX;
+    /// Take a slot on lane `i` if it has capacity right now. Reserving
+    /// records the send timestamp immediately, so concurrent callers can't
+    /// oversubscribe a lane.
+    fn try_take(&self, i: usize, now: Instant) -> Option<Reservation> {
+        let lane = &self.lanes[i];
+        if *lane.cooldown_until.lock().unwrap() > now {
+            return None;
+        }
+        let mut sent = lane.sent.lock().unwrap();
+        while sent.front().is_some_and(|t| now - *t >= WINDOW) {
+            sent.pop_front();
+        }
+        if sent.len() < self.rpm {
+            sent.push_back(now);
+            Some(Reservation::Ready {
+                lane: i,
+                key: lane.key.clone(),
+                stamp: now,
+            })
+        } else {
+            None
+        }
+    }
 
+    /// Try to reserve a request slot. `prefer` pins a conversation to one
+    /// lane while it has capacity (keeping any upstream prefix cache warm on
+    /// a single key); otherwise the least-loaded ready lane wins, spreading
+    /// concurrent in-flight requests evenly across keys.
+    pub fn reserve(&self, prefer: Option<usize>) -> Reservation {
+        let now = Instant::now();
+        if let Some(p) = prefer {
+            if let Some(r) = self.try_take(p, now) {
+                return r;
+            }
+        }
+
+        let mut ready: Vec<(usize, usize)> = Vec::new(); // (in-window load, lane)
+        let mut best_wait = WINDOW;
         for (i, lane) in self.lanes.iter().enumerate() {
             let cooldown = *lane.cooldown_until.lock().unwrap();
             let mut sent = lane.sent.lock().unwrap();
@@ -72,16 +103,18 @@ impl Pool {
             };
             let ready_at = window_ready.max(cooldown);
             if ready_at <= now {
-                sent.push_back(now);
-                return Reservation::Ready {
-                    lane: i,
-                    key: lane.key.clone(),
-                    stamp: now,
-                };
+                ready.push((sent.len(), i));
+            } else {
+                best_wait = best_wait.min(ready_at - now);
             }
-            best_wait = best_wait.min(ready_at - now);
         }
-        Reservation::Wait(best_wait.min(WINDOW))
+        ready.sort_unstable();
+        for (_, i) in ready {
+            if let Some(r) = self.try_take(i, now) {
+                return r;
+            }
+        }
+        Reservation::Wait(best_wait)
     }
 
     /// Return a reserved slot that was never spent on an upstream request
@@ -111,34 +144,60 @@ mod tests {
         (0..n).map(|i| format!("key{i}")).collect()
     }
 
+    fn take(pool: &Pool, prefer: Option<usize>) -> usize {
+        match pool.reserve(prefer) {
+            Reservation::Ready { lane, .. } => lane,
+            Reservation::Wait(_) => panic!("expected Ready"),
+        }
+    }
+
     #[test]
     fn spreads_load_across_lanes_then_waits() {
         let pool = Pool::new(keys(2), 1);
-        assert!(matches!(pool.reserve(), Reservation::Ready { lane: 0, .. }));
-        assert!(matches!(pool.reserve(), Reservation::Ready { lane: 1, .. }));
+        assert_eq!(take(&pool, None), 0);
+        assert_eq!(take(&pool, None), 1);
         // Both lanes at their 1-per-minute cap: caller must wait ~60s.
-        match pool.reserve() {
+        match pool.reserve(None) {
             Reservation::Wait(w) => assert!(w > Duration::from_secs(55) && w <= WINDOW),
             _ => panic!("expected Wait"),
         }
     }
 
     #[test]
+    fn burst_lands_on_least_loaded_lane() {
+        let pool = Pool::new(keys(3), 10);
+        let mut per_lane = [0usize; 3];
+        for _ in 0..9 {
+            per_lane[take(&pool, None)] += 1;
+        }
+        assert_eq!(per_lane, [3, 3, 3]);
+    }
+
+    #[test]
+    fn sticky_lane_wins_until_full_then_spills_over() {
+        let pool = Pool::new(keys(2), 2);
+        assert_eq!(take(&pool, Some(1)), 1);
+        assert_eq!(take(&pool, Some(1)), 1);
+        // Preferred lane is at capacity: spill to the other lane.
+        assert_eq!(take(&pool, Some(1)), 0);
+    }
+
+    #[test]
     fn released_slot_becomes_available_again() {
         let pool = Pool::new(keys(1), 1);
-        let Reservation::Ready { lane, stamp, .. } = pool.reserve() else {
+        let Reservation::Ready { lane, stamp, .. } = pool.reserve(None) else {
             panic!("expected Ready");
         };
-        assert!(matches!(pool.reserve(), Reservation::Wait(_)));
+        assert!(matches!(pool.reserve(None), Reservation::Wait(_)));
         pool.release(lane, stamp);
-        assert!(matches!(pool.reserve(), Reservation::Ready { .. }));
+        assert!(matches!(pool.reserve(None), Reservation::Ready { .. }));
     }
 
     #[test]
     fn penalized_lane_is_skipped() {
         let pool = Pool::new(keys(2), 10);
         pool.penalize(0, Duration::from_secs(30));
-        match pool.reserve() {
+        match pool.reserve(None) {
             Reservation::Ready { lane, key, .. } => {
                 assert_eq!(lane, 1);
                 assert_eq!(key, "key1");
@@ -152,7 +211,7 @@ mod tests {
         let pool = Pool::new(keys(2), 10);
         pool.penalize(0, Duration::from_secs(30));
         pool.penalize(1, Duration::from_secs(5));
-        match pool.reserve() {
+        match pool.reserve(None) {
             Reservation::Wait(w) => assert!(w <= Duration::from_secs(5)),
             _ => panic!("expected Wait"),
         }
