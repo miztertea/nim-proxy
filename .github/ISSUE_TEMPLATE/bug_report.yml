@@ -1,0 +1,87 @@
+name: Bug report
+description: Something in nim-proxy isn't working as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please do **not** report security
+        vulnerabilities here — see [SECURITY.md](../blob/main/SECURITY.md) for
+        private reporting.
+
+        Never paste real API keys, `ADMIN_PASSWORD`, or session cookies into
+        this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you observe, and what did you expect instead?
+      placeholder: The harness aborted with a 429 even though the proxy was running...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence — a curl one-liner, config, or load-harness invocation is ideal.
+      placeholder: |
+        1. Run with `NIM_API_KEYS=... INSECURE_NO_AUTH=true cargo run --release`
+        2. curl http://localhost:8000/v1/chat/completions -d '...'
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: auth-mode
+    attributes:
+      label: Auth mode
+      description: How was the proxy running?
+      options:
+        - Open mode (INSECURE_NO_AUTH=true)
+        - Secure mode (PROXY_API_KEYS + ADMIN_PASSWORD)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: run-method
+    attributes:
+      label: How are you running it?
+      options:
+        - Docker / docker compose
+        - Cargo (cargo run / built binary)
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `nim-proxy --version`, the image tag, or the git commit.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client / harness
+      description: What is pointed at the proxy (OpenCode, Codex, n8n, curl, ...) and which model id?
+      placeholder: "OpenCode, moonshotai/kimi-k2-instruct"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Proxy access/startup logs or client output. **Redact secrets.** This is rendered as code, no backticks needed.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I removed any API keys, passwords, or session cookies from this report.
+          required: true

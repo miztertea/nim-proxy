@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an improvement to nim-proxy
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! nim-proxy is deliberately small and focused —
+        keeping an agent harness within NIM's per-key rate limit. Proposals that
+        sharpen that job (or make it safer/faster/easier to run) fit best.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or pain point, not just the solution.
+      placeholder: When I run N harnesses against K keys, I can't tell whether...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like nim-proxy to do? A new env var, metric, dashboard view, endpoint behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed, or existing workarounds.
+    validations:
+      required: false
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Fit
+      options:
+        - label: This keeps the proxy focused on its rate-limit-aware job (not a general-purpose gateway).
+          required: false
+        - label: I searched existing issues and this isn't already proposed.
+          required: true
