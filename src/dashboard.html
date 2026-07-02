@@ -469,7 +469,7 @@ const deltaBuckets = (cur, prev) => cur.map((b, i) => ({ le: b.le, count: b.coun
 /* ---------- state: live ring or fetched range, same shape ---------- */
 const POLL_MS = 3000, KEEP = 400;
 let samples = [];              // [{t(ms), rows}]
-let mode = { kind: 'live', paused: false, from: 0, to: 0 };
+let mode = { kind: 'live', paused: false };
 let cfg = { lanes: 0, rpm: 40, price_in: 0.5, price_out: 2.0, started: Date.now()/1000, version: '' };
 let heatAsTable = false;
 
@@ -719,15 +719,29 @@ function hueFor(name) {
 /* Resolved color for an entity: a reserved slot if it has one, else a hue. */
 const colorFor = model => { const s = slotFor(model); return s ? css(s) : hueFor(model); };
 
+/* quantile median/p95 series from windowed bucket deltas over `samples`;
+   `filter` narrows the source buckets (e.g. source="usage"). */
+const quantSeries = (metric, filter) => [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
+  name, color,
+  pts: samples.slice(1).map((s, i) => {
+    const bA = s2 => buckets(s2.rows, metric, filter);
+    return { t: s.t, v: quantile(deltaBuckets(bA(s), bA(samples[i])), q) };
+  }).filter(p => isFinite(p.v)),
+}));
+
+/* one metric-table row: label, right-aligned value, optional warn coloring */
+const metricRow = (l, v, warn) => `<tr><td>${l}</td><td class="num"${warn ? ' style="color:var(--critical)"' : ''}>${v}</td></tr>`;
+
 /* ---------- render ---------- */
+/* Compute every value that crosses tab boundaries once into `c`, then let each
+   per-tab function read what it needs and own its own DOM. Tabs render grouped
+   rather than interleaved, but every element is still written the same value. */
 function render() {
   if (!samples.length) return;
   const last = samples[samples.length-1], rows = last.rows;
   const windowLabel = mode.kind === 'live' ? '' : ' in range';
-  $('savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
-  $('reqsLabel').textContent = `Requests${windowLabel}`;
 
-  /* ----- models ----- */
+  /* ----- shared per-model aggregates ----- */
   const ptok = wgroups('nimproxy_prompt_tokens_total', 'model');
   const ctok = wgroups('nimproxy_completion_tokens_total', 'model');
   const reqModels = wgroups('nimproxy_requests_total', 'model', l => l.path === '/v1/chat/completions');
@@ -739,13 +753,101 @@ function render() {
     allP += p; allC += c;
     saved += p/1e6*cfg.price_in + c/1e6*cfg.price_out;
   }
+  const wsum = name => windowed(s => sum(s.rows, name));
+  const ttftS = wsum('nimproxy_ttft_seconds_sum'), ttftN = wsum('nimproxy_ttft_seconds_count');
+  const tpsS = wsum('nimproxy_tokens_per_second_sum'), tpsN = wsum('nimproxy_tokens_per_second_count');
+  const okByModel = wgroups('nimproxy_requests_total', 'model', l => l.status === '200');
+  const errByModel = wgroups('nimproxy_requests_total', 'model',
+    l => l.status !== '200' && l.status !== 'disconnect');
+  const ttftMS = wgroups('nimproxy_ttft_seconds_sum', 'model'), ttftMC = wgroups('nimproxy_ttft_seconds_count', 'model');
+  const tpsMS = wgroups('nimproxy_tokens_per_second_sum', 'model'), tpsMC = wgroups('nimproxy_tokens_per_second_count', 'model');
+  const errPct = m => {
+    const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0);
+    return t ? `${(e / t * 100).toFixed(e ? 1 : 0)}%` : '–';
+  };
+  // Quality maps shared by the model table, finish-reason panel, and Compare.
+  const tpotMS = wgroups('nimproxy_tpot_seconds_sum', 'model'), tpotMC = wgroups('nimproxy_tpot_seconds_count', 'model');
+  const finTotal = wgroups('nimproxy_finish_reason_total', 'model');
+  const finLen = wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === 'length');
+  const reasoningByModel = wgroups('nimproxy_reasoning_tokens_total', 'model');
+  const tpotAvg = m => tpotMC.get(m) ? tpotMS.get(m) / tpotMC.get(m) : NaN;
+  const truncPct = m => finTotal.get(m) ? (finLen.get(m) || 0) / finTotal.get(m) * 100 : NaN;
+  const reasonPct = m => ctok.get(m) ? (reasoningByModel.get(m) || 0) / ctok.get(m) * 100 : NaN;
+  const pct = v => isFinite(v) ? v.toFixed(v && v < 10 ? 1 : 0) + '%' : '–';
+
+  /* cumulative dollars within the view */
+  const base = samples[0];
+  const savedAt = s => {
+    let v = 0;
+    v += (sum(s.rows, 'nimproxy_prompt_tokens_total') - (mode.kind === 'live' ? 0 : sum(base.rows, 'nimproxy_prompt_tokens_total'))) / 1e6 * cfg.price_in;
+    v += (sum(s.rows, 'nimproxy_completion_tokens_total') - (mode.kind === 'live' ? 0 : sum(base.rows, 'nimproxy_completion_tokens_total'))) / 1e6 * cfg.price_out;
+    return Math.max(0, v);
+  };
+
+  /* ----- shared proxy / capacity aggregates ----- */
+  const reqPts = rateSeries(s => sum(s.rows, 'nimproxy_requests_total'));
+  // Trailing-60s average in live mode so the gauge doesn't jump on 3s bursts.
+  const recent = reqPts.filter(p => p.t >= (reqPts[reqPts.length-1]?.t || 0) - 60000);
+  const curRpm = recent.length ? recent.reduce((a,p) => a+p.v, 0) / recent.length : 0;
+  const avgRpm = reqPts.length ? reqPts.reduce((a,p) => a+p.v, 0) / reqPts.length : 0;
+  const capacity = Math.max(1, cfg.lanes * cfg.rpm);
+  const capRatio = (mode.kind === 'live' ? curRpm : avgRpm) / capacity;
+  // Blue while there's headroom, amber approaching the cap, red once saturated.
+  const capColor = capRatio >= 0.9 ? '--critical' : capRatio >= 0.7 ? '--s3' : '--s1';
+  const wreq = windowed(s => sum(s.rows, 'nimproxy_requests_total'));
+  const wok = windowed(s => sum(s.rows, 'nimproxy_requests_total', l => l.status === '200'));
+  const okRatio = wreq ? wok/wreq : 1;
+  const okColor = okRatio < 0.9 ? '--critical' : okRatio < 0.99 ? '--s3' : '--good';
+
+  /* ----- shared client / harness aggregates ----- */
+  const cReq = wgroups('nimproxy_requests_total', 'client');
+  const cP = wgroups('nimproxy_prompt_tokens_total', 'client');
+  const cC = wgroups('nimproxy_completion_tokens_total', 'client');
+  const clients = [...cReq.keys()].sort((a,b) => (cC.get(b)||0) - (cC.get(a)||0));
+  const streamT = wgroups('nimproxy_stream_requests_total', 'client', l => l.stream === 'true');
+  const streamF = wgroups('nimproxy_stream_requests_total', 'client', l => l.stream === 'false');
+  const toolReqs = wgroups('nimproxy_request_tools_count', 'client');
+  const totStreamT = [...streamT.values()].reduce((a, b) => a + b, 0);
+  const totStreamF = [...streamF.values()].reduce((a, b) => a + b, 0);
+  const totGen = totStreamT + totStreamF;
+  const totToolReq = [...toolReqs.values()].reduce((a, b) => a + b, 0);
+
+  /* ----- shared reliability / security counters ----- */
+  const shed = windowed(s => sum(s.rows, 'nimproxy_shed_total'));
+  const unauth = windowed(s => sum(s.rows, 'nimproxy_unauthorized_total'));
+  const logins = windowed(s => sum(s.rows, 'nimproxy_login_failures_total'));
+  const bench429 = windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429'));
+
+  const c = {
+    last, rows, windowLabel,
+    ptok, ctok, reqModels, models, saved, allP, allC,
+    wsum, ttftS, ttftN, tpsS, tpsN,
+    okByModel, errByModel, ttftMS, ttftMC, tpsMS, tpsMC, errPct,
+    tpotMS, tpotMC, finTotal, finLen, reasoningByModel, tpotAvg, truncPct, reasonPct, pct,
+    savedAt,
+    reqPts, curRpm, avgRpm, capacity, capRatio, capColor, wreq, okRatio, okColor,
+    cReq, cP, cC, clients, streamT, streamF, toolReqs, totStreamT, totStreamF, totGen, totToolReq,
+    shed, unauth, logins, bench429,
+  };
+
+  renderModels(c);
+  renderProxy(c);
+  renderKeys(c);
+  renderOverview(c);
+  renderHarnesses(c);
+  renderCompare(c);
+}
+
+/* ----- models ----- */
+function renderModels(c) {
+  const { models, ptok, ctok, reqModels, saved, allP, allC, windowLabel,
+    ttftS, ttftN, tpsS, tpsN, okByModel, ttftMS, ttftMC, tpsMS, tpsMC, errPct,
+    finTotal, reasoningByModel, tpotAvg, truncPct, reasonPct, pct, savedAt } = c;
+  $('savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
   $('m-saved').textContent = money(saved);
   $('m-ctok').textContent = fmt(allC);
   $('m-ptok').textContent = fmt(allP);
-  const wsum = name => windowed(s => sum(s.rows, name));
-  const ttftS = wsum('nimproxy_ttft_seconds_sum'), ttftN = wsum('nimproxy_ttft_seconds_count');
   $('m-ttft').textContent = ttftN ? secs(ttftS/ttftN) : '–';
-  const tpsS = wsum('nimproxy_tokens_per_second_sum'), tpsN = wsum('nimproxy_tokens_per_second_count');
   $('m-tps').textContent = tpsN ? fmt(tpsS/tpsN) + ' tok/s' : '–';
 
   const top = models.slice(0, 5);
@@ -757,50 +859,19 @@ function render() {
   legend($('legend-modeltok'), tokSeries);
 
   /* TTFT p50/p95 from bucket deltas between consecutive snapshots */
-  const bAt = s => buckets(s.rows, 'nimproxy_ttft_seconds');
-  const qSeries = [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
-    name, color,
-    pts: samples.slice(1).map((s, i) => {
-      const d = deltaBuckets(bAt(s), bAt(samples[i]));
-      return { t: s.t, v: quantile(d, q) };
-    }).filter(p => isFinite(p.v)),
-  }));
+  const qSeries = quantSeries('nimproxy_ttft_seconds');
   lineChart($('chart-ttft'), qSeries, secs);
   legend($('legend-ttft'), qSeries);
 
   /* generation speed p50/p95 from tokens_per_second bucket deltas. Filter to
      source="usage" so the trend reflects real reported throughput, not the
      ~1-token-per-event estimate used when upstream omits usage. */
-  const tpsBucketAt = s => buckets(s.rows, 'nimproxy_tokens_per_second', l => l.source === 'usage');
-  const tpsSeries = [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
-    name, color,
-    pts: samples.slice(1).map((s, i) => {
-      const d = deltaBuckets(tpsBucketAt(s), tpsBucketAt(samples[i]));
-      return { t: s.t, v: quantile(d, q) };
-    }).filter(p => isFinite(p.v)),
-  }));
+  const tpsSeries = quantSeries('nimproxy_tokens_per_second', l => l.source === 'usage');
   lineChart($('chart-tps'), tpsSeries, n => fmt(n) + ' tok/s');
   legend($('legend-tps'), tpsSeries);
 
   /* cumulative dollars within the view */
-  const base = samples[0];
-  const savedAt = s => {
-    let v = 0;
-    v += (sum(s.rows, 'nimproxy_prompt_tokens_total') - (mode.kind === 'live' ? 0 : sum(base.rows, 'nimproxy_prompt_tokens_total'))) / 1e6 * cfg.price_in;
-    v += (sum(s.rows, 'nimproxy_completion_tokens_total') - (mode.kind === 'live' ? 0 : sum(base.rows, 'nimproxy_completion_tokens_total'))) / 1e6 * cfg.price_out;
-    return Math.max(0, v);
-  };
   lineChart($('chart-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
-
-  const okByModel = wgroups('nimproxy_requests_total', 'model', l => l.status === '200');
-  const errByModel = wgroups('nimproxy_requests_total', 'model',
-    l => l.status !== '200' && l.status !== 'disconnect');
-  const ttftMS = wgroups('nimproxy_ttft_seconds_sum', 'model'), ttftMC = wgroups('nimproxy_ttft_seconds_count', 'model');
-  const tpsMS = wgroups('nimproxy_tokens_per_second_sum', 'model'), tpsMC = wgroups('nimproxy_tokens_per_second_count', 'model');
-  const errPct = m => {
-    const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0);
-    return t ? `${(e / t * 100).toFixed(e ? 1 : 0)}%` : '–';
-  };
 
   /* ranked model cards */
   $('modelcards').innerHTML = models.slice(0, 8).map((m, i) => {
@@ -820,16 +891,6 @@ function render() {
       </div></div>`;
   }).join('');
 
-  // Quality maps shared by the model table, finish-reason panel, and Compare.
-  const tpotMS = wgroups('nimproxy_tpot_seconds_sum', 'model'), tpotMC = wgroups('nimproxy_tpot_seconds_count', 'model');
-  const finTotal = wgroups('nimproxy_finish_reason_total', 'model');
-  const finLen = wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === 'length');
-  const reasoningByModel = wgroups('nimproxy_reasoning_tokens_total', 'model');
-  const tpotAvg = m => tpotMC.get(m) ? tpotMS.get(m) / tpotMC.get(m) : NaN;
-  const truncPct = m => finTotal.get(m) ? (finLen.get(m) || 0) / finTotal.get(m) * 100 : NaN;
-  const reasonPct = m => ctok.get(m) ? (reasoningByModel.get(m) || 0) / ctok.get(m) * 100 : NaN;
-  const pct = v => isFinite(v) ? v.toFixed(v && v < 10 ? 1 : 0) + '%' : '–';
-
   $('table-models').innerHTML = !models.length ? '<div class="empty">No traffic yet</div>' :
     `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">TPOT</th><th class="num">Avg reply</th><th class="num">Truncated</th><th class="num">Reasoning</th><th class="num">Errors</th><th class="num">Saved</th></tr>` +
     models.map(m => {
@@ -846,21 +907,39 @@ function render() {
         `<td class="num">${money((ptok.get(m)||0)/1e6*cfg.price_in + c/1e6*cfg.price_out)}</td></tr>`;
     }).join('') + '</table>';
 
-  /* ----- proxy ----- */
-  const reqPts = rateSeries(s => sum(s.rows, 'nimproxy_requests_total'));
-  // Trailing-60s average in live mode so the gauge doesn't jump on 3s bursts.
-  const recent = reqPts.filter(p => p.t >= (reqPts[reqPts.length-1]?.t || 0) - 60000);
-  const curRpm = recent.length ? recent.reduce((a,p) => a+p.v, 0) / recent.length : 0;
-  const avgRpm = reqPts.length ? reqPts.reduce((a,p) => a+p.v, 0) / reqPts.length : 0;
-  const capacity = Math.max(1, cfg.lanes * cfg.rpm);
-  const capRatio = (mode.kind === 'live' ? curRpm : avgRpm) / capacity;
-  // Blue while there's headroom, amber approaching the cap, red once saturated.
-  const capColor = capRatio >= 0.9 ? '--critical' : capRatio >= 0.7 ? '--s3' : '--s1';
+  /* ===== models: extra quality charts ===== */
+  const tpotSeries = quantSeries('nimproxy_tpot_seconds');
+  lineChart($('chart-tpot'), tpotSeries, secs);
+  legend($('legend-tpot'), tpotSeries);
+  const upSeries = quantSeries('nimproxy_upstream_seconds');
+  lineChart($('chart-upstream'), upSeries, secs);
+  legend($('legend-upstream'), upSeries);
+
+  const FINISH = [['stop', 'Completed', css('--s2')], ['length', 'Truncated', css('--s6')],
+    ['tool_calls', 'Tool call', css('--s1')], ['content_filter', 'Filtered', css('--s3')], ['other', 'Other', css('--ink-3')]];
+  const finByReason = Object.fromEntries(FINISH.map(([r]) => [r, wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === r)]));
+  $('table-finish').innerHTML = !models.some(m => finTotal.get(m)) ? '<div class="empty">No completions yet</div>' :
+    '<table><tr><th>Model</th>' + FINISH.map(([, l]) => `<th class="num">${l}</th>`).join('') + '</tr>' +
+    models.filter(m => finTotal.get(m)).map(m => {
+      const tot = finTotal.get(m) || 1;
+      return `<tr><td><i class="swatch" style="background:${colorFor(m)}"></i>${esc(prettyName(m))}</td>` +
+        FINISH.map(([r]) => `<td class="num">${pct((finByReason[r].get(m) || 0) / tot * 100)}</td>`).join('') + '</tr>';
+    }).join('') + '</table>';
+
+  const reasoningModels = models.filter(m => (reasoningByModel.get(m) || 0) > 0);
+  barRows($('meters-reasoning'),
+    reasoningModels.map(m => ({ name: prettyName(m), v: reasonPct(m), color: colorFor(m) })),
+    pct);
+  if (!reasoningModels.length) $('meters-reasoning').innerHTML = '<div class="empty">No reasoning-token usage seen</div>';
+}
+
+/* ----- proxy ----- */
+function renderProxy(c) {
+  const { rows, windowLabel, wsum, ttftS, ttftN, reqPts, curRpm, capRatio, capColor,
+    wreq, okRatio, okColor, clients, cReq, cP, cC, shed, unauth, logins, bench429,
+    totStreamT, totStreamF, totGen, totToolReq } = c;
+  $('reqsLabel').textContent = `Requests${windowLabel}`;
   arcGauge($('g-cap'), capRatio, Math.round(capRatio * 100) + '%', capColor);
-  const wreq = windowed(s => sum(s.rows, 'nimproxy_requests_total'));
-  const wok = windowed(s => sum(s.rows, 'nimproxy_requests_total', l => l.status === '200'));
-  const okRatio = wreq ? wok/wreq : 1;
-  const okColor = okRatio < 0.9 ? '--critical' : okRatio < 0.99 ? '--s3' : '--good';
   arcGauge($('g-ok'), okRatio, wreq ? Math.round(okRatio*100) + '%' : '–', okColor);
 
   $('p-reqs').textContent = fmt(wreq);
@@ -910,14 +989,7 @@ function render() {
   legend($('legend-load'), loadSeries);
 
   /* queue wait quantiles, same machinery as TTFT */
-  const qwAt = s => buckets(s.rows, 'nimproxy_queue_wait_seconds');
-  const qwSeries = [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
-    name, color,
-    pts: samples.slice(1).map((s, i) => {
-      const d = deltaBuckets(qwAt(s), qwAt(samples[i]));
-      return { t: s.t, v: quantile(d, q) };
-    }).filter(p => isFinite(p.v)),
-  }));
+  const qwSeries = quantSeries('nimproxy_queue_wait_seconds');
   lineChart($('chart-qwait'), qwSeries, secs);
   legend($('legend-qwait'), qwSeries);
 
@@ -933,10 +1005,6 @@ function render() {
   }
   heatmap($('heatmap'), matrix, hmax);
 
-  const cReq = wgroups('nimproxy_requests_total', 'client');
-  const cP = wgroups('nimproxy_prompt_tokens_total', 'client');
-  const cC = wgroups('nimproxy_completion_tokens_total', 'client');
-  const clients = [...cReq.keys()].sort((a,b) => (cC.get(b)||0) - (cC.get(a)||0));
   const MEDALS = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
   $('table-clients').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
     `<table><tr><th>Client</th><th class="num">Requests</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Saved</th></tr>` +
@@ -946,7 +1014,31 @@ function render() {
       `<td class="num">${money((cP.get(c)||0)/1e6*cfg.price_in + (cC.get(c)||0)/1e6*cfg.price_out)}</td></tr>`
     ).join('') + '</table>';
 
-  /* ----- keys ----- */
+  /* ===== proxy: reliability & request-type panels ===== */
+  $('table-reliability').innerHTML = '<table>' +
+    metricRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
+    metricRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
+    metricRow('Shed (overload 503)', fmt(shed), shed > 0) +
+    metricRow('Rate-limit benches (429)', fmt(bench429)) +
+    metricRow('Other benches (5xx)', fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')))) +
+    metricRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
+    metricRow('Failed logins', fmt(logins), logins > 0) +
+    '</table>';
+  const jsonMode = windowed(s => sum(s.rows, 'nimproxy_json_mode_total'));
+  const tcModes = wgroups('nimproxy_tool_choice_total', 'mode');
+  const tcStr = [...tcModes.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${esc(m)} ${fmt(n)}`).join(', ') || '–';
+  $('table-reqtypes').innerHTML = '<table>' +
+    metricRow('Streaming', `${fmt(totStreamT)}${totGen ? ` (${Math.round(totStreamT / totGen * 100)}%)` : ''}`) +
+    metricRow('Buffered', `${fmt(totStreamF)}${totGen ? ` (${Math.round(totStreamF / totGen * 100)}%)` : ''}`) +
+    metricRow('Tool-offering', `${fmt(totToolReq)}${totGen ? ` (${Math.round(totToolReq / totGen * 100)}%)` : ''}`) +
+    metricRow('JSON mode', fmt(jsonMode)) +
+    metricRow('Tool choice', tcStr) +
+    '</table>';
+}
+
+/* ----- keys ----- */
+function renderKeys(c) {
+  const { last, rows, capacity, curRpm, avgRpm, reqPts } = c;
   $('k-lanes').textContent = cfg.lanes;
   $('k-cap').innerHTML = fmt(capacity) + '<span class="unit">rpm</span>';
   $('k-429').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429')));
@@ -988,7 +1080,19 @@ function render() {
   $('table-lanes').innerHTML =
     `<table><tr><th>Lane</th><th class="num">Requests</th><th class="num">Share</th><th class="num">Last 60s</th><th class="num">429s</th><th class="num">Other benches</th></tr>${laneRows}</table>`;
 
-  /* ===== overview ===== */
+  /* ===== keys: headroom & sizing ===== */
+  const rpmForCap = mode.kind === 'live' ? curRpm : avgRpm;
+  const headroom = capacity - rpmForCap;
+  $('k-headroom').innerHTML = fmt(Math.max(0, headroom)) + '<span class="unit">rpm</span>';
+  const peakRpm = reqPts.length ? Math.max(...reqPts.map(p => p.v)) : 0;
+  $('k-needed').textContent = peakRpm > 0 ? Math.max(cfg.lanes, Math.ceil(peakRpm / cfg.rpm)) : '–';
+}
+
+/* ===== overview ===== */
+function renderOverview(c) {
+  const { windowLabel, saved, capRatio, capColor, okRatio, okColor, wreq, allC,
+    ttftS, ttftN, tpsS, tpsN, reqPts, savedAt, rows, shed, unauth, logins, bench429,
+    models, ctok, clients, cC } = c;
   $('o-savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
   $('o-reqsLabel').textContent = `Requests${windowLabel}`;
   $('o-saved').textContent = money(saved);
@@ -1002,18 +1106,13 @@ function render() {
   lineChart($('spark-tok'), [{ name: 'tok/min', color: css('--s2'), pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total')) }], fmt);
   lineChart($('spark-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
 
-  const shed = windowed(s => sum(s.rows, 'nimproxy_shed_total'));
-  const unauth = windowed(s => sum(s.rows, 'nimproxy_unauthorized_total'));
-  const logins = windowed(s => sum(s.rows, 'nimproxy_login_failures_total'));
-  const bench429 = windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429'));
-  const healthRow = (l, v, warn) => `<tr><td>${l}</td><td class="num"${warn ? ' style="color:var(--critical)"' : ''}>${v}</td></tr>`;
   $('o-health').innerHTML = '<table>' +
-    healthRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
-    healthRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
-    healthRow('Rate-limit benches (429)', fmt(bench429)) +
-    healthRow('Shed (overload)', fmt(shed), shed > 0) +
-    healthRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
-    healthRow('Failed logins', fmt(logins), logins > 0) +
+    metricRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
+    metricRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
+    metricRow('Rate-limit benches (429)', fmt(bench429)) +
+    metricRow('Shed (overload)', fmt(shed), shed > 0) +
+    metricRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
+    metricRow('Failed logins', fmt(logins), logins > 0) +
     '</table>';
   const miniList = (el, entries, fmtV) => $(el).innerHTML = entries.length
     ? entries.map(e => `<div class="meter"><span class="name wide" title="${esc(e.name)}">${esc(e.label ?? e.name)}</span>` +
@@ -1026,40 +1125,47 @@ function render() {
   const topH = clients.slice(0, 3).map((c, i) => ({ name: c, v: cC.get(c) || 0, color: css(SLOTS[i % SLOTS.length]) }));
   const topHmax = Math.max(1, ...topH.map(e => e.v));
   miniList('o-topharness', topH.map(e => ({ ...e, w: (e.v / topHmax * 100).toFixed(0) })), fmt);
+}
 
-  /* ===== models: extra quality charts ===== */
-  const quantSeries = (metric, filter) => [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
-    name, color,
-    pts: samples.slice(1).map((s, i) => {
-      const bA = s2 => buckets(s2.rows, metric, filter);
-      return { t: s.t, v: quantile(deltaBuckets(bA(s), bA(samples[i])), q) };
-    }).filter(p => isFinite(p.v)),
-  }));
-  const tpotSeries = quantSeries('nimproxy_tpot_seconds');
-  lineChart($('chart-tpot'), tpotSeries, secs);
-  legend($('legend-tpot'), tpotSeries);
-  const upSeries = quantSeries('nimproxy_upstream_seconds');
-  lineChart($('chart-upstream'), upSeries, secs);
-  legend($('legend-upstream'), upSeries);
+/* ===== harnesses: what each agent is doing ===== */
+function renderHarnesses(c) {
+  const { clients, cReq, cP, cC, wsum, streamT, streamF, totStreamT, totGen, totToolReq } = c;
+  const avgByKey = (sumN, cntN) => {
+    const s = wgroups(sumN, 'client'), n = wgroups(cntN, 'client');
+    return c => n.get(c) ? s.get(c) / n.get(c) : NaN;
+  };
+  const toolsAvg = avgByKey('nimproxy_request_tools_sum', 'nimproxy_request_tools_count');
+  const msgsAvg = avgByKey('nimproxy_request_messages_sum', 'nimproxy_request_messages_count');
+  const tempAvg = avgByKey('nimproxy_request_temperature_sum', 'nimproxy_request_temperature_count');
+  const genReq = c => (streamT.get(c) || 0) + (streamF.get(c) || 0);
+  const streamPct = c => genReq(c) ? (streamT.get(c) || 0) / genReq(c) * 100 : NaN;
+  const oTools = wsum('nimproxy_request_tools_sum'), oToolsN = wsum('nimproxy_request_tools_count');
+  const oMsgs = wsum('nimproxy_request_messages_sum'), oMsgsN = wsum('nimproxy_request_messages_count');
+  $('h-count').textContent = clients.length;
+  $('h-stream').textContent = totGen ? Math.round(totStreamT / totGen * 100) + '%' : '–';
+  $('h-tools').textContent = oToolsN ? fmt(oTools / oToolsN) : '–';
+  $('h-msgs').textContent = oMsgsN ? fmt(oMsgs / oMsgsN) : '–';
+  $('h-toolpct').textContent = totGen ? Math.round(totToolReq / totGen * 100) + '%' : '–';
+  const slotColor = i => css(SLOTS[i % SLOTS.length]);
+  barRows($('h-toolint'), clients.map((c, i) => ({ name: c, v: toolsAvg(c), color: slotColor(i) })), fmt);
+  barRows($('h-depth'), clients.map((c, i) => ({ name: c, v: msgsAvg(c), color: slotColor(i) })), fmt);
+  barRows($('h-temp'), clients.map((c, i) => ({ name: c, v: tempAvg(c), color: slotColor(i) })), v => v.toFixed(2));
+  barRows($('h-streammix'), clients.map((c, i) => ({ name: c, v: streamPct(c), color: slotColor(i) })), v => Math.round(v) + '%');
+  $('table-harness').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
+    '<table><tr><th>Harness</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Tools/req</th><th class="num">Msgs/req</th><th class="num">Streaming</th><th class="num">Saved</th></tr>' +
+    clients.map(c =>
+      `<tr><td>${esc(c)}</td><td class="num">${fmt(cReq.get(c) || 0)}</td><td class="num">${fmt(cC.get(c) || 0)}</td>` +
+      `<td class="num">${isFinite(toolsAvg(c)) ? fmt(toolsAvg(c)) : '–'}</td>` +
+      `<td class="num">${isFinite(msgsAvg(c)) ? fmt(msgsAvg(c)) : '–'}</td>` +
+      `<td class="num">${isFinite(streamPct(c)) ? Math.round(streamPct(c)) + '%' : '–'}</td>` +
+      `<td class="num">${money((cP.get(c) || 0) / 1e6 * cfg.price_in + (cC.get(c) || 0) / 1e6 * cfg.price_out)}</td></tr>`
+    ).join('') + '</table>';
+}
 
-  const FINISH = [['stop', 'Completed', css('--s2')], ['length', 'Truncated', css('--s6')],
-    ['tool_calls', 'Tool call', css('--s1')], ['content_filter', 'Filtered', css('--s3')], ['other', 'Other', css('--ink-3')]];
-  const finByReason = Object.fromEntries(FINISH.map(([r]) => [r, wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === r)]));
-  $('table-finish').innerHTML = !models.some(m => finTotal.get(m)) ? '<div class="empty">No completions yet</div>' :
-    '<table><tr><th>Model</th>' + FINISH.map(([, l]) => `<th class="num">${l}</th>`).join('') + '</tr>' +
-    models.filter(m => finTotal.get(m)).map(m => {
-      const tot = finTotal.get(m) || 1;
-      return `<tr><td><i class="swatch" style="background:${colorFor(m)}"></i>${esc(prettyName(m))}</td>` +
-        FINISH.map(([r]) => `<td class="num">${pct((finByReason[r].get(m) || 0) / tot * 100)}</td>`).join('') + '</tr>';
-    }).join('') + '</table>';
-
-  const reasoningModels = models.filter(m => (reasoningByModel.get(m) || 0) > 0);
-  barRows($('meters-reasoning'),
-    reasoningModels.map(m => ({ name: prettyName(m), v: reasonPct(m), color: colorFor(m) })),
-    pct);
-  if (!reasoningModels.length) $('meters-reasoning').innerHTML = '<div class="empty">No reasoning-token usage seen</div>';
-
-  /* ===== compare: head-to-head scorecard ===== */
+/* ===== compare: head-to-head scorecard ===== */
+function renderCompare(c) {
+  const { models, ttftMS, ttftMC, tpsMS, tpsMC, errByModel, okByModel, ctok, reqModels,
+    tpotAvg, truncPct, reasonPct, pct } = c;
   const cmpModels = models.slice(0, 8);
   const avgTtft = m => ttftMC.get(m) ? ttftMS.get(m) / ttftMC.get(m) : NaN;
   const avgTps = m => tpsMC.get(m) ? tpsMS.get(m) / tpsMC.get(m) : NaN;
@@ -1078,74 +1184,6 @@ function render() {
       { label: 'Errors', get: errRate, fmt: pct, best: 'min' },
     ]);
   barRows($('compare-bars'), cmpModels.map(m => ({ name: prettyName(m), v: avgTps(m), color: colorFor(m) })), v => fmt(v) + ' tok/s');
-
-  /* ===== harnesses: what each agent is doing ===== */
-  const avgByKey = (sumN, cntN) => {
-    const s = wgroups(sumN, 'client'), n = wgroups(cntN, 'client');
-    return c => n.get(c) ? s.get(c) / n.get(c) : NaN;
-  };
-  const toolsAvg = avgByKey('nimproxy_request_tools_sum', 'nimproxy_request_tools_count');
-  const msgsAvg = avgByKey('nimproxy_request_messages_sum', 'nimproxy_request_messages_count');
-  const tempAvg = avgByKey('nimproxy_request_temperature_sum', 'nimproxy_request_temperature_count');
-  const streamT = wgroups('nimproxy_stream_requests_total', 'client', l => l.stream === 'true');
-  const streamF = wgroups('nimproxy_stream_requests_total', 'client', l => l.stream === 'false');
-  const toolReqs = wgroups('nimproxy_request_tools_count', 'client');
-  const genReq = c => (streamT.get(c) || 0) + (streamF.get(c) || 0);
-  const streamPct = c => genReq(c) ? (streamT.get(c) || 0) / genReq(c) * 100 : NaN;
-  const totStreamT = [...streamT.values()].reduce((a, b) => a + b, 0);
-  const totStreamF = [...streamF.values()].reduce((a, b) => a + b, 0);
-  const totGen = totStreamT + totStreamF;
-  const totToolReq = [...toolReqs.values()].reduce((a, b) => a + b, 0);
-  const oTools = wsum('nimproxy_request_tools_sum'), oToolsN = wsum('nimproxy_request_tools_count');
-  const oMsgs = wsum('nimproxy_request_messages_sum'), oMsgsN = wsum('nimproxy_request_messages_count');
-  $('h-count').textContent = clients.length;
-  $('h-stream').textContent = totGen ? Math.round(totStreamT / totGen * 100) + '%' : '–';
-  $('h-tools').textContent = oToolsN ? fmt(oTools / oToolsN) : '–';
-  $('h-msgs').textContent = oMsgsN ? fmt(oMsgs / oMsgsN) : '–';
-  $('h-toolpct').textContent = totGen ? Math.round(totToolReq / totGen * 100) + '%' : '–';
-  const hcolor = (c, i) => css(SLOTS[i % SLOTS.length]);
-  barRows($('h-toolint'), clients.map((c, i) => ({ name: c, v: toolsAvg(c), color: hcolor(c, i) })), fmt);
-  barRows($('h-depth'), clients.map((c, i) => ({ name: c, v: msgsAvg(c), color: hcolor(c, i) })), fmt);
-  barRows($('h-temp'), clients.map((c, i) => ({ name: c, v: tempAvg(c), color: hcolor(c, i) })), v => v.toFixed(2));
-  barRows($('h-streammix'), clients.map((c, i) => ({ name: c, v: streamPct(c), color: hcolor(c, i) })), v => Math.round(v) + '%');
-  $('table-harness').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
-    '<table><tr><th>Harness</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Tools/req</th><th class="num">Msgs/req</th><th class="num">Streaming</th><th class="num">Saved</th></tr>' +
-    clients.map(c =>
-      `<tr><td>${esc(c)}</td><td class="num">${fmt(cReq.get(c) || 0)}</td><td class="num">${fmt(cC.get(c) || 0)}</td>` +
-      `<td class="num">${isFinite(toolsAvg(c)) ? fmt(toolsAvg(c)) : '–'}</td>` +
-      `<td class="num">${isFinite(msgsAvg(c)) ? fmt(msgsAvg(c)) : '–'}</td>` +
-      `<td class="num">${isFinite(streamPct(c)) ? Math.round(streamPct(c)) + '%' : '–'}</td>` +
-      `<td class="num">${money((cP.get(c) || 0) / 1e6 * cfg.price_in + (cC.get(c) || 0) / 1e6 * cfg.price_out)}</td></tr>`
-    ).join('') + '</table>';
-
-  /* ===== proxy: reliability & request-type panels ===== */
-  const relRow = (l, v, warn) => `<tr><td>${l}</td><td class="num"${warn ? ' style="color:var(--critical)"' : ''}>${v}</td></tr>`;
-  $('table-reliability').innerHTML = '<table>' +
-    relRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
-    relRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
-    relRow('Shed (overload 503)', fmt(shed), shed > 0) +
-    relRow('Rate-limit benches (429)', fmt(bench429)) +
-    relRow('Other benches (5xx)', fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')))) +
-    relRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
-    relRow('Failed logins', fmt(logins), logins > 0) +
-    '</table>';
-  const jsonMode = windowed(s => sum(s.rows, 'nimproxy_json_mode_total'));
-  const tcModes = wgroups('nimproxy_tool_choice_total', 'mode');
-  const tcStr = [...tcModes.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${esc(m)} ${fmt(n)}`).join(', ') || '–';
-  $('table-reqtypes').innerHTML = '<table>' +
-    relRow('Streaming', `${fmt(totStreamT)}${totGen ? ` (${Math.round(totStreamT / totGen * 100)}%)` : ''}`) +
-    relRow('Buffered', `${fmt(totStreamF)}${totGen ? ` (${Math.round(totStreamF / totGen * 100)}%)` : ''}`) +
-    relRow('Tool-offering', `${fmt(totToolReq)}${totGen ? ` (${Math.round(totToolReq / totGen * 100)}%)` : ''}`) +
-    relRow('JSON mode', fmt(jsonMode)) +
-    relRow('Tool choice', tcStr) +
-    '</table>';
-
-  /* ===== keys: headroom & sizing ===== */
-  const rpmForCap = mode.kind === 'live' ? curRpm : avgRpm;
-  const headroom = capacity - rpmForCap;
-  $('k-headroom').innerHTML = fmt(Math.max(0, headroom)) + '<span class="unit">rpm</span>';
-  const peakRpm = reqPts.length ? Math.max(...reqPts.map(p => p.v)) : 0;
-  $('k-needed').textContent = peakRpm > 0 ? Math.max(cfg.lanes, Math.ceil(peakRpm / cfg.rpm)) : '–';
 }
 
 /* ---------- data sources ---------- */
@@ -1166,7 +1204,7 @@ async function pollLive() {
 }
 
 async function loadRange(from, to) {
-  mode = { kind: 'range', paused: false, from, to };
+  mode = { kind: 'range', paused: false };
   $('live').className = 'live idle';
   $('liveText').textContent = 'history';
   $('rangeinfo').textContent =
@@ -1188,7 +1226,7 @@ async function loadRange(from, to) {
 }
 
 function goLive() {
-  mode = { kind: 'live', paused: false, from: 0, to: 0 };
+  mode = { kind: 'live', paused: false };
   samples = [];
   $('rangeinfo').textContent = '';
   $('pause').innerHTML = '&#10074;&#10074;';
