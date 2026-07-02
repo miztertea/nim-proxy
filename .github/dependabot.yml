@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Rust dependencies. Group minor/patch bumps into one PR to cut noise;
+  # major bumps come as individual PRs so they get real review.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions used in workflows (keeps pinned versions fresh / SHA-pinnable).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
+
+  # The Docker build base image (rust:1-alpine).
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly

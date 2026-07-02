@@ -244,6 +244,21 @@ impl Proxy {
 
 impl Drop for Proxy {
     fn drop(&mut self) {
+        // A SIGKILLed process never flushes its coverage profile. Under
+        // `cargo llvm-cov` (detected via LLVM_PROFILE_FILE) ask for a graceful
+        // SIGTERM — which the proxy handles — and wait briefly so the child
+        // writes its profile; otherwise kill immediately to keep teardown fast.
+        if std::env::var_os("LLVM_PROFILE_FILE").is_some() {
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &self.child.id().to_string()])
+                .status();
+            for _ in 0..150 {
+                if let Ok(Some(_)) = self.child.try_wait() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -292,6 +307,12 @@ fn base_cmd(port: u16, upstream: &str) -> std::process::Command {
         .env("RUST_LOG", "nim_proxy=warn")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    // Under `cargo llvm-cov` the spawned server must write its own coverage
+    // profile, but env_clear() above dropped the profile path — forward it back
+    // when present (a no-op in normal test runs).
+    if let Ok(v) = std::env::var("LLVM_PROFILE_FILE") {
+        cmd.env("LLVM_PROFILE_FILE", v);
+    }
     cmd
 }
 
