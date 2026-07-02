@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use metrics::gauge;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::pool::{Pool, Reservation};
@@ -37,6 +38,7 @@ impl Dispatcher {
         prefer: Option<usize>,
     ) -> oneshot::Receiver<(usize, String)> {
         let (reply, rx) = oneshot::channel();
+        gauge!("nimproxy_queue_depth").increment(1.0);
         let _ = self.queue.send(Waiter {
             reply,
             deadline,
@@ -48,6 +50,7 @@ impl Dispatcher {
 
 async fn run(pool: Arc<Pool>, mut queue: mpsc::UnboundedReceiver<Waiter>) {
     while let Some(waiter) = queue.recv().await {
+        let _leave = scopeguard(|| gauge!("nimproxy_queue_depth").decrement(1.0));
         loop {
             if waiter.reply.is_closed() {
                 break; // client hung up while queued
@@ -69,6 +72,18 @@ async fn run(pool: Arc<Pool>, mut queue: mpsc::UnboundedReceiver<Waiter>) {
             }
         }
     }
+}
+
+/// Minimal drop-guard so the queue-depth gauge stays honest on every exit
+/// path (granted, expired, or abandoned).
+fn scopeguard<F: FnMut()>(f: F) -> impl Drop {
+    struct Guard<F: FnMut()>(F);
+    impl<F: FnMut()> Drop for Guard<F> {
+        fn drop(&mut self) {
+            (self.0)();
+        }
+    }
+    Guard(f)
 }
 
 #[cfg(test)]

@@ -72,13 +72,44 @@ All via environment variables (or `.env`):
 | `MAX_WAIT_SECS` | `900` | Max time a request waits for a slot / retries before giving up |
 | `HEARTBEAT_SECS` | `10` | SSE keepalive interval while waiting |
 | `MODELS_TTL_SECS` | `600` | `/v1/models` cache lifetime |
+| `PROXY_API_KEYS` | unset | Client access keys, `name:secret` comma-separated; unset = local mode (no auth) |
 | `RUST_LOG` | `nim_proxy=info` | Log filter |
+
+## Client access keys
+
+By default the proxy runs in **local mode**: no authentication, every request is attributed to the client `local`. Set `PROXY_API_KEYS` to require a Bearer token and the proxy becomes safe to share:
+
+```sh
+PROXY_API_KEYS=alice:8f3k...,bob:2mq9...
+```
+
+Clients then send `Authorization: Bearer 8f3k...` (in OpenCode, set `apiKey` in the provider options). The name is what shows up in metrics, so per-friend usage is visible per model. Unknown or missing tokens get an OpenAI-style 401.
+
+## Metrics
+
+Prometheus-format metrics at `GET /metrics` (unauthenticated, like `/health` — firewall accordingly):
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `nimproxy_requests_total` | client, model, path, status | Every request through the proxy (`status` includes `disconnect`, `stream_error`) |
+| `nimproxy_prompt_tokens_total` | client, model | Prompt tokens, from upstream `usage` |
+| `nimproxy_completion_tokens_total` | client, model, source | Completion tokens; `source="usage"` is exact, `"estimate"` counts SSE events when upstream omits usage |
+| `nimproxy_ttft_seconds` | model | Time from upstream send to first streamed byte |
+| `nimproxy_tokens_per_second` | model, source | Generation speed per model |
+| `nimproxy_upstream_seconds` | model | Non-streaming upstream latency |
+| `nimproxy_queue_wait_seconds` | — | Time spent waiting for a rate-limit slot |
+| `nimproxy_queue_depth` | — | Requests currently queued |
+| `nimproxy_lane_requests_total` | lane | Requests sent per key lane |
+| `nimproxy_lane_benched_total` | lane, status | Upstream 429/5xx per lane |
+| `nimproxy_unauthorized_total` | — | Rejected client requests |
+
+Between them you can answer: which models are fast right now (TTFT + tokens/sec), whether you need more keys (queue depth/wait vs. lane utilization), how often NIM actually 429s despite pacing, and who used what (per-client token totals per model).
 
 ## Deployment
 
 The image is built `FROM scratch`: no distro, no shell, no libc, no CA bundle — just the ~3.3 MB static musl binary with TLS roots compiled in (rustls + webpki-roots). It runs as a non-root numeric UID, needs no capabilities and no writable filesystem (the compose file sets `read_only`, `cap_drop: ALL`, `no-new-privileges`), and works under rootless Docker or Podman as-is.
 
-**If you expose the proxy beyond localhost** (e.g. pooling keys with friends), know that it has no client authentication — anyone who can reach the port can spend your rate budget. Put it behind a VPN/Tailscale, an authenticating reverse proxy, or ask for a shared-token feature. Also note NVIDIA keys are issued per developer account; pooling keys across people is between you and NVIDIA's terms of service.
+**If you expose the proxy beyond localhost** (e.g. pooling keys with friends), set `PROXY_API_KEYS` so only your clients can spend the rate budget, and keep `/metrics` firewalled or behind a reverse proxy. Also note NVIDIA keys are issued per developer account; pooling keys across people is between you and NVIDIA's terms of service.
 
 ## Notes
 
