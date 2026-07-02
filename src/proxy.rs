@@ -448,7 +448,7 @@ pub async fn handle(
         .map(|pq| pq.as_str().to_owned())
         .unwrap_or_else(|| uri.path().to_owned());
 
-    let parsed = serde_json::from_slice::<serde_json::Value>(&body).ok();
+    let mut parsed = serde_json::from_slice::<serde_json::Value>(&body).ok();
     let raw_model = parsed
         .as_ref()
         .and_then(|v| v.get("model").and_then(|m| m.as_str()))
@@ -490,7 +490,10 @@ pub async fn handle(
             .is_some_and(|v| v.is_object() && v.get("stream_options").is_none())
             && !state.no_inject.lock().unwrap().contains(&ctx.model);
         if injectable {
-            let mut v = parsed.clone().unwrap();
+            // `parsed` is unused after this point, so move it rather than deep-
+            // cloning the whole request body (the full conversation) to inject
+            // one field.
+            let mut v = parsed.take().unwrap();
             v["stream_options"] = serde_json::json!({ "include_usage": true });
             fallback = Some(std::mem::replace(
                 &mut body,
@@ -595,7 +598,8 @@ async fn streaming(
         gauge!("nimproxy_active_requests").increment(1.0);
         let send = |b: &'static str| {
             let tx = tx.clone();
-            async move { tx.send(Ok(Bytes::from(b))).await.is_ok() }
+            // Static control frames — no per-send alloc/copy.
+            async move { tx.send(Ok(Bytes::from_static(b.as_bytes()))).await.is_ok() }
         };
         if !send(": connected\n\n").await {
             record_request(&ctx, "disconnect");
@@ -605,7 +609,8 @@ async fn streaming(
         loop {
             // Queue for a slot, heartbeating so the harness doesn't hang up.
             let slot = reserve_slot(&state, deadline, prefer, || {
-                tx.try_send(Ok(Bytes::from(": heartbeat\n\n"))).is_ok()
+                tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
+                    .is_ok()
             })
             .await;
             let Some((lane, key)) = slot else {

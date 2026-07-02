@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Regression tests for all of the above; coverage raised to ~90%.
 
+### Performance
+
+- Build with `opt-level = 3` (was `"z"`): the release profile optimized for size,
+  throttling the JSON-parse and SSE-scan hot paths. Binary grows ~3.5→4.6 MB.
+- Drop a deep clone of the whole request body on the streaming injection path
+  (move it instead); use `Bytes::from_static` for the SSE control frames.
+- Routine `cargo update` (`rustc-hash` patch).
+
 ## [0.4.0] - 2026-07-02
 
 The proxy becomes a **benchmarking and agent-observability tool**: because it
