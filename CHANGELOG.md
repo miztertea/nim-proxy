@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (move it instead); use `Bytes::from_static` for the SSE control frames.
 - Routine `cargo update` (`rustc-hash` patch).
 
+### Dependencies
+
+- Bump `metrics-exporter-prometheus` 0.17 → 0.18 and refresh CI action versions.
+- Hold the auth crypto/RNG stack (`hmac` 0.12, `sha2` 0.10, `getrandom` 0.2) on
+  the proven-stable line — the proposed 0.13/0.11/0.3 majors are breaking with no
+  security fix; Dependabot is configured to only take patches for these.
+
 ## [0.4.0] - 2026-07-02
 
 The proxy becomes a **benchmarking and agent-observability tool**: because it
