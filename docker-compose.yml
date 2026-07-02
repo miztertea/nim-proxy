@@ -4,7 +4,10 @@ services:
     image: nim-proxy:latest
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Bound to loopback by default — reachable only from this host. To expose
+      # it, set auth in .env (ADMIN_PASSWORD + PROXY_API_KEYS), put TLS in front
+      # (nginx/Caddy or your platform's edge), then change this to "8000:8000".
+      - "127.0.0.1:8000:8000"
     env_file: .env
     read_only: true
     cap_drop: [ALL]

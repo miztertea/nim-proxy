@@ -4,10 +4,18 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use support::{chat_body, read_sse, start_mock, start_proxy, Behavior};
+use support::{chat_body, expect_refuses_to_start, read_sse, start_mock, start_proxy, Behavior};
 
 fn client() -> reqwest::Client {
     reqwest::Client::new()
+}
+
+/// A client that does NOT follow redirects, so we can assert on 302/303.
+fn no_redirect_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
 }
 
 #[tokio::test]
@@ -455,4 +463,223 @@ async fn dashboard_and_config_are_served() {
         .unwrap();
     assert_eq!(cfg["lanes"], 3);
     assert_eq!(cfg["auth"], false);
+}
+
+// ---------- security hardening ----------
+
+#[tokio::test]
+async fn refuses_to_start_without_auth() {
+    let mock = start_mock().await;
+    // Nothing set: no INSECURE flag, no admin password, no API keys.
+    expect_refuses_to_start(&mock.url, &[]).await;
+    // Partial config is still refused (only a password, no API key).
+    expect_refuses_to_start(&mock.url, &[("ADMIN_PASSWORD", "pw")]).await;
+    // Only API keys, no admin password: still refused.
+    expect_refuses_to_start(&mock.url, &[("PROXY_API_KEYS", "k")]).await;
+}
+
+#[tokio::test]
+async fn secure_mode_gates_dashboard_metrics_and_history() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(
+        &mock.url,
+        &[
+            ("INSECURE_NO_AUTH", "false"),
+            ("ADMIN_PASSWORD", "s3cret"),
+            ("PROXY_API_KEYS", "api-key-1"),
+        ],
+    )
+    .await;
+
+    // Health stays public (load balancers / Docker probe).
+    assert_eq!(
+        client()
+            .get(proxy.url("/health"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+
+    // Metrics require creds; Bearer <password> works (Prometheus scrape path).
+    assert_eq!(
+        client()
+            .get(proxy.url("/metrics"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    let ok = client()
+        .get(proxy.url("/metrics"))
+        .bearer_auth("s3cret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200);
+    assert_eq!(
+        client()
+            .get(proxy.url("/api/history"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    assert_eq!(
+        client()
+            .get(proxy.url("/api/history"))
+            .bearer_auth("s3cret")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+
+    // Browser hitting the dashboard without a session is redirected to /login.
+    let nr = no_redirect_client();
+    let redir = nr
+        .get(proxy.url("/"))
+        .header("accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(redir.status(), 302);
+    assert_eq!(redir.headers()["location"], "/login");
+    assert_eq!(
+        nr.get(proxy.url("/login")).send().await.unwrap().status(),
+        200
+    );
+
+    // Wrong password is rejected; correct password sets a session cookie.
+    let bad = nr
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("password=wrong")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 401);
+
+    let good = nr
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("password=s3cret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(good.status(), 303);
+    let cookie = good.headers()["set-cookie"].to_str().unwrap().to_owned();
+    assert!(cookie.contains("nimproxy_session="));
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Strict"));
+
+    // The session cookie then opens the dashboard.
+    let session = cookie.split(';').next().unwrap();
+    let dash = nr
+        .get(proxy.url("/"))
+        .header("accept", "text/html")
+        .header("cookie", session)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dash.status(), 200);
+    assert!(dash.text().await.unwrap().contains("NIM"));
+
+    // API still requires a valid key.
+    assert_eq!(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("hi", false))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    assert_eq!(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .bearer_auth("api-key-1")
+            .json(&chat_body("hi", false))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+}
+
+#[tokio::test]
+async fn model_label_is_sanitized_in_metrics() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    // A malicious model id carrying Prometheus/HTML/log injection payloads.
+    let evil = "<img src=x onerror=alert(1)>\"} pwn 1\nmeta";
+    let body = serde_json::json!({
+        "model": evil,
+        "messages": [{"role": "user", "content": "hi"}]
+    });
+    let r = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    // The sanitized label keeps only safe chars; none of the injection
+    // characters survive, and no spurious `pwn` series was created.
+    // The model label value (after `model="`) must contain only safe chars —
+    // no `<`, `>`, quote, brace, or newline that could break the exposition
+    // format, inject a series, or become HTML. The payload collapses to one
+    // harmless alphanumeric token on a single line.
+    let req_line = metrics
+        .lines()
+        .find(|l| l.starts_with("nimproxy_requests_total"))
+        .expect("requests_total present");
+    let value = req_line
+        .split("model=\"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .expect("model label present");
+    assert!(
+        value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':')),
+        "unsafe chars in model label: {value:?}"
+    );
+    // No injected standalone series (the `\n... pwn 1` part of the payload).
+    assert!(
+        !metrics.lines().any(|l| l.trim_start().starts_with("pwn")),
+        "injected metric series present"
+    );
+}
+
+#[tokio::test]
+async fn dashboard_sends_security_headers() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let resp = client().get(proxy.url("/")).send().await.unwrap();
+    let h = resp.headers();
+    let csp = h["content-security-policy"].to_str().unwrap();
+    assert!(csp.contains("frame-ancestors 'none'"));
+    assert!(
+        csp.contains("connect-src 'self'"),
+        "blocks cross-origin exfil"
+    );
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert_eq!(h["x-frame-options"], "DENY");
 }

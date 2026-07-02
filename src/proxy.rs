@@ -29,6 +29,62 @@ struct Ctx {
     started: Instant,
 }
 
+/// Cap on distinct `model` label values tracked, past which new models are
+/// bucketed to "other" so an attacker can't explode metric cardinality.
+const MODEL_LABEL_CAP: usize = 256;
+
+/// Reduce an arbitrary client-supplied string to a safe metric-label / log
+/// value: keep a conservative charset (which model ids use), drop everything
+/// else (quotes, braces, newlines, control/ANSI — the injection vectors for
+/// Prometheus exposition, structured logs, and terminals), and cap length.
+fn sanitize_label(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':'))
+        .take(64)
+        .collect();
+    if cleaned.is_empty() {
+        "none".to_owned()
+    } else {
+        cleaned
+    }
+}
+
+/// Sanitize a model id and bound its cardinality: known models pass through,
+/// but once `MODEL_LABEL_CAP` distinct values have been seen, further new
+/// ones collapse to "other".
+fn label_model(state: &AppState, raw: &str) -> String {
+    let s = sanitize_label(raw);
+    let mut seen = state.model_labels.lock().unwrap();
+    bounded_label(&mut seen, s, MODEL_LABEL_CAP)
+}
+
+/// Cardinality guard: return `s` if already seen or under the cap (recording
+/// it), else "other". Pure so it can be tested without an AppState.
+fn bounded_label(seen: &mut std::collections::HashSet<String>, s: String, cap: usize) -> String {
+    if seen.contains(&s) {
+        s
+    } else if seen.len() < cap {
+        seen.insert(s.clone());
+        s
+    } else {
+        "other".to_owned()
+    }
+}
+
+/// Bound the `path` label to the known OpenAI endpoints; anything else
+/// (arbitrary sub-paths a client can hit under /v1/) becomes "other".
+fn label_path(path: &str) -> String {
+    match path {
+        "/v1/chat/completions"
+        | "/v1/completions"
+        | "/v1/embeddings"
+        | "/v1/models"
+        | "/v1/rankings" => path.to_owned(),
+        _ => "other".to_owned(),
+    }
+}
+
 /// Statuses worth waiting out: rate limit and transient server-side trouble.
 fn retryable(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
@@ -194,8 +250,28 @@ pub async fn handle(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // Shed load past the in-flight cap so a connection flood can't grow the
+    // queue unbounded. A guard decrements on every exit path.
+    let inflight = state
+        .inflight
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    let _guard = crate::dispatch::scopeguard({
+        let state = state.clone();
+        move || {
+            state
+                .inflight
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    if inflight > state.max_inflight {
+        counter!("nimproxy_shed_total").increment(1);
+        return overloaded(&state);
+    }
+
     // Client auth: local mode (no configured keys) admits everyone as
     // "local"; otherwise the Bearer token must match a configured key.
+    // The match is constant-time to avoid leaking a valid key byte-by-byte.
     let client = match &state.clients {
         None => "local".to_owned(),
         Some(clients) => {
@@ -204,10 +280,17 @@ pub async fn handle(
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("Bearer "))
                 .unwrap_or("");
-            match clients.get(token) {
-                Some(name) => name.clone(),
+            let mut matched = None;
+            for (secret, name) in clients {
+                if crate::auth::ct_eq(token, secret) {
+                    matched = Some(name.clone());
+                }
+            }
+            match matched {
+                Some(name) => name,
                 None => {
                     counter!("nimproxy_unauthorized_total").increment(1);
+                    tokio::time::sleep(Duration::from_millis(250)).await;
                     return unauthorized();
                 }
             }
@@ -220,14 +303,14 @@ pub async fn handle(
         .unwrap_or_else(|| uri.path().to_owned());
 
     let parsed = serde_json::from_slice::<serde_json::Value>(&body).ok();
+    let raw_model = parsed
+        .as_ref()
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()))
+        .unwrap_or("none");
     let ctx = Ctx {
         client,
-        model: parsed
-            .as_ref()
-            .and_then(|v| v.get("model").and_then(|m| m.as_str()))
-            .unwrap_or("none")
-            .to_owned(),
-        path: uri.path().to_owned(),
+        model: label_model(&state, raw_model),
+        path: label_path(uri.path()),
         started: Instant::now(),
     };
 
@@ -603,6 +686,25 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
+fn overloaded(state: &AppState) -> Response {
+    let body = serde_json::json!({
+        "error": {
+            "message": format!(
+                "proxy at capacity ({} concurrent requests); retry shortly",
+                state.max_inflight
+            ),
+            "type": "proxy_error",
+            "code": "overloaded"
+        }
+    });
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [(header::RETRY_AFTER, "5")],
+        axum::Json(body),
+    )
+        .into_response()
+}
+
 fn gateway_timeout(state: &AppState) -> Response {
     let body = serde_json::json!({
         "error": {
@@ -620,7 +722,48 @@ fn gateway_timeout(state: &AppState) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::SseScan;
+    use super::{bounded_label, label_path, sanitize_label, SseScan};
+    use std::collections::HashSet;
+
+    #[test]
+    fn sanitize_strips_injection_chars() {
+        // Quotes, braces, angle brackets, newlines, ANSI escapes all removed.
+        assert_eq!(sanitize_label("meta/llama-3.3-70b"), "meta/llama-3.3-70b");
+        assert_eq!(sanitize_label("a\"} fake_metric 1"), "afake_metric1");
+        assert_eq!(
+            sanitize_label("<img src=x onerror=alert(1)>"),
+            "imgsrcxonerroralert1"
+        );
+        assert_eq!(sanitize_label("line1\nline2"), "line1line2");
+        assert_eq!(sanitize_label("\x1b[31mred"), "31mred");
+        assert_eq!(sanitize_label(""), "none");
+        assert_eq!(sanitize_label("!!!"), "none");
+    }
+
+    #[test]
+    fn sanitize_caps_length() {
+        let long = "a".repeat(200);
+        assert_eq!(sanitize_label(&long).len(), 64);
+    }
+
+    #[test]
+    fn bounded_label_caps_cardinality() {
+        let mut seen = HashSet::new();
+        assert_eq!(bounded_label(&mut seen, "m1".into(), 2), "m1");
+        assert_eq!(bounded_label(&mut seen, "m2".into(), 2), "m2");
+        // Third distinct value exceeds the cap -> "other".
+        assert_eq!(bounded_label(&mut seen, "m3".into(), 2), "other");
+        // Already-seen values still pass through after the cap.
+        assert_eq!(bounded_label(&mut seen, "m1".into(), 2), "m1");
+    }
+
+    #[test]
+    fn path_label_is_allowlisted() {
+        assert_eq!(label_path("/v1/chat/completions"), "/v1/chat/completions");
+        assert_eq!(label_path("/v1/embeddings"), "/v1/embeddings");
+        assert_eq!(label_path("/v1/anything-else"), "other");
+        assert_eq!(label_path("/v1/../etc"), "other");
+    }
 
     #[test]
     fn scan_counts_events_and_finds_usage() {

@@ -270,6 +270,11 @@ const $ = id => document.getElementById(id);
 const SLOTS = ['--s1','--s2','--s3','--s4','--s5','--s6'];
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+// HTML-escape any value that reaches innerHTML. Model ids and client names
+// originate from request data; the server sanitizes them, but escape here too
+// so a stray character can never become markup (defense in depth vs XSS).
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Sequential blue ramp for the heatmap (light: light→dark = more).
 const RAMP = dark
   ? ['#0d366b','#104281','#184f95','#1c5cab','#256abf','#2a78d6','#3987e5']
@@ -423,7 +428,7 @@ function lineChart(el, series, unitFmt) {
     for (const s of live) {
       let best = s.pts[0];
       for (const p of s.pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
-      html += `<div class="row"><span><i class="swatch" style="background:${s.color}"></i>${s.name}</span><b>${unitFmt(best.v)}</b></div>`;
+      html += `<div class="row"><span><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}</span><b>${unitFmt(best.v)}</b></div>`;
     }
     showTip(ev.clientX, ev.clientY, html);
   });
@@ -432,7 +437,7 @@ function lineChart(el, series, unitFmt) {
 
 function legend(el, series) {
   el.innerHTML = series.length > 1
-    ? series.map(s => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')
+    ? series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')
     : '';
 }
 
@@ -614,7 +619,7 @@ function render() {
     const statCell = (l, v) => `<span class="stat"><span class="l">${l}</span><br><span class="v">${v}</span></span>`;
     return `<div class="mcard"><span class="rank">#${i + 1}</span>
       <div class="brand">${logoHtml(pub)}
-        <div><div class="name">${prettyName(m)}</div><div class="pub">${pub.name}</div></div>
+        <div><div class="name">${esc(prettyName(m))}</div><div class="pub">${esc(pub.name)}</div></div>
       </div>
       <div class="stats">
         ${statCell('requests', fmt(reqModels.get(m) || 0))}
@@ -630,7 +635,7 @@ function render() {
     `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">Avg reply</th><th class="num">Errors</th><th class="num">Saved</th></tr>` +
     models.map(m => {
       const c = ctok.get(m)||0, ok = okByModel.get(m)||0;
-      return `<tr><td>${modelSlots.has(m) ? `<i class="swatch" style="background:${css(slotFor(m))}"></i>` : ''}${m}</td>` +
+      return `<tr><td>${modelSlots.has(m) ? `<i class="swatch" style="background:${css(slotFor(m))}"></i>` : ''}${esc(m)}</td>` +
         `<td class="num">${fmt(reqModels.get(m)||0)}</td><td class="num">${fmt(c)}</td>` +
         `<td class="num">${ttftMC.get(m) ? secs(ttftMS.get(m)/ttftMC.get(m)) : '–'}</td>` +
         `<td class="num">${tpsMC.get(m) ? fmt(tpsMS.get(m)/tpsMC.get(m)) : '–'}</td>` +
@@ -710,7 +715,7 @@ function render() {
   $('table-clients').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
     `<table><tr><th>Client</th><th class="num">Requests</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Saved</th></tr>` +
     clients.map((c, i) =>
-      `<tr><td>${MEDALS[i] ? `<span class="medal">${MEDALS[i]}</span>` : ''}${c}</td><td class="num">${fmt(cReq.get(c)||0)}</td><td class="num">${fmt(cP.get(c)||0)}</td>` +
+      `<tr><td>${MEDALS[i] ? `<span class="medal">${MEDALS[i]}</span>` : ''}${esc(c)}</td><td class="num">${fmt(cReq.get(c)||0)}</td><td class="num">${fmt(cP.get(c)||0)}</td>` +
       `<td class="num">${fmt(cC.get(c)||0)}</td>` +
       `<td class="num">${money((cP.get(c)||0)/1e6*cfg.price_in + (cC.get(c)||0)/1e6*cfg.price_out)}</td></tr>`
     ).join('') + '</table>';

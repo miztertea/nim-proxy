@@ -1,19 +1,22 @@
+mod auth;
 mod dispatch;
 mod history;
 mod pool;
 mod proxy;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::Router;
 use bytes::Bytes;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder};
 use tokio::sync::Mutex;
 
+use auth::Admin;
 use dispatch::Dispatcher;
 use pool::Pool;
 
@@ -41,10 +44,45 @@ pub struct AppState {
     pub clients: Option<HashMap<String, String>>,
     /// Models that rejected stream_options injection; never inject for them again.
     pub no_inject: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Distinct sanitized model labels seen (bounds metric cardinality).
+    pub model_labels: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Admin gate for the dashboard + observability endpoints.
+    pub admin: Admin,
+    /// Requests currently in flight; capped to bound memory under floods.
+    pub inflight: AtomicUsize,
+    pub max_inflight: usize,
 }
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
+}
+
+/// Add hardening headers to every response. The CSP allows the dashboard's
+/// own inline script/style and unpkg logos, but pins `connect-src` to 'self'
+/// so an injected element can't exfiltrate to another origin — a second line
+/// of defense behind server-side sanitizing and the dashboard's `esc()`.
+async fn security_headers(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::HeaderValue;
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    h.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'none'; img-src 'self' https://unpkg.com data:; \
+             style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; \
+             connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        ),
+    );
+    h.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    resp
 }
 
 const BANNER: &str = r#"
@@ -98,8 +136,9 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // PROXY_API_KEYS entries are "name:secret" (name becomes the metrics
-    // label) or a bare secret. Unset = local mode: no auth required.
+    // PROXY_API_KEYS entries gate /v1/*. Any key works; an optional
+    // "name:secret" form labels that client in metrics, a bare secret is
+    // auto-labeled. Empty = no API keys configured.
     let clients: Option<HashMap<String, String>> = {
         let entries: Vec<(String, String)> = env_or("PROXY_API_KEYS", "")
             .split(',')
@@ -113,6 +152,39 @@ async fn main() {
             .collect();
         (!entries.is_empty()).then(|| entries.into_iter().collect())
     };
+
+    // Admin password gates the dashboard + observability endpoints.
+    let admin_password = {
+        let p = env_or("ADMIN_PASSWORD", "");
+        (!p.is_empty()).then_some(p)
+    };
+    let insecure = env_or("INSECURE_NO_AUTH", "false") == "true";
+    let trust_proxy = env_or("TRUST_PROXY", "false") == "true";
+
+    // Fail closed: refuse to start exposed without auth. Secure mode requires
+    // both an API key and an admin password; the only way to run fully open is
+    // to opt in explicitly (loopback / firewalled deployments).
+    let secure_mode = clients.is_some() && admin_password.is_some();
+    if !(insecure || secure_mode) {
+        eprintln!(
+            "\nnim-proxy refuses to start without authentication.\n\n\
+             Choose one:\n  \
+             1. Secure mode  — set BOTH:\n       \
+             PROXY_API_KEYS=<one-or-more-secrets>   (gates the API)\n       \
+             ADMIN_PASSWORD=<password>              (gates the dashboard/metrics)\n  \
+             2. Open mode    — set INSECURE_NO_AUTH=true\n       \
+             (ONLY on localhost or behind a firewall/VPN; everything is unauthenticated)\n\n\
+             Currently set: PROXY_API_KEYS={}, ADMIN_PASSWORD={}\n",
+            if clients.is_some() { "yes" } else { "no" },
+            if admin_password.is_some() {
+                "yes"
+            } else {
+                "no"
+            },
+        );
+        std::process::exit(1);
+    }
+
     let rpm: usize = env_or("RPM_PER_KEY", "40").parse().expect("RPM_PER_KEY");
     let cfg = Config {
         base_url: env_or("NIM_BASE_URL", "https://integrate.api.nvidia.com")
@@ -155,11 +227,22 @@ async fn main() {
         rpm,
         keys.len() * rpm
     );
+    if insecure {
+        tracing::warn!("INSECURE_NO_AUTH=true — API and dashboard are UNAUTHENTICATED. Use only on localhost or behind a firewall.");
+    }
     tracing::info!(
-        "client auth       {}",
+        "API auth          {}",
         match &clients {
-            Some(c) => format!("required ({} clients)", c.len()),
-            None => "off (local mode)".to_owned(),
+            Some(c) => format!("required ({} key(s))", c.len()),
+            None => "OFF (no PROXY_API_KEYS)".to_owned(),
+        }
+    );
+    tracing::info!(
+        "dashboard auth    {}",
+        if admin_password.is_some() {
+            "required (ADMIN_PASSWORD)"
+        } else {
+            "OFF"
         }
     );
     tracing::info!(
@@ -192,6 +275,7 @@ async fn main() {
         .install_recorder()
         .expect("prometheus recorder");
 
+    let max_inflight: usize = env_or("MAX_INFLIGHT", "512").parse().expect("MAX_INFLIGHT");
     let pool = Arc::new(Pool::new(keys, rpm));
     let state = Arc::new(AppState {
         dispatch: Dispatcher::new(pool.clone()),
@@ -204,6 +288,10 @@ async fn main() {
             .expect("http client"),
         models_cache: Mutex::new(None),
         no_inject: std::sync::Mutex::new(std::collections::HashSet::new()),
+        model_labels: std::sync::Mutex::new(std::collections::HashSet::new()),
+        admin: Admin::new(admin_password, trust_proxy),
+        inflight: AtomicUsize::new(0),
+        max_inflight,
         cfg,
     });
 
@@ -254,7 +342,10 @@ async fn main() {
             include_str!("dashboard.html"),
         )
     };
-    let app = Router::new()
+    // Admin-gated surface: dashboard, config, history, metrics. The guard
+    // middleware passes a valid session cookie / Bearer / Basic, else it
+    // redirects browsers to /login and 401s API clients.
+    let protected = Router::new()
         .route("/", get(dash))
         .route("/dash", get(dash))
         .route(
@@ -286,13 +377,25 @@ async fn main() {
                 },
             ),
         )
-        .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(move || async move { prometheus.render() }))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_admin,
+        ));
+
+    // Public surface: health probe, login flow, and the API (its own key gate).
+    let app = Router::new()
+        .merge(protected)
+        .route("/health", get(|| async { "ok" }))
+        .route("/login", get(auth::login_page).post(auth::login_submit))
+        .route("/logout", post(auth::logout))
         .route("/v1/{*path}", any(proxy::handle))
+        .layer(axum::middleware::from_fn(security_headers))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{port}");
+    let host = env_or("HOST", "0.0.0.0");
+    let addr = format!("{host}:{port}");
     tracing::info!("dashboard         http://localhost:{port}/  (metrics at /metrics)");
     tracing::info!("listening on      {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");

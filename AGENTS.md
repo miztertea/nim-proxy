@@ -3,7 +3,14 @@
 nim-proxy is a Rust proxy that makes NVIDIA NIM's free tier usable for agent
 harnesses: it paces requests to the per-key rate limit, load-balances across
 keys, and keeps client connections alive while it waits. Source lives in
-`src/` (~5 files), tests in `tests/`, load harness in `scripts/`.
+`src/` (`main.rs`, `proxy.rs`, `pool.rs`, `dispatch.rs`, `history.rs`,
+`auth.rs`, `dashboard.html`), tests in `tests/`, load harness in `scripts/`.
+
+Auth lives in `src/auth.rs` (fail-closed posture, admin-password session
+cookie, constant-time compares); the API-key gate and label sanitizing are in
+`src/proxy.rs`. Any change touching auth, request labels, or the dashboard's
+`innerHTML` must keep the security invariants — see the `decisions/` pages on
+auth posture and input sanitizing before editing.
 
 ## Working on the code
 

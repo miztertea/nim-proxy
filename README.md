@@ -26,17 +26,19 @@ This tool is **not** designed to circumvent NVIDIA's terms of service. It maximi
 2. Configure and run:
 
 ```sh
-cp .env.example .env        # paste your keys into NIM_API_KEYS
+cp .env.example .env        # paste keys into NIM_API_KEYS, then pick an auth mode (below)
 docker compose up -d --build
 ```
 
-Or without Docker: `NIM_API_KEYS=nvapi-xxx,nvapi-yyy cargo run --release`
+Or without Docker: `NIM_API_KEYS=nvapi-xxx,nvapi-yyy INSECURE_NO_AUTH=true cargo run --release`
 
 3. Open the dashboard at `http://localhost:8000/` and point your client at `http://localhost:8000/v1`.
 
+> **The proxy refuses to start exposed without auth.** Either set `ADMIN_PASSWORD` + `PROXY_API_KEYS` (secure mode) or `INSECURE_NO_AUTH=true` (open — localhost/firewalled only). See [Security & deployment](#security--deployment).
+
 ## Client recipes
 
-Model IDs are passed through verbatim — use any ID from the [NIM catalog](https://build.nvidia.com/models) (or `curl localhost:8000/v1/models`). No API key is needed client-side in local mode; if the proxy has `PROXY_API_KEYS` set, use your assigned secret as the API key.
+Model IDs are passed through verbatim — use any ID from the [NIM catalog](https://build.nvidia.com/models) (or `curl localhost:8000/v1/models`). In open mode no client-side key is needed; in secure mode, use your assigned `PROXY_API_KEYS` secret as the API key.
 
 **OpenCode** — `opencode.json`:
 
@@ -99,15 +101,47 @@ Served at `GET /` — a single embedded HTML file, no Grafana, no config. Three 
 
 **Time ranges & history.** The filter row offers Live (pausable, 3 s refresh) plus 1h/6h/24h/7d/30d presets and a custom calendar date-time range. Range views are served from the proxy's own history: a ~4 KB metrics snapshot every 5 minutes, kept `HISTORY_DAYS` days (default 30, `0` = forever) in `DATA_DIR` (a Docker volume in the compose file; ~35 MB per 30 days). In a range view every tile, card, and table reports totals *for that window* — instant usage reports.
 
-## Client access keys
+## Security & deployment
 
-By default the proxy runs in **local mode**: no authentication, every request attributed to the client `local`. Set `PROXY_API_KEYS` to require a Bearer token and the proxy becomes safe to share:
+The proxy **fails closed**: it will not start on a network-reachable port without authentication. There are exactly two ways to run it.
+
+### Secure mode (any exposed deployment)
+
+Set both credentials:
 
 ```sh
-PROXY_API_KEYS=alice:8f3k...,bob:2mq9...
+PROXY_API_KEYS=alice:8f3k...,bob:2mq9...   # gates the API (/v1/*); any key works
+ADMIN_PASSWORD=a-long-random-string        # gates the dashboard, /metrics, /api/history
 ```
 
-The name is the metrics/dashboard label, so per-friend usage is visible per model. Unknown tokens get an OpenAI-style 401. Keep `/metrics`, `/health`, and the dashboard behind your firewall or reverse proxy — they are intentionally unauthenticated.
+- **API** (`/v1/*`): clients send `Authorization: Bearer <key>`. The optional `name:secret` form labels that client in metrics (per-friend leaderboard); a bare secret is auto-labeled. Unknown keys get an OpenAI-style 401. Key comparison is constant-time.
+- **Dashboard**: browsers hit `/login`, enter the password, and get a signed, HttpOnly, SameSite=Strict session cookie (12 h). `/`, `/metrics`, and `/api/history` require it.
+- **Scrapers**: Prometheus scrapes `/metrics` with `Authorization: Bearer <ADMIN_PASSWORD>` (or HTTP Basic). Example scrape config:
+  ```yaml
+  scrape_configs:
+    - job_name: nim-proxy
+      authorization: { credentials: "<ADMIN_PASSWORD>" }
+      static_configs: [{ targets: ["nim-proxy:8000"] }]
+  ```
+- `/health` stays public (load-balancer / Docker probe; exposes nothing).
+
+### Open mode (localhost / firewalled only)
+
+```sh
+INSECURE_NO_AUTH=true
+```
+
+Everything is unauthenticated. Only use this bound to loopback or on a fully private network. The compose file publishes `127.0.0.1:8000:8000` by default for exactly this case.
+
+### Deployment patterns
+
+| Pattern | How |
+|---|---|
+| **Local self-host** | `INSECURE_NO_AUTH=true`, keep the default loopback port publish. Or set `HOST=127.0.0.1` when running the binary directly. |
+| **VPS / bare metal** | Secure mode + a TLS-terminating reverse proxy (nginx/Caddy) in front. Set `TRUST_PROXY=true` so the session cookie is marked `Secure` (needs `X-Forwarded-Proto: https`). |
+| **PaaS (ECS / Railway / Fly)** | Secure mode; the platform edge terminates TLS. Set `TRUST_PROXY=true`. Inject `ADMIN_PASSWORD` / `PROXY_API_KEYS` as platform secrets, not in the image. |
+
+**TLS is not built in** — passwords and keys must travel over HTTPS, so terminate TLS at a reverse proxy or platform edge for any exposed deployment. Additional hardening in place: a strict `Content-Security-Policy` and anti-framing/sniffing headers on all responses, a failed-login throttle, and an in-flight cap (`MAX_INFLIGHT`) that sheds floods with a 503.
 
 ## Configuration
 
@@ -117,14 +151,18 @@ All via environment variables (or `.env`). Only `NIM_API_KEYS` is required.
 |---|---|---|
 | `NIM_API_KEYS` | — (required) | Comma-separated `nvapi-...` keys; each is an independent 40 RPM lane |
 | `NIM_BASE_URL` | `https://integrate.api.nvidia.com` | Upstream base URL |
-| `PORT` | `8000` | Listen port |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` | Bind address and port |
+| `PROXY_API_KEYS` | unset | API keys (`secret` or `name:secret`, comma-separated). Required in secure mode |
+| `ADMIN_PASSWORD` | unset | Dashboard/observability password. Required in secure mode |
+| `INSECURE_NO_AUTH` | `false` | `true` runs fully open (localhost/firewalled only) |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-Proto` and mark the session cookie `Secure` |
+| `MAX_INFLIGHT` | `512` | Concurrent-request cap before shedding with 503 |
 | `RPM_PER_KEY` | `40` | Per-key requests per rolling minute |
 | `MAX_WAIT_SECS` | `900` | Max time a request waits for a slot / retries before giving up |
 | `HEARTBEAT_SECS` | `10` | SSE keepalive interval while waiting |
 | `MODELS_TTL_SECS` | `600` | `/v1/models` cache lifetime |
 | `STREAM_IDLE_SECS` | `300` | Abort a stream after this much upstream silence (0 = off) |
 | `STRICT_PASSTHROUGH` | `false` | Never modify request bodies (disables usage injection) |
-| `PROXY_API_KEYS` | unset | Client access keys, `name:secret` comma-separated; unset = local mode |
 | `REF_PRICE_IN` / `REF_PRICE_OUT` | `0.5` / `2.0` | $/1M-token reference prices for "dollars saved" |
 | `HISTORY_DAYS` | `30` | Metrics-history retention in days (0 = forever) |
 | `DATA_DIR` | `data` (`/data` in Docker) | Where `history.jsonl` lives; empty = in-memory only |
@@ -151,17 +189,21 @@ All via environment variables (or `.env`). Only `NIM_API_KEYS` is required.
 | `nimproxy_lane_requests_total` | lane | Requests per key lane |
 | `nimproxy_lane_benched_total` | lane, status | Upstream 429/5xx/connect per lane |
 | `nimproxy_affinity_total` | result | Conversation routing: `sticky` / `spill` / `none` |
-| `nimproxy_unauthorized_total` | — | Rejected client requests |
+| `nimproxy_unauthorized_total` | — | Rejected API requests |
+| `nimproxy_login_failures_total` | — | Failed dashboard logins |
+| `nimproxy_shed_total` | — | Requests shed at the in-flight cap |
+
+The `model` and `path` labels are sanitized (safe charset, length-capped) and `model` cardinality is bounded, so untrusted clients can't inject into the exposition format or explode the registry.
 
 ## Testing
 
 Three layers, all runnable locally:
 
 ```sh
-cargo test          # 13 unit + 15 end-to-end tests (real binary vs scripted mock NIM)
+cargo test          # 26 unit + 19 end-to-end tests (real binary vs scripted mock NIM)
 ```
 
-The e2e suite covers auth, 429 ride-out with key failover, Retry-After timing, pacing enforcement, fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, metrics accuracy, history persistence across restart, and SIGTERM.
+The e2e suite covers auth (API keys, admin password / session cookie / Bearer, fail-closed boot posture), 429 ride-out with key failover, Retry-After timing, pacing enforcement, fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, label-injection sanitizing, security headers, metrics accuracy, history persistence across restart, and SIGTERM.
 
 Load test (100 concurrent clients against a mock that *strictly enforces* NIM's per-key window and counts violations):
 
@@ -180,7 +222,9 @@ Exits non-zero on any client-visible failure or a single upstream rate violation
 - **One instance per key set.** Rate state is in-memory; two replicas sharing keys would each assume the full 40 RPM. Run one instance (it comfortably saturates far more keys than you can register).
 - **Rate windows reset on restart.** A restart right after heavy traffic can draw a burst of 429s — the retry machinery absorbs them invisibly.
 - **Chart history in a Live view lives in the browser** (~20 min); range views and totals come from server-side history and survive refresh.
-- **"OTel metrics?"** Prometheus exposition format, which every OpenTelemetry collector ingests natively (`prometheus` receiver).
+- **"OTel metrics?"** Prometheus exposition format, which every OpenTelemetry collector ingests natively (`prometheus` receiver). In secure mode the scraper authenticates with `Authorization: Bearer <ADMIN_PASSWORD>`.
+- **No built-in TLS.** Terminate TLS at a reverse proxy or platform edge for any exposed deployment; set `TRUST_PROXY=true` so session cookies are marked `Secure`.
+- **Sessions reset on restart.** The cookie signing key is random per boot, so a restart logs everyone out of the dashboard (API keys are unaffected).
 
 ## Project knowledge base
 
