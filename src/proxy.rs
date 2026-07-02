@@ -172,6 +172,117 @@ fn record_tokens(ctx: &Ctx, prompt: Option<u64>, completion: Option<u64>, source
     }
 }
 
+/// Bound `finish_reason` to the known OpenAI set so an unexpected upstream
+/// value can't grow label cardinality. `length` is the truncation signal.
+fn finish_label(raw: &str) -> String {
+    match raw {
+        "stop" | "length" | "tool_calls" | "content_filter" | "function_call" => raw.to_owned(),
+        _ => "other".to_owned(),
+    }
+}
+
+/// The request's tool-selection mode, bounded to a small enum. Called only
+/// when the request offers tools, so a missing `tool_choice` means the
+/// provider default (auto).
+fn tool_choice_mode(v: &serde_json::Value) -> &'static str {
+    match v.get("tool_choice") {
+        Some(serde_json::Value::String(s)) => match s.as_str() {
+            "auto" => "auto",
+            "none" => "none",
+            "required" => "required",
+            _ => "other",
+        },
+        Some(serde_json::Value::Object(_)) => "named",
+        _ => "auto",
+    }
+}
+
+/// Count tools offered in a request body (`tools`, or legacy `functions`).
+fn count_tools(v: &serde_json::Value) -> Option<usize> {
+    v.get("tools")
+        .and_then(|t| t.as_array())
+        .map(|a| a.len())
+        .or_else(|| {
+            v.get("functions")
+                .and_then(|t| t.as_array())
+                .map(|a| a.len())
+        })
+}
+
+/// Whether the request asks for structured (JSON) output.
+fn is_json_mode(v: &serde_json::Value) -> bool {
+    v.get("response_format")
+        .and_then(|rf| rf.get("type"))
+        .and_then(|t| t.as_str())
+        .is_some_and(|t| t == "json_object" || t == "json_schema")
+}
+
+/// Record request-shape metrics: what the harness asked for (stream flag,
+/// conversation depth, tools offered, sampling params, output cap, JSON mode).
+/// Counts and sizes only — never message content. All heavy values go to
+/// histograms, never labels, so cardinality stays bounded.
+fn record_shape(ctx: &Ctx, parsed: Option<&serde_json::Value>, wants_stream: bool) {
+    // Labeled by client: request shape reflects the harness, not the model —
+    // this is what powers the Harnesses view ("what is each agent doing").
+    counter!(
+        "nimproxy_stream_requests_total",
+        "client" => ctx.client.clone(),
+        "stream" => if wants_stream { "true" } else { "false" }.to_owned(),
+    )
+    .increment(1);
+    let Some(v) = parsed else { return };
+    if let Some(msgs) = v.get("messages").and_then(|m| m.as_array()) {
+        histogram!("nimproxy_request_messages", "client" => ctx.client.clone())
+            .record(msgs.len() as f64);
+    }
+    if let Some(n) = count_tools(v) {
+        histogram!("nimproxy_request_tools", "client" => ctx.client.clone()).record(n as f64);
+        counter!("nimproxy_tool_choice_total", "mode" => tool_choice_mode(v).to_owned())
+            .increment(1);
+    }
+    if let Some(mt) = v
+        .get("max_tokens")
+        .and_then(|x| x.as_u64())
+        .or_else(|| v.get("max_completion_tokens").and_then(|x| x.as_u64()))
+    {
+        histogram!("nimproxy_request_max_tokens", "client" => ctx.client.clone()).record(mt as f64);
+    }
+    if let Some(t) = v.get("temperature").and_then(|x| x.as_f64()) {
+        histogram!("nimproxy_request_temperature", "client" => ctx.client.clone()).record(t);
+    }
+    if is_json_mode(v) {
+        counter!("nimproxy_json_mode_total", "client" => ctx.client.clone()).increment(1);
+    }
+}
+
+/// Record response-quality signals available once a generation completes:
+/// how it ended (truncation), reasoning-token burn, and tool-call volume.
+fn record_quality(
+    ctx: &Ctx,
+    finish: Option<&str>,
+    reasoning: Option<u64>,
+    tool_calls: Option<u64>,
+) {
+    if let Some(fr) = finish {
+        counter!(
+            "nimproxy_finish_reason_total",
+            "model" => ctx.model.clone(),
+            "reason" => finish_label(fr),
+        )
+        .increment(1);
+    }
+    if let Some(r) = reasoning {
+        if r > 0 {
+            counter!("nimproxy_reasoning_tokens_total", "model" => ctx.model.clone()).increment(r);
+        }
+    }
+    if let Some(n) = tool_calls {
+        if n > 0 {
+            counter!("nimproxy_tool_calls_total", "model" => ctx.model.clone()).increment(n);
+        }
+    }
+}
+
 /// Watches an SSE byte stream for the `usage` object and counts data events
 /// (a rough one-token-per-event estimate when the upstream omits usage).
 /// Purely observational — bytes reach the client untouched.
@@ -181,6 +292,10 @@ struct SseScan {
     events: u64,
     prompt: Option<u64>,
     completion: Option<u64>,
+    reasoning: Option<u64>,
+    finish_reason: Option<String>,
+    /// Highest `tool_calls[].index` seen; +1 is the tool-call count.
+    tool_call_max: Option<u64>,
 }
 
 impl SseScan {
@@ -194,19 +309,50 @@ impl SseScan {
                     continue;
                 }
                 self.events += 1;
-                if data.contains("\"usage\"") {
-                    if let Some(u) = serde_json::from_str::<serde_json::Value>(data)
-                        .ok()
-                        .and_then(|v| v.get("usage").filter(|u| !u.is_null()).cloned())
-                    {
-                        self.prompt = u
-                            .get("prompt_tokens")
-                            .and_then(|x| x.as_u64())
-                            .or(self.prompt);
-                        self.completion = u
-                            .get("completion_tokens")
-                            .and_then(|x| x.as_u64())
-                            .or(self.completion);
+                // Only the events that carry usage, a concrete finish_reason
+                // (a string, not the per-chunk `null`), or tool_calls are worth
+                // a full JSON parse; plain content deltas are skipped.
+                let interesting = data.contains("\"usage\"")
+                    || data.contains("\"finish_reason\":\"")
+                    || data.contains("\"tool_calls\"");
+                if interesting {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
+                            self.prompt = u
+                                .get("prompt_tokens")
+                                .and_then(|x| x.as_u64())
+                                .or(self.prompt);
+                            self.completion = u
+                                .get("completion_tokens")
+                                .and_then(|x| x.as_u64())
+                                .or(self.completion);
+                            self.reasoning = u
+                                .get("completion_tokens_details")
+                                .and_then(|d| d.get("reasoning_tokens"))
+                                .and_then(|x| x.as_u64())
+                                .or(self.reasoning);
+                        }
+                        if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
+                            for ch in choices {
+                                if let Some(fr) = ch.get("finish_reason").and_then(|f| f.as_str()) {
+                                    self.finish_reason = Some(fr.to_owned());
+                                }
+                                if let Some(tcs) = ch
+                                    .get("delta")
+                                    .and_then(|d| d.get("tool_calls"))
+                                    .and_then(|t| t.as_array())
+                                {
+                                    for tc in tcs {
+                                        if let Some(idx) = tc.get("index").and_then(|i| i.as_u64())
+                                        {
+                                            self.tool_call_max = Some(
+                                                self.tool_call_max.map_or(idx, |m| m.max(idx)),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -327,6 +473,11 @@ pub async fn handle(
         .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
         .unwrap_or(false);
     let prefer = parsed.as_ref().and_then(|v| affinity(v, state.pool.len()));
+
+    // Fingerprint what the harness asked for (generation endpoints only).
+    if ctx.path == "/v1/chat/completions" || ctx.path == "/v1/completions" {
+        record_shape(&ctx, parsed.as_ref(), wants_stream);
+    }
 
     // Usage injection: streamed responses only report exact token usage when
     // asked via stream_options, so ask on the client's behalf. `fallback`
@@ -567,13 +718,26 @@ async fn streaming(
             };
             let completion = scan.completion.or(Some(scan.events));
             record_tokens(&ctx, scan.prompt, completion, source);
+            record_quality(
+                &ctx,
+                scan.finish_reason.as_deref(),
+                scan.reasoning,
+                scan.tool_call_max.map(|m| m + 1),
+            );
             if let (Some(first), Some(c)) = (first_chunk, completion) {
                 let gen_secs = first.elapsed().as_secs_f64();
                 if gen_secs > 0.1 && c > 0 {
                     histogram!("nimproxy_tokens_per_second", "model" => ctx.model.clone(), "source" => source.to_owned())
                         .record(c as f64 / gen_secs);
+                    // Mean inter-token latency (time-per-output-token).
+                    histogram!("nimproxy_tpot_seconds", "model" => ctx.model.clone())
+                        .record(gen_secs / c as f64);
                 }
             }
+            // Total upstream time for streaming, for parity with the buffered
+            // path (which records upstream_seconds directly).
+            histogram!("nimproxy_upstream_seconds", "model" => ctx.model.clone())
+                .record(sent_at.elapsed().as_secs_f64());
             record_request(&ctx, "200");
             return;
         }
@@ -636,16 +800,36 @@ async fn relay(resp: reqwest::Response, ctx: &Ctx) -> Response {
         .to_owned();
     let body = resp.bytes().await.unwrap_or_default();
     if status.is_success() {
-        if let Some(u) = serde_json::from_slice::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("usage").filter(|u| !u.is_null()).cloned())
-        {
-            record_tokens(
-                ctx,
-                u.get("prompt_tokens").and_then(|x| x.as_u64()),
-                u.get("completion_tokens").and_then(|x| x.as_u64()),
-                "usage",
-            );
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+            if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
+                record_tokens(
+                    ctx,
+                    u.get("prompt_tokens").and_then(|x| x.as_u64()),
+                    u.get("completion_tokens").and_then(|x| x.as_u64()),
+                    "usage",
+                );
+            }
+            let reasoning = v
+                .get("usage")
+                .and_then(|u| u.get("completion_tokens_details"))
+                .and_then(|d| d.get("reasoning_tokens"))
+                .and_then(|x| x.as_u64());
+            let choices = v.get("choices").and_then(|c| c.as_array());
+            let finish = choices
+                .and_then(|c| c.first())
+                .and_then(|c| c.get("finish_reason"))
+                .and_then(|f| f.as_str());
+            let tool_calls = choices.map(|cs| {
+                cs.iter()
+                    .filter_map(|c| {
+                        c.get("message")
+                            .and_then(|m| m.get("tool_calls"))
+                            .and_then(|t| t.as_array())
+                    })
+                    .map(|a| a.len() as u64)
+                    .sum::<u64>()
+            });
+            record_quality(ctx, finish, reasoning, tool_calls);
         }
     }
     Response::builder()
@@ -722,7 +906,10 @@ fn gateway_timeout(state: &AppState) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_label, label_path, sanitize_label, SseScan};
+    use super::{
+        bounded_label, count_tools, finish_label, is_json_mode, label_path, sanitize_label,
+        tool_choice_mode, SseScan,
+    };
     use std::collections::HashSet;
 
     #[test]
@@ -782,5 +969,63 @@ mod tests {
         scan.feed(b"data: {\"a\":1}\n\ndata: {\"b\":2}\n\ndata: {\"c\":3}\n\ndata: [DONE]\n\n");
         assert_eq!(scan.events, 3);
         assert_eq!(scan.completion, None);
+    }
+
+    #[test]
+    fn scan_captures_finish_reason_tool_calls_and_reasoning() {
+        let mut scan = SseScan::default();
+        // A content delta (finish_reason:null — skipped), two tool-call deltas
+        // (indices 0 and 1), then a final chunk with finish_reason + usage that
+        // carries reasoning-token details.
+        scan.feed(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n",
+        );
+        scan.feed(b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"a\"}}]}}]}\n\n");
+        scan.feed(b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"name\":\"b\"}}]}}]}\n\n");
+        scan.feed(b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n");
+        scan.feed(b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"completion_tokens_details\":{\"reasoning_tokens\":5}}}\n\ndata: [DONE]\n\n");
+        assert_eq!(scan.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(scan.tool_call_max, Some(1)); // +1 => 2 tool calls
+        assert_eq!(scan.reasoning, Some(5));
+        assert_eq!(scan.completion, Some(8));
+    }
+
+    #[test]
+    fn finish_label_bounds_unknown_values() {
+        assert_eq!(finish_label("stop"), "stop");
+        assert_eq!(finish_label("length"), "length");
+        assert_eq!(finish_label("tool_calls"), "tool_calls");
+        assert_eq!(finish_label("weird\"injection"), "other");
+    }
+
+    #[test]
+    fn tool_choice_and_shape_readers() {
+        let auto = serde_json::json!({"tools": [{}], "tool_choice": "auto"});
+        assert_eq!(tool_choice_mode(&auto), "auto");
+        let named = serde_json::json!({"tool_choice": {"type": "function"}});
+        assert_eq!(tool_choice_mode(&named), "named");
+        // tools present, no explicit choice -> provider default (auto)
+        assert_eq!(
+            tool_choice_mode(&serde_json::json!({"tools": [{}]})),
+            "auto"
+        );
+
+        assert_eq!(
+            count_tools(&serde_json::json!({"tools": [{}, {}, {}]})),
+            Some(3)
+        );
+        assert_eq!(
+            count_tools(&serde_json::json!({"functions": [{}]})),
+            Some(1)
+        );
+        assert_eq!(count_tools(&serde_json::json!({"model": "x"})), None);
+
+        assert!(is_json_mode(
+            &serde_json::json!({"response_format": {"type": "json_object"}})
+        ));
+        assert!(!is_json_mode(
+            &serde_json::json!({"response_format": {"type": "text"}})
+        ));
+        assert!(!is_json_mode(&serde_json::json!({"model": "x"})));
     }
 }

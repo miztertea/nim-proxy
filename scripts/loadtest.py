@@ -9,9 +9,13 @@ saw a failure or the upstream recorded a single rate-limit violation.
 Typical run (three terminals or backgrounded):
   python3 scripts/mock_nim.py --enforce --rpm 40 --port 9999
   NIM_API_KEYS=k1,k2,k3 NIM_BASE_URL=http://127.0.0.1:9999 PORT=8000 \
-      cargo run --release
+      INSECURE_NO_AUTH=true cargo run --release
   python3 scripts/loadtest.py --proxy http://127.0.0.1:8000 \
       --mock http://127.0.0.1:9999 --clients 100 --requests 3
+
+The request mix includes plain, tool-offering, and JSON-mode calls with
+sampling params, so the v0.4.0 request-shape / response-quality code paths are
+exercised under concurrency (not just the rate limiter).
 """
 import argparse
 import json
@@ -33,15 +37,27 @@ results_lock = threading.Lock()
 def one_request(args, client_id, seq):
     model = MODELS[(client_id + seq) % len(MODELS)]
     stream = (client_id + seq) % 2 == 0
-    body = json.dumps({
+    payload = {
         "model": model,
         "stream": stream,
+        "temperature": 0.2 + 0.1 * ((client_id + seq) % 8),
+        "max_tokens": 1024,
         "messages": [
             {"role": "system", "content": "you are a load test"},
-            # Stable per-client conversation identity exercises affinity.
+            # Stable per-client conversation identity exercises affinity
+            # (messages are unchanged by the shape variety below).
             {"role": "user", "content": f"conversation for client {client_id}"},
         ],
-    }).encode()
+    }
+    # Exercise the v0.4.0 shape/quality paths under concurrency: every 3rd
+    # request offers tools, every 5th asks for JSON output.
+    if (client_id + seq) % 3 == 0:
+        payload["tools"] = [{"type": "function",
+                             "function": {"name": "search", "parameters": {}}}]
+        payload["tool_choice"] = "auto"
+    if (client_id + seq) % 5 == 0:
+        payload["response_format"] = {"type": "json_object"}
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{args.proxy}/v1/chat/completions", data=body,
         headers={"Content-Type": "application/json",

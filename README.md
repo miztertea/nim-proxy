@@ -95,11 +95,14 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## Dashboard
 
-Served at `GET /` — a single embedded HTML file, no Grafana, no config. Three views, light and dark mode:
+Served at `GET /` — a single embedded HTML file, no Grafana, no config. Because the proxy sits in the request path for every harness and model, it doubles as a **benchmarking and agent-observability tool**: it can see how tool-heavy each harness is, how deep its conversations run, how it tunes sampling, where models truncate, and how much "thinking" a reasoning model burns — all from counts and sizes, never message content. Six persona-aligned views, light and dark mode, each ordered at-a-glance → trends → detail:
 
-- **Models** — ranked model cards (publisher logos with offline fallback, requests, tokens, TTFT, tok/s, error rate, dollars saved), TTFT median/p95 over time, tokens-per-minute by model, cumulative savings, full table.
-- **Proxy** — capacity-used and success-rate gauges, request/outcome/load charts, queue-wait median/p95, hour-of-day activity heatmap, per-client leaderboard.
-- **Keys** — per-lane utilization meters, 429s-per-minute by lane, conversation stickiness, per-lane table.
+- **Overview** — the one-screen landing: dollars saved, capacity and success-rate gauges (threshold-colored), request/token/savings sparklines, a health strip (active/queued/shed/401/failed-logins), and top models & harnesses.
+- **Models** — ranked model cards, TTFT / generation-speed (tok/s) / inter-token-latency (TPOT) / upstream-latency median-p95 charts, tokens-per-minute by model, cumulative savings, a "how responses end" (truncation) breakdown, reasoning-vs-output share, and a full per-model table (adds TPOT, truncation %, reasoning %).
+- **Compare** — a head-to-head model scorecard (requests, TTFT, tok/s, TPOT, avg reply, truncation, reasoning, errors) with the best value in each column highlighted, plus a generation-speed bar race.
+- **Harnesses** — what each agent is *doing*: tool intensity (avg tools/request), conversation depth (avg messages/request), sampling fingerprint (avg temperature), streaming-vs-buffered mix, and a per-harness leaderboard.
+- **Proxy** — capacity-used and success-rate gauges (colored by threshold), request/outcome/load charts, a ranked non-success-outcome breakdown, queue-wait median/p95, hour-of-day heatmap, a reliability & security panel (shed/benches/401s/failed logins), a request-types panel (stream vs buffered, JSON mode, tool-choice mix), and a per-client leaderboard.
+- **Keys** — per-lane utilization meters, 429s-per-minute by lane, conversation stickiness, live headroom, a keys-for-peak sizing estimate, and a per-lane table.
 
 **Time ranges & history.** The filter row offers Live (pausable, 3 s refresh) plus 1h/6h/24h/7d/30d presets and a custom calendar date-time range. Range views are served from the proxy's own history: a ~4 KB metrics snapshot every 5 minutes, kept `HISTORY_DAYS` days (default 30, `0` = forever) in `DATA_DIR` (a Docker volume in the compose file; ~35 MB per 30 days). In a range view every tile, card, and table reports totals *for that window* — instant usage reports.
 
@@ -185,7 +188,18 @@ All via environment variables (or `.env`). Only `NIM_API_KEYS` is required.
 | `nimproxy_completion_tokens_total` | client, model, source | Completion tokens; `usage` = exact, `estimate` = per-SSE-event fallback |
 | `nimproxy_ttft_seconds` | model | Upstream send → first streamed byte |
 | `nimproxy_tokens_per_second` | model, source | Generation speed |
-| `nimproxy_upstream_seconds` | model | Non-streaming upstream latency |
+| `nimproxy_tpot_seconds` | model | Mean inter-token latency (time per output token) |
+| `nimproxy_upstream_seconds` | model | Upstream latency (streaming + non-streaming) |
+| `nimproxy_finish_reason_total` | model, reason | How generations end; `length` = truncation |
+| `nimproxy_tool_calls_total` | model | Tool calls emitted |
+| `nimproxy_reasoning_tokens_total` | model | Reasoning ("thinking") tokens, from `usage` details |
+| `nimproxy_stream_requests_total` | client, stream | Requests per harness, streaming vs buffered |
+| `nimproxy_request_messages` | client | Conversation depth per request (histogram) |
+| `nimproxy_request_tools` | client | Tools offered per request (histogram) |
+| `nimproxy_request_max_tokens` | client | Requested output cap (histogram) |
+| `nimproxy_request_temperature` | client | Sampling temperature (histogram) |
+| `nimproxy_tool_choice_total` | mode | Tool-selection mode: `auto`/`none`/`required`/`named` |
+| `nimproxy_json_mode_total` | client | Structured-output (JSON-mode) requests |
 | `nimproxy_queue_wait_seconds` | — | Time waiting for a rate-limit slot |
 | `nimproxy_queue_depth` / `nimproxy_active_requests` | — | Live load gauges |
 | `nimproxy_lane_requests_total` | lane | Requests per key lane |
@@ -195,19 +209,23 @@ All via environment variables (or `.env`). Only `NIM_API_KEYS` is required.
 | `nimproxy_login_failures_total` | — | Failed dashboard logins |
 | `nimproxy_shed_total` | — | Requests shed at the in-flight cap |
 
-The `model` and `path` labels are sanitized (safe charset, length-capped) and `model` cardinality is bounded, so untrusted clients can't inject into the exposition format or explode the registry.
+Request shape (messages, tools, sampling params) is captured as **counts and
+sizes only — never message content**. The `model` and `path` labels are
+sanitized (safe charset, length-capped) and `model` cardinality is bounded;
+`reason`, `mode`, and `stream` are fixed enums — so untrusted clients can't
+inject into the exposition format or explode the registry.
 
 ## Testing
 
 Three layers, all runnable locally:
 
 ```sh
-cargo test          # 26 unit + 19 end-to-end tests (real binary vs scripted mock NIM)
+cargo test          # 29 unit + 21 end-to-end tests (real binary vs scripted mock NIM)
 ```
 
-The e2e suite covers auth (API keys, admin password / session cookie / Bearer, fail-closed boot posture), 429 ride-out with key failover, Retry-After timing, pacing enforcement, fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, label-injection sanitizing, security headers, metrics accuracy, history persistence across restart, and SIGTERM.
+The e2e suite covers auth (API keys, admin password / session cookie / Bearer, fail-closed boot posture), 429 ride-out with key failover, Retry-After timing, pacing enforcement, fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, label-injection sanitizing, security headers, metrics accuracy (incl. request-shape & response-quality signal on both the streaming and buffered paths, and the finish-reason cardinality clamp), history persistence across restart, and SIGTERM.
 
-Load test (100 concurrent clients against a mock that *strictly enforces* NIM's per-key window and counts violations):
+Load test (100 concurrent clients — a mix of plain, tool-offering, and JSON-mode calls — against a mock that *strictly enforces* NIM's per-key window and counts violations):
 
 ```sh
 python3 scripts/mock_nim.py --enforce --rpm 40 --port 9999 &

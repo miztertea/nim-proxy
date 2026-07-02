@@ -387,6 +387,206 @@ async fn metrics_report_traffic_tokens_and_affinity() {
 }
 
 #[tokio::test]
+async fn request_shape_and_quality_metrics_are_recorded() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    // A plain streaming request (finishes "stop").
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("hi", true))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    // A tool-using request with sampling params: the mock answers with a
+    // tool_calls delta and finish_reason "tool_calls".
+    let tool_req = serde_json::json!({
+        "model": "mock/model-a",
+        "stream": true,
+        "temperature": 0.7,
+        "max_tokens": 4096,
+        "tools": [{"type": "function", "function": {"name": "get_weather"}}],
+        "tool_choice": "auto",
+        "messages": [
+            {"role": "system", "content": "you are a test"},
+            {"role": "user", "content": "weather?"}
+        ]
+    });
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&tool_req)
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // Request shape (labeled by client — harness behavior).
+    assert!(
+        metrics.contains(r#"nimproxy_stream_requests_total{client="local",stream="true"}"#),
+        "stream flag counted: {metrics}"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_request_messages_count{client="local"}"#),
+        "conversation depth histogram present"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_request_tools_count{client="local"}"#),
+        "tools-offered histogram present"
+    );
+    assert!(
+        metrics.contains("nimproxy_request_temperature_count"),
+        "temperature histogram present"
+    );
+    assert!(
+        metrics.contains("nimproxy_request_max_tokens_count"),
+        "max_tokens histogram present"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_tool_choice_total{mode="auto"}"#),
+        "tool_choice mode counted"
+    );
+
+    // Response quality.
+    assert!(
+        metrics.contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="stop"}"#),
+        "stop finish recorded: {metrics}"
+    );
+    assert!(
+        metrics
+            .contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="tool_calls"}"#),
+        "tool_calls finish recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_tool_calls_total{model="mock/model-a"}"#),
+        "tool-call volume recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_reasoning_tokens_total{model="mock/model-a"}"#),
+        "reasoning tokens recorded"
+    );
+
+    // Cardinality stays bounded: the stream label is a two-value enum.
+    for line in metrics
+        .lines()
+        .filter(|l| l.starts_with("nimproxy_stream_requests_total{"))
+    {
+        assert!(
+            line.contains(r#"stream="true""#) || line.contains(r#"stream="false""#),
+            "stream label bounded to true/false: {line}"
+        );
+    }
+}
+
+/// The buffered (non-streaming) path extracts finish_reason, reasoning tokens,
+/// and tool-call count from `relay()`; an unknown finish_reason collapses to
+/// `other`; JSON mode and non-`auto` tool_choice are recorded. These paths are
+/// distinct from the streaming assertions above.
+#[tokio::test]
+async fn buffered_quality_and_edge_cases_are_recorded() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let post = |body: serde_json::Value| {
+        let proxy = &proxy;
+        async move {
+            let r = client()
+                .post(proxy.url("/v1/chat/completions"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status(), 200);
+            r.text().await.unwrap();
+        }
+    };
+
+    // Buffered tool call: mock answers with message.tool_calls + finish tool_calls.
+    post(serde_json::json!({
+        "model": "mock/model-a", "stream": false, "tool_choice": "required",
+        "tools": [{"type": "function", "function": {"name": "run"}}],
+        "messages": [{"role": "user", "content": "go"}]
+    }))
+    .await;
+
+    // Buffered JSON mode.
+    post(serde_json::json!({
+        "model": "mock/model-a", "stream": false,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": "as json"}]
+    }))
+    .await;
+
+    // Unknown upstream finish_reason must collapse to "other".
+    mock.state.push(Behavior::OddFinish);
+    post(serde_json::json!({
+        "model": "mock/model-a", "stream": false,
+        "messages": [{"role": "user", "content": "hi"}]
+    }))
+    .await;
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+
+    // Buffered quality extraction (from relay()).
+    assert!(
+        metrics
+            .contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="tool_calls"}"#),
+        "buffered tool_calls finish recorded: {metrics}"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_tool_calls_total{model="mock/model-a"}"#),
+        "buffered tool-call count recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_reasoning_tokens_total{model="mock/model-a"}"#),
+        "buffered reasoning tokens recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_upstream_seconds_count{model="mock/model-a"}"#),
+        "upstream latency recorded on the buffered path"
+    );
+
+    // Edge cases.
+    assert!(
+        metrics.contains(r#"nimproxy_tool_choice_total{mode="required"}"#),
+        "non-auto tool_choice mode recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_json_mode_total{client="local"}"#),
+        "JSON mode recorded"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_finish_reason_total{model="mock/model-a",reason="other"}"#),
+        "unknown finish_reason collapsed to other: {metrics}"
+    );
+    assert!(
+        !metrics.contains(r#"reason="banana""#),
+        "raw upstream finish_reason never becomes a label"
+    );
+}
+
+#[tokio::test]
 async fn history_records_snapshots_and_survives_restart() {
     let dir = std::env::temp_dir().join(format!("nimproxy-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

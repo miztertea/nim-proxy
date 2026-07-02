@@ -6,6 +6,60 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-02] decision + ingest — Benchmarking observability (v0.4.0)
+
+Turned the proxy into a benchmarking / agent-observability tool. The request
+body is already deserialized and every SSE event already scanned, so the
+agent-behavior + model-quality signal was in hand but unread.
+
+- **New decision** → [request-shape-metrics](decisions/request-shape-metrics.md):
+  capture request shape (messages, tools, sampling params, stream/JSON mode) and
+  response quality (finish_reason/truncation, tool calls, reasoning tokens, mean
+  TPOT) as bounded-cardinality metrics — **counts and sizes, never content**.
+  Shape is labeled by *client* (harness behavior), quality by *model*. Enums
+  (`finish_reason`, `tool_choice` mode, `stream`) are clamped server-side.
+- **Dashboard** rebuilt from three tabs to six persona-aligned views (Overview,
+  Models, Compare, Harnesses, Proxy, Keys); see
+  [dashboard](architecture/dashboard.md). Added `scorecard()`/`barRows()`
+  helpers and a hash-to-hue color fallback past the six categorical slots.
+- **Verified** in headless Chromium against a mock driving two named harnesses
+  (opencode: tool-heavy/deep; codex: plain): all six tabs populate, the
+  Harnesses view distinguishes both with distinct fingerprints, zero JS errors.
+  Cardinality bounding is unit- and e2e-tested.
+
+### Pre-merge hardening pass (same PR)
+
+Before merge: security scan (dedicated dashboard-XSS audit + a full
+`/security-review` of the branch) found **zero** vulnerabilities — every new
+`innerHTML` value is escaped, every new label is a bounded enum / histogram, and
+no route left the admin gate. Documentation swept and confirmed current (six
+views, metric table, env vars). Test coverage extended to the buffered
+`relay()` quality path, an unknown-`finish_reason`→`other` clamp, JSON mode, and
+non-`auto` `tool_choice` (now **29 unit + 21 e2e**). The load harness gained
+tool/JSON/sampling variety and a corrected boot command (`INSECURE_NO_AUTH`);
+re-run at 80×3 = 240 requests → 0 failures, 0 upstream rate violations, balanced
+across all keys, with the new metric series confirmed populated.
+
+## [2026-07-02] ingest — Dashboard reporting polish
+
+Client-side only (no server change, security invariants untouched); surfaces
+data already collected but previously under-shown. See
+[dashboard](architecture/dashboard.md).
+
+- **Generation speed (tok/s) median/p95 trend** on the Models tab — the
+  `nimproxy_tokens_per_second` histogram was only ever shown as one average
+  tile. Same bucket-delta quantile machinery as TTFT, filtered to
+  `source="usage"` so estimates don't drag the trend down.
+- **Non-success outcomes table** on the Proxy tab — ranks every recorded
+  non-200 status by count with a plain-language reason and share, so the
+  status detail already in `nimproxy_requests_total` is legible instead of
+  lumped into one "errors/min" line.
+- **Threshold-colored gauges** — capacity (blue→amber≥70%→red≥90%) and success
+  rate (green→amber<99%→red<90%) so the dials signal, not just count.
+- Verified in headless Chromium against the mock: both new elements render with
+  live data, gauges take the amber band under induced load/errors, zero JS
+  page errors.
+
 ## [2026-07-02] ingest — Security hardening (v0.3.0)
 
 A security review of the merged proxy found a stored-XSS chain (client-supplied

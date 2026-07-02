@@ -26,6 +26,7 @@ the chronology in [log.md](log.md).
 | [usage-injection-auto-fallback](decisions/usage-injection-auto-fallback.md) | Inject stream_options for exact tokens; 400 → retry untouched and remember |
 | [auth-posture-and-dashboard-password](decisions/auth-posture-and-dashboard-password.md) | Fail closed without auth; API keys + a shared-password dashboard session |
 | [input-sanitizing-and-xss](decisions/input-sanitizing-and-xss.md) | Sanitize client `model`/`path` labels; escape + CSP the dashboard (XSS/cardinality/log-injection) |
+| [request-shape-metrics](decisions/request-shape-metrics.md) | Capture agent-behavior & quality signal as bounded metrics — counts, never content — for benchmarking |
 
 ## Research — validated external facts
 

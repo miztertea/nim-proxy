@@ -96,6 +96,8 @@ td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--grid); font-size: 1
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr:last-child td { border-bottom: 0; }
 .swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 7px; }
+td.best { color: var(--good); font-weight: 650; }
+.meter .name.wide { width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { color: var(--ink-3); padding: 26px 0; text-align: center; font-size: 13px; }
 .meter { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
 .meter .name { width: 64px; color: var(--ink-2); font-size: 12.5px; flex: none; }
@@ -158,13 +160,54 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
 </div>
 
 <nav role="tablist">
-  <button role="tab" data-tab="models" aria-selected="true">Models</button>
+  <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+  <button role="tab" data-tab="models" aria-selected="false">Models</button>
+  <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
+  <button role="tab" data-tab="harnesses" aria-selected="false">Harnesses</button>
   <button role="tab" data-tab="proxy" aria-selected="false">Proxy</button>
   <button role="tab" data-tab="keys" aria-selected="false">Keys</button>
 </nav>
 
 <main>
-  <section id="tab-models">
+  <section id="tab-overview">
+    <div class="tiles">
+      <div class="tile hero"><div class="label" id="o-savedLabel">Dollars saved (vs reference pricing)</div><div class="value" id="o-saved">$0.00</div></div>
+      <div class="tile gauge"><div id="o-cap"></div><div class="label">Capacity used</div></div>
+      <div class="tile gauge"><div id="o-ok"></div><div class="label">Success rate</div></div>
+      <div class="tile"><div class="label" id="o-reqsLabel">Requests</div><div class="value" id="o-reqs">0</div></div>
+      <div class="tile"><div class="label">Tokens out</div><div class="value" id="o-ctok">0</div></div>
+      <div class="tile"><div class="label">Avg TTFT</div><div class="value" id="o-ttft">–</div></div>
+      <div class="tile"><div class="label">Avg speed</div><div class="value" id="o-tps">–</div></div>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h2>Requests per minute</h2>
+        <div id="spark-reqs"></div>
+      </div>
+      <div class="card">
+        <h2>Completion tokens per minute</h2>
+        <div id="spark-tok"></div>
+      </div>
+      <div class="card">
+        <h2>Dollars saved, cumulative</h2>
+        <div id="spark-saved"></div>
+      </div>
+      <div class="card">
+        <h2>Health</h2>
+        <div id="o-health"></div>
+      </div>
+      <div class="card">
+        <h2>Top models</h2>
+        <div id="o-topmodels"></div>
+      </div>
+      <div class="card">
+        <h2>Top harnesses</h2>
+        <div id="o-topharness"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-models" hidden>
     <div class="tiles">
       <div class="tile hero"><div class="label" id="savedLabel">Dollars saved (vs reference pricing)</div><div class="value" id="m-saved">$0.00</div></div>
       <div class="tile"><div class="label">Completion tokens</div><div class="value" id="m-ctok">0</div></div>
@@ -185,12 +228,80 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <div class="legend" id="legend-ttft"></div>
       </div>
       <div class="card">
+        <h2>Generation speed</h2>
+        <div id="chart-tps"></div>
+        <div class="legend" id="legend-tps"></div>
+      </div>
+      <div class="card">
+        <h2>Inter-token latency (TPOT)</h2>
+        <div id="chart-tpot"></div>
+        <div class="legend" id="legend-tpot"></div>
+      </div>
+      <div class="card">
+        <h2>Upstream latency</h2>
+        <div id="chart-upstream"></div>
+        <div class="legend" id="legend-upstream"></div>
+      </div>
+      <div class="card">
         <h2>Dollars saved, cumulative</h2>
         <div id="chart-saved"></div>
+      </div>
+      <div class="card">
+        <h2>How responses end</h2>
+        <div id="table-finish"></div>
+      </div>
+      <div class="card">
+        <h2>Reasoning vs output tokens</h2>
+        <div id="meters-reasoning"></div>
       </div>
       <div class="card wide">
         <h2>Per model</h2>
         <div id="table-models"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-compare" hidden>
+    <div class="cards">
+      <div class="card wide">
+        <h2>Model scorecard <span class="sub" style="font-weight:400">best in each column highlighted</span></h2>
+        <div id="compare-scorecard"></div>
+      </div>
+      <div class="card wide">
+        <h2>Head to head</h2>
+        <div id="compare-bars"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-harnesses" hidden>
+    <div class="tiles">
+      <div class="tile"><div class="label">Harnesses</div><div class="value" id="h-count">0</div></div>
+      <div class="tile"><div class="label">Streaming share</div><div class="value" id="h-stream">–</div></div>
+      <div class="tile"><div class="label">Avg tools / request</div><div class="value" id="h-tools">–</div></div>
+      <div class="tile"><div class="label">Avg messages / request</div><div class="value" id="h-msgs">–</div></div>
+      <div class="tile"><div class="label">Tool-using requests</div><div class="value" id="h-toolpct">–</div></div>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h2>Tool intensity <span class="sub" style="font-weight:400">avg tools offered / request</span></h2>
+        <div id="h-toolint"></div>
+      </div>
+      <div class="card">
+        <h2>Conversation depth <span class="sub" style="font-weight:400">avg messages / request</span></h2>
+        <div id="h-depth"></div>
+      </div>
+      <div class="card">
+        <h2>Sampling fingerprint <span class="sub" style="font-weight:400">avg temperature</span></h2>
+        <div id="h-temp"></div>
+      </div>
+      <div class="card">
+        <h2>Streaming vs buffered</h2>
+        <div id="h-streammix"></div>
+      </div>
+      <div class="card wide">
+        <h2>Per harness</h2>
+        <div id="table-harness"></div>
       </div>
     </div>
   </section>
@@ -217,6 +328,10 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <div class="legend" id="legend-outcomes"></div>
       </div>
       <div class="card">
+        <h2>Non-success outcomes</h2>
+        <div id="table-outcomes"></div>
+      </div>
+      <div class="card">
         <h2>In flight &amp; queued</h2>
         <div id="chart-load"></div>
         <div class="legend" id="legend-load"></div>
@@ -229,6 +344,14 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
       <div class="card">
         <h2>Activity by hour <button class="toggle" id="heatToggle">table</button></h2>
         <div id="heatmap"></div>
+      </div>
+      <div class="card">
+        <h2>Reliability &amp; security</h2>
+        <div id="table-reliability"></div>
+      </div>
+      <div class="card">
+        <h2>Request types</h2>
+        <div id="table-reqtypes"></div>
       </div>
       <div class="card wide">
         <h2>Per client</h2>
@@ -244,6 +367,8 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
       <div class="tile"><div class="label">Rate-limit hits (429)</div><div class="value" id="k-429">0</div></div>
       <div class="tile"><div class="label">Other benches</div><div class="value" id="k-5xx">0</div></div>
       <div class="tile"><div class="label">Conversation stickiness</div><div class="value" id="k-sticky">–</div></div>
+      <div class="tile"><div class="label">Headroom now</div><div class="value" id="k-headroom">–</div></div>
+      <div class="tile"><div class="label" title="Keys to keep peak demand under budget">Keys for peak</div><div class="value" id="k-needed">–</div></div>
     </div>
     <div class="cards">
       <div class="card">
@@ -441,18 +566,57 @@ function legend(el, series) {
     : '';
 }
 
-/* ---------- arc gauge: a meter bent into 270 degrees ---------- */
-function arcGauge(el, ratio, text) {
+/* ---------- horizontal bar rows: one labeled, scaled bar per entity ----------
+   entries: [{name, v, color?}]; `fmtV` formats the value, bars scale to the
+   max. Reuses the .meter markup so it matches the lane utilization bars. */
+function barRows(el, entries, fmtV) {
+  const vals = entries.filter(e => isFinite(e.v));
+  if (!vals.length) { el.innerHTML = '<div class="empty">No data yet</div>'; return; }
+  const max = Math.max(1e-9, ...vals.map(e => e.v));
+  el.innerHTML = entries.map(e => {
+    const w = isFinite(e.v) ? Math.max(2, e.v / max * 100) : 0;
+    return `<div class="meter"><span class="name wide" title="${esc(e.name)}">${esc(e.name)}</span>` +
+      `<span class="track"><span class="fill" style="width:${w.toFixed(0)}%;background:${e.color || css('--s1')}"></span></span>` +
+      `<span class="val">${isFinite(e.v) ? fmtV(e.v) : '–'}</span></div>`;
+  }).join('');
+}
+
+/* ---------- scorecard: entities as rows, metrics as columns, best-in-column
+   highlighted. cols: [{label, get(row)->number, fmt, best:'min'|'max'}]. ---------- */
+function scorecard(el, rows, nameOf, cols) {
+  if (!rows.length) { el.innerHTML = '<div class="empty">No traffic yet</div>'; return; }
+  const bestOf = c => {
+    const vs = rows.map(c.get).filter(isFinite);
+    if (!vs.length) return null;
+    return c.best === 'max' ? Math.max(...vs) : Math.min(...vs);
+  };
+  const bests = cols.map(bestOf);
+  let h = '<table><tr><th>' + nameOf.head + '</th>' +
+    cols.map(c => `<th class="num">${esc(c.label)}</th>`).join('') + '</tr>';
+  for (const r of rows) {
+    h += '<tr><td>' + nameOf.cell(r) + '</td>' + cols.map((c, i) => {
+      const v = c.get(r);
+      const best = bests[i] !== null && isFinite(v) && v === bests[i] && rows.length > 1;
+      return `<td class="num${best ? ' best' : ''}">${isFinite(v) ? c.fmt(v) : '–'}</td>`;
+    }).join('') + '</tr>';
+  }
+  el.innerHTML = h + '</table>';
+}
+
+/* ---------- arc gauge: a meter bent into 270 degrees ----------
+   `color` is a CSS var name (default --s1); pass a threshold color so the
+   dial itself signals saturation/health, not just the number. */
+function arcGauge(el, ratio, text, color) {
   const R = 40, C = 48, SW = 9, start = 135, sweep = 270;
   const clamped = Math.max(0, Math.min(1, ratio));
-  const arc = (from, deg, color) => {
+  const arc = (from, deg, stroke) => {
     const p = a => { const r = (a-90) * Math.PI/180; return `${C + R*Math.cos(r)},${C + R*Math.sin(r)}`; };
     const large = deg > 180 ? 1 : 0;
-    return `<path d="M${p(from)} A${R},${R} 0 ${large} 1 ${p(from+deg)}" fill="none" stroke="${color}" stroke-width="${SW}" stroke-linecap="round"/>`;
+    return `<path d="M${p(from)} A${R},${R} 0 ${large} 1 ${p(from+deg)}" fill="none" stroke="${stroke}" stroke-width="${SW}" stroke-linecap="round"/>`;
   };
   el.innerHTML = `<svg width="96" height="86" viewBox="0 0 96 90" role="img" aria-label="${text}">
     ${arc(start, sweep, css('--meter-track'))}
-    ${clamped > 0.005 ? arc(start, sweep * clamped, css('--s1')) : ''}
+    ${clamped > 0.005 ? arc(start, sweep * clamped, css(color || '--s1')) : ''}
     <text x="${C}" y="${C+5}" text-anchor="middle" style="font-size:17px;font-weight:650;fill:${css('--ink-1')}">${text}</text>
   </svg>`;
 }
@@ -538,12 +702,22 @@ function logoHtml(pub) {
   return `<span class="logo"><img alt="" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/${pub.slug}.svg" onerror="${mono}"></span>`;
 }
 
-/* ---------- color-follows-entity ---------- */
+/* ---------- color-follows-entity ----------
+   First six distinct entities take the validated categorical slots; beyond
+   that, a stable hash-to-hue keeps every entity a consistent (if unreserved)
+   color instead of dropping to none. */
 const modelSlots = new Map();
 function slotFor(model) {
   if (!modelSlots.has(model) && modelSlots.size < SLOTS.length) modelSlots.set(model, SLOTS[modelSlots.size]);
   return modelSlots.get(model);
 }
+function hueFor(name) {
+  let h = 0;
+  for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `hsl(${h % 360} 58% ${dark ? '62%' : '44%'})`;
+}
+/* Resolved color for an entity: a reserved slot if it has one, else a hue. */
+const colorFor = model => { const s = slotFor(model); return s ? css(s) : hueFor(model); };
 
 /* ---------- render ---------- */
 function render() {
@@ -576,7 +750,7 @@ function render() {
 
   const top = models.slice(0, 5);
   const tokSeries = top.map(m => ({
-    name: m.split('/').pop(), color: css(slotFor(m)),
+    name: m.split('/').pop(), color: colorFor(m),
     pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total', l => l.model === m)),
   }));
   lineChart($('chart-modeltok'), tokSeries, fmt);
@@ -593,6 +767,20 @@ function render() {
   }));
   lineChart($('chart-ttft'), qSeries, secs);
   legend($('legend-ttft'), qSeries);
+
+  /* generation speed p50/p95 from tokens_per_second bucket deltas. Filter to
+     source="usage" so the trend reflects real reported throughput, not the
+     ~1-token-per-event estimate used when upstream omits usage. */
+  const tpsBucketAt = s => buckets(s.rows, 'nimproxy_tokens_per_second', l => l.source === 'usage');
+  const tpsSeries = [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
+    name, color,
+    pts: samples.slice(1).map((s, i) => {
+      const d = deltaBuckets(tpsBucketAt(s), tpsBucketAt(samples[i]));
+      return { t: s.t, v: quantile(d, q) };
+    }).filter(p => isFinite(p.v)),
+  }));
+  lineChart($('chart-tps'), tpsSeries, n => fmt(n) + ' tok/s');
+  legend($('legend-tps'), tpsSeries);
 
   /* cumulative dollars within the view */
   const base = samples[0];
@@ -632,15 +820,28 @@ function render() {
       </div></div>`;
   }).join('');
 
+  // Quality maps shared by the model table, finish-reason panel, and Compare.
+  const tpotMS = wgroups('nimproxy_tpot_seconds_sum', 'model'), tpotMC = wgroups('nimproxy_tpot_seconds_count', 'model');
+  const finTotal = wgroups('nimproxy_finish_reason_total', 'model');
+  const finLen = wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === 'length');
+  const reasoningByModel = wgroups('nimproxy_reasoning_tokens_total', 'model');
+  const tpotAvg = m => tpotMC.get(m) ? tpotMS.get(m) / tpotMC.get(m) : NaN;
+  const truncPct = m => finTotal.get(m) ? (finLen.get(m) || 0) / finTotal.get(m) * 100 : NaN;
+  const reasonPct = m => ctok.get(m) ? (reasoningByModel.get(m) || 0) / ctok.get(m) * 100 : NaN;
+  const pct = v => isFinite(v) ? v.toFixed(v && v < 10 ? 1 : 0) + '%' : '–';
+
   $('table-models').innerHTML = !models.length ? '<div class="empty">No traffic yet</div>' :
-    `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">Avg reply</th><th class="num">Errors</th><th class="num">Saved</th></tr>` +
+    `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">TPOT</th><th class="num">Avg reply</th><th class="num">Truncated</th><th class="num">Reasoning</th><th class="num">Errors</th><th class="num">Saved</th></tr>` +
     models.map(m => {
       const c = ctok.get(m)||0, ok = okByModel.get(m)||0;
-      return `<tr><td>${modelSlots.has(m) ? `<i class="swatch" style="background:${css(slotFor(m))}"></i>` : ''}${esc(m)}</td>` +
+      return `<tr><td><i class="swatch" style="background:${colorFor(m)}"></i>${esc(m)}</td>` +
         `<td class="num">${fmt(reqModels.get(m)||0)}</td><td class="num">${fmt(c)}</td>` +
         `<td class="num">${ttftMC.get(m) ? secs(ttftMS.get(m)/ttftMC.get(m)) : '–'}</td>` +
         `<td class="num">${tpsMC.get(m) ? fmt(tpsMS.get(m)/tpsMC.get(m)) : '–'}</td>` +
+        `<td class="num">${isFinite(tpotAvg(m)) ? secs(tpotAvg(m)) : '–'}</td>` +
         `<td class="num">${ok ? fmt(c/ok) + ' tok' : '–'}</td>` +
+        `<td class="num">${pct(truncPct(m))}</td>` +
+        `<td class="num">${pct(reasonPct(m))}</td>` +
         `<td class="num">${errPct(m)}</td>` +
         `<td class="num">${money((ptok.get(m)||0)/1e6*cfg.price_in + c/1e6*cfg.price_out)}</td></tr>`;
     }).join('') + '</table>';
@@ -653,10 +854,14 @@ function render() {
   const avgRpm = reqPts.length ? reqPts.reduce((a,p) => a+p.v, 0) / reqPts.length : 0;
   const capacity = Math.max(1, cfg.lanes * cfg.rpm);
   const capRatio = (mode.kind === 'live' ? curRpm : avgRpm) / capacity;
-  arcGauge($('g-cap'), capRatio, Math.round(capRatio * 100) + '%');
+  // Blue while there's headroom, amber approaching the cap, red once saturated.
+  const capColor = capRatio >= 0.9 ? '--critical' : capRatio >= 0.7 ? '--s3' : '--s1';
+  arcGauge($('g-cap'), capRatio, Math.round(capRatio * 100) + '%', capColor);
   const wreq = windowed(s => sum(s.rows, 'nimproxy_requests_total'));
   const wok = windowed(s => sum(s.rows, 'nimproxy_requests_total', l => l.status === '200'));
-  arcGauge($('g-ok'), wreq ? wok/wreq : 1, wreq ? Math.round(wok/wreq*100) + '%' : '–');
+  const okRatio = wreq ? wok/wreq : 1;
+  const okColor = okRatio < 0.9 ? '--critical' : okRatio < 0.99 ? '--s3' : '--good';
+  arcGauge($('g-ok'), okRatio, wreq ? Math.round(okRatio*100) + '%' : '–', okColor);
 
   $('p-reqs').textContent = fmt(wreq);
   $('p-rpm').textContent = fmt(curRpm);
@@ -676,6 +881,26 @@ function render() {
   ].map(({name, color, f}) => ({ name, color, pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', f)) }));
   lineChart($('chart-outcomes'), outcomeSeries, fmt);
   legend($('legend-outcomes'), outcomeSeries);
+
+  /* non-success outcomes ranked by count — every status the proxy records
+     that isn't a clean 200, with a plain-language reason and its share. */
+  const REASONS = {
+    'disconnect': 'Client disconnected', 'stall': 'Stream stalled',
+    'stream_error': 'Stream error', '504': 'Upstream timeout (504)',
+    '429': 'Rate limited (429)', '400': 'Bad request (400)',
+    '401': 'Unauthorized (401)', '403': 'Forbidden (403)',
+    '404': 'Not found (404)', '502': 'Bad gateway (502)', '503': 'Unavailable (503)',
+  };
+  const reason = s => REASONS[s] || (/^\d+$/.test(s) ? `HTTP ${s}` : esc(s));
+  const statusG = wgroups('nimproxy_requests_total', 'status');
+  const totReq = [...statusG.values()].reduce((a, b) => a + b, 0) || 1;
+  const bad = [...statusG.entries()].filter(([s]) => s !== '200').sort((a, b) => b[1] - a[1]);
+  $('table-outcomes').innerHTML = !bad.length
+    ? '<div class="empty">All requests succeeded in this window</div>'
+    : '<table><tr><th>Reason</th><th class="num">Count</th><th class="num">Share</th></tr>' +
+      bad.map(([s, n]) =>
+        `<tr><td>${reason(s)}</td><td class="num">${fmt(n)}</td><td class="num">${(n / totReq * 100).toFixed(1)}%</td></tr>`
+      ).join('') + '</table>';
 
   const loadSeries = [
     { name: 'active', color: css('--s1'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_active_requests') })) },
@@ -762,6 +987,165 @@ function render() {
   legend($('legend-benches'), benchSeries);
   $('table-lanes').innerHTML =
     `<table><tr><th>Lane</th><th class="num">Requests</th><th class="num">Share</th><th class="num">Last 60s</th><th class="num">429s</th><th class="num">Other benches</th></tr>${laneRows}</table>`;
+
+  /* ===== overview ===== */
+  $('o-savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
+  $('o-reqsLabel').textContent = `Requests${windowLabel}`;
+  $('o-saved').textContent = money(saved);
+  arcGauge($('o-cap'), capRatio, Math.round(capRatio * 100) + '%', capColor);
+  arcGauge($('o-ok'), okRatio, wreq ? Math.round(okRatio * 100) + '%' : '–', okColor);
+  $('o-reqs').textContent = fmt(wreq);
+  $('o-ctok').textContent = fmt(allC);
+  $('o-ttft').textContent = ttftN ? secs(ttftS / ttftN) : '–';
+  $('o-tps').textContent = tpsN ? fmt(tpsS / tpsN) + ' tok/s' : '–';
+  lineChart($('spark-reqs'), [{ name: 'req/min', color: css('--s1'), pts: reqPts }], fmt);
+  lineChart($('spark-tok'), [{ name: 'tok/min', color: css('--s2'), pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total')) }], fmt);
+  lineChart($('spark-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
+
+  const shed = windowed(s => sum(s.rows, 'nimproxy_shed_total'));
+  const unauth = windowed(s => sum(s.rows, 'nimproxy_unauthorized_total'));
+  const logins = windowed(s => sum(s.rows, 'nimproxy_login_failures_total'));
+  const bench429 = windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429'));
+  const healthRow = (l, v, warn) => `<tr><td>${l}</td><td class="num"${warn ? ' style="color:var(--critical)"' : ''}>${v}</td></tr>`;
+  $('o-health').innerHTML = '<table>' +
+    healthRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
+    healthRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
+    healthRow('Rate-limit benches (429)', fmt(bench429)) +
+    healthRow('Shed (overload)', fmt(shed), shed > 0) +
+    healthRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
+    healthRow('Failed logins', fmt(logins), logins > 0) +
+    '</table>';
+  const miniList = (el, entries, fmtV) => $(el).innerHTML = entries.length
+    ? entries.map(e => `<div class="meter"><span class="name wide" title="${esc(e.name)}">${esc(e.label ?? e.name)}</span>` +
+        `<span class="track"><span class="fill" style="width:${e.w}%;background:${e.color}"></span></span>` +
+        `<span class="val">${fmtV(e.v)}</span></div>`).join('')
+    : '<div class="empty">No traffic yet</div>';
+  const topM = models.slice(0, 3).map(m => ({ name: m, label: prettyName(m), v: ctok.get(m) || 0, color: colorFor(m) }));
+  const topMmax = Math.max(1, ...topM.map(e => e.v));
+  miniList('o-topmodels', topM.map(e => ({ ...e, w: (e.v / topMmax * 100).toFixed(0) })), fmt);
+  const topH = clients.slice(0, 3).map((c, i) => ({ name: c, v: cC.get(c) || 0, color: css(SLOTS[i % SLOTS.length]) }));
+  const topHmax = Math.max(1, ...topH.map(e => e.v));
+  miniList('o-topharness', topH.map(e => ({ ...e, w: (e.v / topHmax * 100).toFixed(0) })), fmt);
+
+  /* ===== models: extra quality charts ===== */
+  const quantSeries = (metric, filter) => [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
+    name, color,
+    pts: samples.slice(1).map((s, i) => {
+      const bA = s2 => buckets(s2.rows, metric, filter);
+      return { t: s.t, v: quantile(deltaBuckets(bA(s), bA(samples[i])), q) };
+    }).filter(p => isFinite(p.v)),
+  }));
+  const tpotSeries = quantSeries('nimproxy_tpot_seconds');
+  lineChart($('chart-tpot'), tpotSeries, secs);
+  legend($('legend-tpot'), tpotSeries);
+  const upSeries = quantSeries('nimproxy_upstream_seconds');
+  lineChart($('chart-upstream'), upSeries, secs);
+  legend($('legend-upstream'), upSeries);
+
+  const FINISH = [['stop', 'Completed', css('--s2')], ['length', 'Truncated', css('--s6')],
+    ['tool_calls', 'Tool call', css('--s1')], ['content_filter', 'Filtered', css('--s3')], ['other', 'Other', css('--ink-3')]];
+  const finByReason = Object.fromEntries(FINISH.map(([r]) => [r, wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === r)]));
+  $('table-finish').innerHTML = !models.some(m => finTotal.get(m)) ? '<div class="empty">No completions yet</div>' :
+    '<table><tr><th>Model</th>' + FINISH.map(([, l]) => `<th class="num">${l}</th>`).join('') + '</tr>' +
+    models.filter(m => finTotal.get(m)).map(m => {
+      const tot = finTotal.get(m) || 1;
+      return `<tr><td><i class="swatch" style="background:${colorFor(m)}"></i>${esc(prettyName(m))}</td>` +
+        FINISH.map(([r]) => `<td class="num">${pct((finByReason[r].get(m) || 0) / tot * 100)}</td>`).join('') + '</tr>';
+    }).join('') + '</table>';
+
+  const reasoningModels = models.filter(m => (reasoningByModel.get(m) || 0) > 0);
+  barRows($('meters-reasoning'),
+    reasoningModels.map(m => ({ name: prettyName(m), v: reasonPct(m), color: colorFor(m) })),
+    pct);
+  if (!reasoningModels.length) $('meters-reasoning').innerHTML = '<div class="empty">No reasoning-token usage seen</div>';
+
+  /* ===== compare: head-to-head scorecard ===== */
+  const cmpModels = models.slice(0, 8);
+  const avgTtft = m => ttftMC.get(m) ? ttftMS.get(m) / ttftMC.get(m) : NaN;
+  const avgTps = m => tpsMC.get(m) ? tpsMS.get(m) / tpsMC.get(m) : NaN;
+  const errRate = m => { const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0); return t ? e / t * 100 : NaN; };
+  const avgReply = m => okByModel.get(m) ? (ctok.get(m) || 0) / okByModel.get(m) : NaN;
+  scorecard($('compare-scorecard'), cmpModels,
+    { head: 'Model', cell: m => `<i class="swatch" style="background:${colorFor(m)}"></i>${esc(prettyName(m))}` },
+    [
+      { label: 'Requests', get: m => reqModels.get(m) || 0, fmt: fmt, best: 'max' },
+      { label: 'TTFT', get: avgTtft, fmt: secs, best: 'min' },
+      { label: 'tok/s', get: avgTps, fmt: fmt, best: 'max' },
+      { label: 'TPOT', get: tpotAvg, fmt: secs, best: 'min' },
+      { label: 'Avg reply', get: avgReply, fmt: v => fmt(v) + ' tok', best: 'max' },
+      { label: 'Truncated', get: truncPct, fmt: pct, best: 'min' },
+      { label: 'Reasoning', get: reasonPct, fmt: pct, best: 'min' },
+      { label: 'Errors', get: errRate, fmt: pct, best: 'min' },
+    ]);
+  barRows($('compare-bars'), cmpModels.map(m => ({ name: prettyName(m), v: avgTps(m), color: colorFor(m) })), v => fmt(v) + ' tok/s');
+
+  /* ===== harnesses: what each agent is doing ===== */
+  const avgByKey = (sumN, cntN) => {
+    const s = wgroups(sumN, 'client'), n = wgroups(cntN, 'client');
+    return c => n.get(c) ? s.get(c) / n.get(c) : NaN;
+  };
+  const toolsAvg = avgByKey('nimproxy_request_tools_sum', 'nimproxy_request_tools_count');
+  const msgsAvg = avgByKey('nimproxy_request_messages_sum', 'nimproxy_request_messages_count');
+  const tempAvg = avgByKey('nimproxy_request_temperature_sum', 'nimproxy_request_temperature_count');
+  const streamT = wgroups('nimproxy_stream_requests_total', 'client', l => l.stream === 'true');
+  const streamF = wgroups('nimproxy_stream_requests_total', 'client', l => l.stream === 'false');
+  const toolReqs = wgroups('nimproxy_request_tools_count', 'client');
+  const genReq = c => (streamT.get(c) || 0) + (streamF.get(c) || 0);
+  const streamPct = c => genReq(c) ? (streamT.get(c) || 0) / genReq(c) * 100 : NaN;
+  const totStreamT = [...streamT.values()].reduce((a, b) => a + b, 0);
+  const totStreamF = [...streamF.values()].reduce((a, b) => a + b, 0);
+  const totGen = totStreamT + totStreamF;
+  const totToolReq = [...toolReqs.values()].reduce((a, b) => a + b, 0);
+  const oTools = wsum('nimproxy_request_tools_sum'), oToolsN = wsum('nimproxy_request_tools_count');
+  const oMsgs = wsum('nimproxy_request_messages_sum'), oMsgsN = wsum('nimproxy_request_messages_count');
+  $('h-count').textContent = clients.length;
+  $('h-stream').textContent = totGen ? Math.round(totStreamT / totGen * 100) + '%' : '–';
+  $('h-tools').textContent = oToolsN ? fmt(oTools / oToolsN) : '–';
+  $('h-msgs').textContent = oMsgsN ? fmt(oMsgs / oMsgsN) : '–';
+  $('h-toolpct').textContent = totGen ? Math.round(totToolReq / totGen * 100) + '%' : '–';
+  const hcolor = (c, i) => css(SLOTS[i % SLOTS.length]);
+  barRows($('h-toolint'), clients.map((c, i) => ({ name: c, v: toolsAvg(c), color: hcolor(c, i) })), fmt);
+  barRows($('h-depth'), clients.map((c, i) => ({ name: c, v: msgsAvg(c), color: hcolor(c, i) })), fmt);
+  barRows($('h-temp'), clients.map((c, i) => ({ name: c, v: tempAvg(c), color: hcolor(c, i) })), v => v.toFixed(2));
+  barRows($('h-streammix'), clients.map((c, i) => ({ name: c, v: streamPct(c), color: hcolor(c, i) })), v => Math.round(v) + '%');
+  $('table-harness').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
+    '<table><tr><th>Harness</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Tools/req</th><th class="num">Msgs/req</th><th class="num">Streaming</th><th class="num">Saved</th></tr>' +
+    clients.map(c =>
+      `<tr><td>${esc(c)}</td><td class="num">${fmt(cReq.get(c) || 0)}</td><td class="num">${fmt(cC.get(c) || 0)}</td>` +
+      `<td class="num">${isFinite(toolsAvg(c)) ? fmt(toolsAvg(c)) : '–'}</td>` +
+      `<td class="num">${isFinite(msgsAvg(c)) ? fmt(msgsAvg(c)) : '–'}</td>` +
+      `<td class="num">${isFinite(streamPct(c)) ? Math.round(streamPct(c)) + '%' : '–'}</td>` +
+      `<td class="num">${money((cP.get(c) || 0) / 1e6 * cfg.price_in + (cC.get(c) || 0) / 1e6 * cfg.price_out)}</td></tr>`
+    ).join('') + '</table>';
+
+  /* ===== proxy: reliability & request-type panels ===== */
+  const relRow = (l, v, warn) => `<tr><td>${l}</td><td class="num"${warn ? ' style="color:var(--critical)"' : ''}>${v}</td></tr>`;
+  $('table-reliability').innerHTML = '<table>' +
+    relRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
+    relRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
+    relRow('Shed (overload 503)', fmt(shed), shed > 0) +
+    relRow('Rate-limit benches (429)', fmt(bench429)) +
+    relRow('Other benches (5xx)', fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')))) +
+    relRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
+    relRow('Failed logins', fmt(logins), logins > 0) +
+    '</table>';
+  const jsonMode = windowed(s => sum(s.rows, 'nimproxy_json_mode_total'));
+  const tcModes = wgroups('nimproxy_tool_choice_total', 'mode');
+  const tcStr = [...tcModes.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${esc(m)} ${fmt(n)}`).join(', ') || '–';
+  $('table-reqtypes').innerHTML = '<table>' +
+    relRow('Streaming', `${fmt(totStreamT)}${totGen ? ` (${Math.round(totStreamT / totGen * 100)}%)` : ''}`) +
+    relRow('Buffered', `${fmt(totStreamF)}${totGen ? ` (${Math.round(totStreamF / totGen * 100)}%)` : ''}`) +
+    relRow('Tool-offering', `${fmt(totToolReq)}${totGen ? ` (${Math.round(totToolReq / totGen * 100)}%)` : ''}`) +
+    relRow('JSON mode', fmt(jsonMode)) +
+    relRow('Tool choice', tcStr) +
+    '</table>';
+
+  /* ===== keys: headroom & sizing ===== */
+  const rpmForCap = mode.kind === 'live' ? curRpm : avgRpm;
+  const headroom = capacity - rpmForCap;
+  $('k-headroom').innerHTML = fmt(Math.max(0, headroom)) + '<span class="unit">rpm</span>';
+  const peakRpm = reqPts.length ? Math.max(...reqPts.map(p => p.v)) : 0;
+  $('k-needed').textContent = peakRpm > 0 ? Math.max(cfg.lanes, Math.ceil(peakRpm / cfg.rpm)) : '–';
 }
 
 /* ---------- data sources ---------- */
