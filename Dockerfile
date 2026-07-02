@@ -1,6 +1,9 @@
-# Build a small static binary against musl, ship it on bare Alpine.
+# Build a fully static musl binary, ship it on scratch: no distro, no shell,
+# no libc, no package manager. TLS roots are compiled into the binary
+# (rustls + webpki-roots), so not even CA certificates are needed.
 FROM rust:1-alpine AS build
 RUN apk add --no-cache musl-dev gcc
+ENV RUSTFLAGS="-C target-feature=+crt-static"
 WORKDIR /app
 
 # Cache the dependency build separately from source changes.
@@ -10,9 +13,8 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && r
 COPY src ./src
 RUN touch src/main.rs && cargo build --release
 
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && adduser -D -H proxy
-USER proxy
-COPY --from=build /app/target/release/nim-proxy /usr/local/bin/nim-proxy
+FROM scratch
+COPY --from=build /app/target/release/nim-proxy /nim-proxy
+USER 10001:10001
 EXPOSE 8000
-ENTRYPOINT ["nim-proxy"]
+ENTRYPOINT ["/nim-proxy"]

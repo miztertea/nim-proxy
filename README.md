@@ -74,6 +74,12 @@ All via environment variables (or `.env`):
 | `MODELS_TTL_SECS` | `600` | `/v1/models` cache lifetime |
 | `RUST_LOG` | `nim_proxy=info` | Log filter |
 
+## Deployment
+
+The image is built `FROM scratch`: no distro, no shell, no libc, no CA bundle — just the ~3.3 MB static musl binary with TLS roots compiled in (rustls + webpki-roots). It runs as a non-root numeric UID, needs no capabilities and no writable filesystem (the compose file sets `read_only`, `cap_drop: ALL`, `no-new-privileges`), and works under rootless Docker or Podman as-is.
+
+**If you expose the proxy beyond localhost** (e.g. pooling keys with friends), know that it has no client authentication — anyone who can reach the port can spend your rate budget. Put it behind a VPN/Tailscale, an authenticating reverse proxy, or ask for a shared-token feature. Also note NVIDIA keys are issued per developer account; pooling keys across people is between you and NVIDIA's terms of service.
+
 ## Notes
 
 - **Non-streaming requests** can't be heartbeated (there's no wire format for it), so they just wait silently through pacing/retries up to `MAX_WAIT_SECS`. Agent harnesses stream, so this rarely matters.
