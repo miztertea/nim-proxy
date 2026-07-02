@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege by default; jobs opt into more only if they need it.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -35,15 +39,51 @@ jobs:
           PY
           node --check "$RUNNER_TEMP/dash.js"
 
-  audit:
-    name: cargo audit
+  coverage:
+    name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: rustsec/audit-check@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      # The e2e suite spawns the real binary; the test harness forwards the
+      # coverage profile path to the child and shuts it down gracefully under
+      # llvm-cov, so subprocess coverage is captured. Gate at 80% lines.
+      - name: Coverage (gate >= 80% lines)
+        run: |
+          {
+            echo '```'
+            cargo llvm-cov --summary-only --fail-under-lines 80
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks lists PR commits on pull_request runs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for the secret sweep
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker:
     name: docker build

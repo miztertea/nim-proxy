@@ -1,0 +1,23 @@
+# gitleaks configuration — extends the built-in ruleset.
+# The default rules catch real high-entropy / provider-format secrets; the
+# allowlist below keeps the intentional placeholders in docs from tripping it.
+title = "nim-proxy gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented placeholders and example configs — not real secrets"
+paths = [
+    '''\.env\.example''',
+    '''examples/.*''',
+    '''README\.md''',
+]
+regexes = [
+    '''nvapi-xxx''',
+    '''nvapi-yyy''',
+    '''nvapi-\.\.\.''',
+    '''your-proxy-secret''',
+    '''a-long-random-string''',
+    '''[a-z]+:[0-9a-f]{4}\.\.\.''',
+]
