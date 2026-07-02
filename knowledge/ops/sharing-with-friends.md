@@ -15,15 +15,17 @@ pool, and share the aggregate throughput. Five keys = 200 RPM for everyone.
 ## Setup
 
 1. Collect keys into `NIM_API_KEYS`.
-2. Issue one `name:secret` per person in `PROXY_API_KEYS` — the name is what
-   shows on the dashboard leaderboard and in per-client metrics, so
-   contribution and consumption stay visible.
-3. Expose **only the proxy port**, ideally via Tailscale/VPN or an
-   authenticating reverse proxy. `/`, `/metrics`, `/health`, and
-   `/api/history` are unauthenticated by design
-   ([client-auth](../architecture/client-auth.md)) — keep them private.
-4. Everyone points their OpenAI-compatible client at the URL with their
-   secret as the API key (recipes in the README).
+2. Issue one `name:secret` per person in `PROXY_API_KEYS` — the name shows on
+   the dashboard leaderboard and in per-client metrics, so contribution and
+   consumption stay visible. (Any key works; naming is just for attribution.)
+3. Set `ADMIN_PASSWORD` — the shared dashboard/metrics password. With both set,
+   the proxy runs in secure mode and every surface requires auth
+   ([client-auth](../architecture/client-auth.md)); it refuses to start
+   otherwise. `/health` stays public.
+4. Terminate TLS in front (reverse proxy / VPN / platform edge) and set
+   `TRUST_PROXY=true` — passwords and keys must not travel in cleartext.
+5. Everyone points their OpenAI-compatible client at the URL with their secret
+   as the API key (recipes in the README); the dashboard is at `/login`.
 
 ## Fairness & capacity
 

@@ -14,3 +14,5 @@ description: Lightweight ADRs — context, options, choice, consequences.
 - [history-retention-days-not-size](history-retention-days-not-size.md)
 - [distroless-scratch-image](distroless-scratch-image.md)
 - [usage-injection-auto-fallback](usage-injection-auto-fallback.md)
+- [auth-posture-and-dashboard-password](auth-posture-and-dashboard-password.md)
+- [input-sanitizing-and-xss](input-sanitizing-and-xss.md)

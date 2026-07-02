@@ -1,6 +1,6 @@
 [package]
 name = "nim-proxy"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Rate-limit-aware OpenAI-compatible proxy for NVIDIA NIM with multi-key load balancing"
 license = "MIT"
@@ -18,6 +18,11 @@ tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
+# Auth: HMAC-signed session cookies + constant-time secret comparison.
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+getrandom = "0.2"
 
 [dev-dependencies]
 axum = "0.8"

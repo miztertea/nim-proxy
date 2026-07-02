@@ -25,6 +25,16 @@ jobs:
       - name: Tests (unit + integration)
         run: cargo test
 
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   docker:
     name: docker build
     runs-on: ubuntu-latest
@@ -34,7 +44,7 @@ jobs:
         run: docker build -t nim-proxy:ci .
       - name: Smoke test image
         run: |
-          docker run -d --name smoke -e NIM_API_KEYS=test-key -p 8000:8000 nim-proxy:ci
+          docker run -d --name smoke -e NIM_API_KEYS=test-key -e INSECURE_NO_AUTH=true -p 8000:8000 nim-proxy:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8000/health > /dev/null 2>&1; then ok=1; break; fi
             sleep 1

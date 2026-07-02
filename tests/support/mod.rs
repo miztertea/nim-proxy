@@ -225,18 +225,10 @@ pub async fn start_proxy(upstream: &str, envs: &[(&str, &str)]) -> Proxy {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap().port()
     };
-    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"));
-    cmd.env_clear()
-        .current_dir(std::env::temp_dir()) // dodge any local .env
-        .env("PORT", port.to_string())
-        .env("NIM_BASE_URL", upstream)
-        .env("NIM_API_KEYS", "test-key-0,test-key-1,test-key-2")
-        .env("DATA_DIR", "")
-        .env("MAX_WAIT_SECS", "30")
-        .env("HEARTBEAT_SECS", "1")
-        .env("RUST_LOG", "nim_proxy=warn")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    // Default to open mode so behavior tests need no auth boilerplate; auth
+    // tests override INSECURE_NO_AUTH/ADMIN_PASSWORD/PROXY_API_KEYS.
+    let mut cmd = base_cmd(port, upstream);
+    cmd.env("INSECURE_NO_AUTH", "true");
     for (k, v) in envs {
         cmd.env(k, v);
     }
@@ -252,6 +244,62 @@ pub async fn start_proxy(upstream: &str, envs: &[(&str, &str)]) -> Proxy {
             }
         }
         assert!(Instant::now() < deadline, "proxy did not become healthy");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn base_cmd(port: u16, upstream: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"));
+    cmd.env_clear()
+        .current_dir(std::env::temp_dir()) // dodge any local .env
+        .env("PORT", port.to_string())
+        .env("NIM_BASE_URL", upstream)
+        .env("NIM_API_KEYS", "test-key-0,test-key-1,test-key-2")
+        .env("DATA_DIR", "")
+        .env("MAX_WAIT_SECS", "30")
+        .env("HEARTBEAT_SECS", "1")
+        .env("RUST_LOG", "nim_proxy=warn")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd
+}
+
+/// Spawn the proxy with only the given env (no INSECURE default) and assert it
+/// exits non-zero without ever becoming healthy — used for boot-posture tests.
+pub async fn expect_refuses_to_start(upstream: &str, envs: &[(&str, &str)]) {
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let mut cmd = base_cmd(port, upstream);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("spawn proxy");
+    let client = reqwest::Client::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            assert!(
+                !status.success(),
+                "proxy should exit non-zero, got {status:?}"
+            );
+            return;
+        }
+        if let Ok(r) = client
+            .get(format!("http://127.0.0.1:{port}/health"))
+            .send()
+            .await
+        {
+            if r.status().is_success() {
+                let _ = child.kill();
+                panic!("proxy became healthy but should have refused to start");
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "proxy neither exited nor became healthy"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

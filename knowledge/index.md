@@ -24,6 +24,8 @@ the chronology in [log.md](log.md).
 | [history-retention-days-not-size](decisions/history-retention-days-not-size.md) | 5-min ~4KB snapshots make days the right knob; a size cap would never trigger |
 | [distroless-scratch-image](decisions/distroless-scratch-image.md) | Static musl binary with baked-in TLS roots; FROM scratch, non-root, --health probe |
 | [usage-injection-auto-fallback](decisions/usage-injection-auto-fallback.md) | Inject stream_options for exact tokens; 400 → retry untouched and remember |
+| [auth-posture-and-dashboard-password](decisions/auth-posture-and-dashboard-password.md) | Fail closed without auth; API keys + a shared-password dashboard session |
+| [input-sanitizing-and-xss](decisions/input-sanitizing-and-xss.md) | Sanitize client `model`/`path` labels; escape + CSP the dashboard (XSS/cardinality/log-injection) |
 
 ## Research — validated external facts
 
@@ -42,7 +44,7 @@ the chronology in [log.md](log.md).
 | [streaming-pipeline](architecture/streaming-pipeline.md) | Heartbeats, retry/failover, idle timeout, SSE usage scanning |
 | [metrics-history](architecture/metrics-history.md) | Prometheus registry + 5-min snapshot history replayed by the dashboard |
 | [dashboard](architecture/dashboard.md) | Single embedded HTML; live/range modes; chart & palette rules |
-| [client-auth](architecture/client-auth.md) | Local mode vs PROXY_API_KEYS; per-client attribution |
+| [client-auth](architecture/client-auth.md) | API Bearer keys + admin-password dashboard session; fail-closed posture |
 
 ## Operations — runbooks
 
