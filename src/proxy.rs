@@ -509,11 +509,11 @@ pub async fn handle(
     }
 }
 
-/// Sticky-lane hint: hash the conversation's identity (model, system prompt,
-/// and first user message — stable across every turn of an agent session) so
-/// a conversation keeps hitting the same key while it has capacity, keeping
-/// any upstream prefix cache warm. Purely an optimization; correctness never
-/// depends on which key serves a request.
+/// Sticky-lane hint: hash the conversation's identity (model + the first two
+/// messages — typically the system prompt and first user turn, stable across
+/// every turn of an agent session) so a conversation keeps hitting the same key
+/// while it has capacity, keeping any upstream prefix cache warm. Purely an
+/// optimization; correctness never depends on which key serves a request.
 fn affinity(body: &serde_json::Value, lanes: usize) -> Option<usize> {
     let messages = body.get("messages")?.as_array()?;
     let mut h = DefaultHasher::new();
@@ -851,10 +851,15 @@ async fn relay(resp: reqwest::Response, ctx: &Ctx) -> Response {
         .unwrap()
 }
 
+/// The proxy's standard error envelope: `{"error":{message,type,code}}`.
+fn proxy_error_json(code: &str, message: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({
+        "error": { "message": message.into(), "type": "proxy_error", "code": code }
+    })
+}
+
 fn sse_error(message: &str) -> Bytes {
-    let event = serde_json::json!({
-        "error": { "message": message, "type": "proxy_error", "code": "upstream_unavailable" }
-    });
+    let event = proxy_error_json("upstream_unavailable", message);
     Bytes::from(format!("data: {event}\n\ndata: [DONE]\n\n"))
 }
 
@@ -867,13 +872,10 @@ fn json_response(status: StatusCode, body: Bytes) -> Response {
 }
 
 fn unauthorized() -> Response {
-    let body = serde_json::json!({
-        "error": {
-            "message": "missing or invalid proxy API key (Authorization: Bearer ...)",
-            "type": "proxy_error",
-            "code": "unauthorized"
-        }
-    });
+    let body = proxy_error_json(
+        "unauthorized",
+        "missing or invalid proxy API key (Authorization: Bearer ...)",
+    );
     (
         StatusCode::UNAUTHORIZED,
         [(header::WWW_AUTHENTICATE, "Bearer")],
@@ -883,16 +885,13 @@ fn unauthorized() -> Response {
 }
 
 fn overloaded(state: &AppState) -> Response {
-    let body = serde_json::json!({
-        "error": {
-            "message": format!(
-                "proxy at capacity ({} concurrent requests); retry shortly",
-                state.max_inflight
-            ),
-            "type": "proxy_error",
-            "code": "overloaded"
-        }
-    });
+    let body = proxy_error_json(
+        "overloaded",
+        format!(
+            "proxy at capacity ({} concurrent requests); retry shortly",
+            state.max_inflight
+        ),
+    );
     (
         StatusCode::SERVICE_UNAVAILABLE,
         [(header::RETRY_AFTER, "5")],
@@ -902,28 +901,19 @@ fn overloaded(state: &AppState) -> Response {
 }
 
 fn bad_gateway() -> Response {
-    let body = serde_json::json!({
-        "error": {
-            "message": "upstream response failed or timed out",
-            "type": "proxy_error",
-            "code": "bad_gateway"
-        }
-    });
+    let body = proxy_error_json("bad_gateway", "upstream response failed or timed out");
     (StatusCode::BAD_GATEWAY, axum::Json(body)).into_response()
 }
 
 fn gateway_timeout(state: &AppState) -> Response {
-    let body = serde_json::json!({
-        "error": {
-            "message": format!(
-                "no upstream slot became available within {}s (all {} keys saturated)",
-                state.cfg.max_wait.as_secs(),
-                state.pool.len()
-            ),
-            "type": "proxy_error",
-            "code": "rate_limited"
-        }
-    });
+    let body = proxy_error_json(
+        "rate_limited",
+        format!(
+            "no upstream slot became available within {}s (all {} keys saturated)",
+            state.cfg.max_wait.as_secs(),
+            state.pool.len()
+        ),
+    );
     (StatusCode::GATEWAY_TIMEOUT, axum::Json(body)).into_response()
 }
 
