@@ -35,5 +35,8 @@ futures-util = "0.3"
 [profile.release]
 lto = true
 strip = true
-opt-level = "z"
+# Optimize for speed (the proxy's job): re-enables inlining/vectorization on the
+# JSON-parse and SSE-scan hot paths. lto + strip + codegen-units=1 keep the size
+# growth modest against opt-level="z".
+opt-level = 3
 codegen-units = 1
