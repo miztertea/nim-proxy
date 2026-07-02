@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege by default; each job opts into exactly what it needs.
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    name: image → GHCR (multi-arch, signed)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+      id-token: write # keyless cosign + provenance via OIDC
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+          provenance: true
+          sbom: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign image (keyless)
+        run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      # Extract the exact static binaries we just shipped (no separate cross
+      # toolchain): create — not run — a container per arch and copy /nim-proxy.
+      - name: Extract release binaries
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            cid=$(docker create --platform "linux/$arch" "${IMAGE}@${{ steps.build.outputs.digest }}")
+            docker cp "$cid:/nim-proxy" "nim-proxy-$arch"
+            docker rm "$cid" >/dev/null
+            tar -czf "nim-proxy-${{ steps.meta.outputs.version }}-linux-$arch.tar.gz" "nim-proxy-$arch"
+            rm "nim-proxy-$arch"
+          done
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: nim-proxy-sbom.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            nim-proxy-*.tar.gz
+            nim-proxy-sbom.spdx.json
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            nim-proxy-*.tar.gz
+            nim-proxy-sbom.spdx.json
+          body: |
+            Container image (multi-arch, signed, with SBOM + provenance):
+
+            ```sh
+            docker pull ghcr.io/${{ github.repository }}:${{ needs.image.outputs.version }}
+            ```
+
+            Verify the signature:
+
+            ```sh
+            cosign verify ghcr.io/${{ github.repository }}:${{ needs.image.outputs.version }} \
+              --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            ```
