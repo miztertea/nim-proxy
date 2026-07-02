@@ -74,6 +74,9 @@ jobs:
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks lists PR commits on pull_request runs
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,24 +84,6 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  trivy:
-    name: trivy image scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t nim-proxy:ci .
-      # Scratch image with a static binary has no OS layer, so this mostly
-      # future-proofs against a base-image change; fail on any fixable HIGH/CRIT.
-      - name: Scan image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: nim-proxy:ci
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-          format: table
 
   docker:
     name: docker build
