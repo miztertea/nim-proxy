@@ -6,6 +6,23 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-03] ops — v0.5.0 first public release prep
+
+Repo went public; cutting the first tagged release (which also gives
+`release.yml` its first-ever run — GHCR multi-arch image, keyless cosign,
+provenance, SBOM, GitHub Release).
+
+- **New runbook** → [ops/release](ops/release.md): tag-driven release
+  procedure, post-release verification checklist, roll-forward policy, and the
+  one-time repo settings (private vulnerability reporting, auto-delete head
+  branches, recommended `main` ruleset).
+- Version 0.5.0; CHANGELOG `[Unreleased]` promoted. `release.yml` gained a
+  tag↔Cargo.toml version guard so the OCI label and boot banner can't disagree.
+- SECURITY.md now points **only** at private GitHub Security Advisories (no
+  maintainer email published); CODE_OF_CONDUCT reports go via the maintainer's
+  GitHub profile. README gained a release badge and a published-image
+  (`ghcr.io`) quick start.
+
 ## [2026-07-02] decision + ingest — Benchmarking observability (v0.4.0)
 
 Turned the proxy into a benchmarking / agent-observability tool. The request
