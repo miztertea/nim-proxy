@@ -1046,6 +1046,10 @@ async fn dashboard_sends_security_headers() {
         csp.contains("connect-src 'self'"),
         "blocks cross-origin exfil"
     );
+    assert!(
+        csp.contains("font-src https://fonts.gstatic.com"),
+        "dashboard webfonts are allowed, and only from Google's font host"
+    );
     assert_eq!(h["x-content-type-options"], "nosniff");
     assert_eq!(h["x-frame-options"], "DENY");
 }

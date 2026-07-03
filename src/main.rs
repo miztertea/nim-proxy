@@ -62,9 +62,10 @@ fn env_or(name: &str, default: &str) -> String {
 }
 
 /// Add hardening headers to every response. The CSP allows the dashboard's
-/// own inline script/style and unpkg logos, but pins `connect-src` to 'self'
-/// so an injected element can't exfiltrate to another origin — a second line
-/// of defense behind server-side sanitizing and the dashboard's `esc()`.
+/// own inline script/style, unpkg logos, and Google Fonts (system-font
+/// fallback offline), but pins `connect-src` to 'self' so an injected
+/// element can't exfiltrate to another origin — a second line of defense
+/// behind server-side sanitizing and the dashboard's `esc()`.
 async fn security_headers(
     req: axum::extract::Request,
     next: axum::middleware::Next,
@@ -76,7 +77,9 @@ async fn security_headers(
         "content-security-policy",
         HeaderValue::from_static(
             "default-src 'none'; img-src 'self' https://unpkg.com data:; \
-             style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; \
+             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+             font-src https://fonts.gstatic.com; \
+             script-src 'self' 'unsafe-inline'; \
              connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         ),
     );

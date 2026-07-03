@@ -27,6 +27,7 @@ the chronology in [log.md](log.md).
 | [auth-posture-and-dashboard-password](decisions/auth-posture-and-dashboard-password.md) | Fail closed without auth; API keys + a shared-password dashboard session |
 | [input-sanitizing-and-xss](decisions/input-sanitizing-and-xss.md) | Sanitize client `model`/`path` labels; escape + CSP the dashboard (XSS/cardinality/log-injection) |
 | [request-shape-metrics](decisions/request-shape-metrics.md) | Capture agent-behavior & quality signal as bounded metrics — counts, never content — for benchmarking |
+| [dashboard-operator-console-redesign](decisions/dashboard-operator-console-redesign.md) | 6→5 tabs (Compare merged in), dark-only palette, webfonts via Google Fonts CDN under CSP, window-halves delta chips |
 
 ## Research — validated external facts
 
@@ -44,7 +45,7 @@ the chronology in [log.md](log.md).
 | [dispatcher](architecture/dispatcher.md) | Global FIFO slot queue; abandoned-waiter slot return; affinity accounting |
 | [streaming-pipeline](architecture/streaming-pipeline.md) | Heartbeats, retry/failover, idle timeout, SSE usage scanning |
 | [metrics-history](architecture/metrics-history.md) | Prometheus registry + 5-min snapshot history replayed by the dashboard |
-| [dashboard](architecture/dashboard.md) | Single embedded HTML; live/range modes; chart & palette rules |
+| [dashboard](architecture/dashboard.md) | Single embedded HTML; dark operator console; 5 tabs; hover charts & sortable tables |
 | [client-auth](architecture/client-auth.md) | API Bearer keys + admin-password dashboard session; fail-closed posture |
 
 ## Operations — runbooks
