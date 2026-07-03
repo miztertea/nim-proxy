@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="overflow:auto; max-height:{{ maxH }}px; margin:0 -4px">
+  <table style="width:100%; border-collapse:collapse; min-width:{{ minW }}px">
+    <thead><tr>
+      <sc-for list="{{ heads }}" as="h" hint-placeholder-count="6">
+        <th onClick="{{ h.onClick }}" style="position:sticky; top:0; background:#12150E; font:550 11px 'Spline Sans Mono', monospace; color:{{ h.color }}; padding:9px 10px; z-index:1; cursor:pointer; user-select:none; white-space:nowrap; text-align:{{ h.align }}">{{ h.label }}</th>
+      </sc-for>
+    </tr></thead>
+    <tbody>
+      <sc-for list="{{ sortedRows }}" as="r" hint-placeholder-count="10">
+        <tr>
+          <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="6">
+            <td style="padding:8px 10px; border-top:1px solid rgba(255,255,255,0.05); font:500 12px 'Spline Sans Mono', monospace; color:{{ c.c }}; text-align:{{ c.align }}; white-space:nowrap; font-variant-numeric:tabular-nums">
+              <sc-if value="{{ c.chip }}" hint-placeholder-val="{{ false }}"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:{{ c.chipColor }}; margin-right:8px; vertical-align:baseline"></span></sc-if>{{ c.t }}
+            </td>
+          </sc-for>
+        </tr>
+      </sc-for>
+    </tbody>
+  </table>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:720,&quot;height&quot;:320},&quot;columns&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{label:string,align?:string,kind?:string}[]&quot;},&quot;rows&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{cells:{t:string,c:string,align?:string,chip?:boolean,chipColor?:string}[],vals:(string|number)[]}[]&quot;},&quot;defaultIdx&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0},&quot;defaultAsc&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false},&quot;maxHeight&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:420},&quot;minWidth&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:600}}">
+class Component extends DCLogic {
+  state = {};
+  renderVals() {
+    const cols = this.props.columns || [];
+    const rows = this.props.rows || [];
+    const dIdx = Number(this.props.defaultIdx ?? 0);
+    const dAsc = this.props.defaultAsc === true || this.props.defaultAsc === 'true';
+    const idx = this.state.idx ?? dIdx;
+    const asc = this.state.asc ?? dAsc;
+    const set = i => () => this.setState(s => {
+      const ci = s.idx ?? dIdx, ca = s.asc ?? dAsc;
+      return ci === i ? { idx: i, asc: !ca } : { idx: i, asc: cols[i] && cols[i].kind === 'str' };
+    });
+    const alignOf = i => (cols[i] && cols[i].align) || 'right';
+    const heads = cols.map((c, i) => ({
+      label: c.label + (i === idx ? (asc ? ' \u2191' : ' \u2193') : ''),
+      onClick: set(i), color: i === idx ? '#A7D65A' : '#8E967F', align: alignOf(i),
+    }));
+    const sorted = [...rows].sort((a, b) => {
+      const av = a.vals[idx], bv = b.vals[idx];
+      if (typeof av === 'string') return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return asc ? av - bv : bv - av;
+    }).map(r => ({ cells: r.cells.map((c, i) => ({ ...c, align: alignOf(i) })) }));
+    return { heads, sortedRows: sorted, maxH: this.props.maxHeight ?? 420, minW: this.props.minWidth ?? 600 };
+  }
+}
+</script>
+</body>
+</html>
