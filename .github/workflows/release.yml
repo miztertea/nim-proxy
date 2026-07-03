@@ -25,6 +25,16 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      # The binary reports CARGO_PKG_VERSION; the image is labeled with the git
+      # tag. Refuse to ship an image where the two would disagree.
+      - name: Tag must match Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          grep -Fxq "version = \"$tag\"" Cargo.toml || {
+            echo "::error::tag v$tag does not match Cargo.toml version:"
+            grep '^version = ' Cargo.toml
+            exit 1
+          }
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR

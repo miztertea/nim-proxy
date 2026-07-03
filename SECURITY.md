@@ -6,25 +6,23 @@ We take its security posture seriously and welcome private reports.
 
 ## Supported versions
 
-Security fixes land on the latest `0.4.x` release. Older minors are not
-patched — upgrade to the newest `0.4.x` tag.
+Security fixes land on the latest `0.5.x` release. Older minors are not
+patched — upgrade to the newest `0.5.x` tag.
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.4.x   | :white_check_mark: |
-| < 0.4   | :x:                |
+| 0.5.x   | :white_check_mark: |
+| < 0.5   | :x:                |
 
 ## Reporting a vulnerability
 
 **Please do not open a public issue for security problems.**
 
-1. Preferred: open a private report through GitHub's
-   [Security Advisories](https://github.com/miztertea/nim-proxy/security/advisories/new)
-   ("Report a vulnerability"). This keeps the details confidential until a fix
-   ships.
-2. Alternatively, email the maintainer at
-   `<SECURITY-CONTACT-EMAIL — maintainer to fill in>`. Use a subject that makes
-   the nature clear (e.g. "nim-proxy security report").
+Open a private report through GitHub's
+[Security Advisories](https://github.com/miztertea/nim-proxy/security/advisories/new)
+("Report a vulnerability"). This keeps the details confidential until a fix
+ships, and it is the only reporting channel — no email is monitored for this
+project.
 
 Please include: affected version/commit, run mode (secure vs. `INSECURE_NO_AUTH`),
 a description of the impact, and a minimal reproduction (a request body, a
@@ -37,7 +35,7 @@ This is a small, volunteer-maintained project. We aim to:
 
 - **Acknowledge** your report within 3 business days.
 - **Triage** and confirm (or explain why it's out of scope) within 7 days.
-- **Fix** confirmed vulnerabilities in a `0.4.x` patch release and credit you in
+- **Fix** confirmed vulnerabilities in a `0.5.x` patch release and credit you in
   the advisory (unless you prefer to stay anonymous).
 
 Please give us a reasonable window to ship a fix before any public disclosure.

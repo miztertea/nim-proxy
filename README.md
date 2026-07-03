@@ -1,6 +1,7 @@
 # nim-proxy
 
 [![CI](https://github.com/miztertea/nim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/miztertea/nim-proxy/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/miztertea/nim-proxy)](https://github.com/miztertea/nim-proxy/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Container: GHCR](https://img.shields.io/badge/container-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/miztertea/nim-proxy/pkgs/container/nim-proxy)
 
@@ -27,7 +28,15 @@ This tool is **not** designed to circumvent NVIDIA's terms of service. It maximi
 
 1. Get one or more API keys at [build.nvidia.com](https://build.nvidia.com) (free, `nvapi-...`; each account needs a unique email and phone number).
 
-2. Configure and run:
+2. Run the published image (multi-arch, signed, ~5 MB):
+
+```sh
+docker run -d --name nim-proxy -p 127.0.0.1:8000:8000 \
+  -e NIM_API_KEYS=nvapi-xxx,nvapi-yyy -e INSECURE_NO_AUTH=true \
+  ghcr.io/miztertea/nim-proxy:latest
+```
+
+Or build from source with the hardened compose defaults:
 
 ```sh
 cp .env.example .env        # paste keys into NIM_API_KEYS, then pick an auth mode (below)

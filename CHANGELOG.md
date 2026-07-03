@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-03
+
+First public release: the repository is now public, and this tag publishes the
+first signed multi-arch container image to GHCR with SBOM and build provenance.
+
 ### Fixed
 
 - **Unauthenticated panic in the login handler.** A percent-escape followed by a
@@ -168,7 +173,8 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.5.0
 [0.4.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.3.0
 [0.2.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.2.0
