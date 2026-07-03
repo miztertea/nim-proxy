@@ -31,9 +31,10 @@ load harness.
 # Build and run locally, open mode (loopback only — see Security below):
 NIM_API_KEYS=nvapi-xxx,nvapi-yyy INSECURE_NO_AUTH=true cargo run --release
 
-# Or via Docker, exactly as a user would:
+# Or via Docker, building your working tree (a plain `docker compose up`
+# pulls the published GHCR image, not your local changes):
 cp .env.example .env      # paste keys, pick an auth mode
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 The dashboard is served at `http://localhost:8000/` and the OpenAI-compatible

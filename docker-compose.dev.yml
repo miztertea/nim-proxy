@@ -1,0 +1,9 @@
+# Build-from-source override for development. Layers on top of the base file
+# so the hardened defaults stay identical to what users run:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# The local image name deliberately differs from the published ghcr.io one so a
+# dev build can never shadow the pulled release image.
+services:
+  nim-proxy:
+    image: nim-proxy:dev
+    build: .

@@ -10,10 +10,15 @@ timestamp: 2026-07-02T00:00:00Z
 
 ```sh
 cp .env.example .env     # set NIM_API_KEYS + an auth mode (below)
-docker compose up -d --build
+docker compose up -d     # pulls ghcr.io/miztertea/nim-proxy:latest (signed, multi-arch)
 docker ps                # STATUS shows (healthy) via the built-in probe
 docker logs nim-proxy-nim-proxy-1
 ```
+
+To build from source instead (development):
+`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`
+— the dev override tags the local build `nim-proxy:dev` so it can't shadow the
+published image.
 
 **Auth is mandatory** ([posture](../decisions/auth-posture-and-dashboard-password.md)):
 set `ADMIN_PASSWORD` + `PROXY_API_KEYS` (secure), or `INSECURE_NO_AUTH=true`
@@ -44,5 +49,6 @@ Logs are one access line per request plus startup detail; ANSI is disabled
 automatically when stdout isn't a TTY. There is no shell to exec into — use
 logs, `/metrics`, and the dashboard.
 
-Upgrades: `docker compose up -d --build` — history persists in the volume;
-rate windows reset (a brief post-restart 429 burst is absorbed silently).
+Upgrades: `docker compose pull && docker compose up -d` — history persists in
+the volume; rate windows reset (a brief post-restart 429 burst is absorbed
+silently).

@@ -28,7 +28,14 @@ This tool is **not** designed to circumvent NVIDIA's terms of service. It maximi
 
 1. Get one or more API keys at [build.nvidia.com](https://build.nvidia.com) (free, `nvapi-...`; each account needs a unique email and phone number).
 
-2. Run the published image (multi-arch, signed, ~5 MB):
+2. Configure and run — compose pulls the published image (multi-arch, signed, ~5 MB) with hardened defaults and persistent history:
+
+```sh
+cp .env.example .env        # paste keys into NIM_API_KEYS, then pick an auth mode (below)
+docker compose up -d
+```
+
+Or without a checkout:
 
 ```sh
 docker run -d --name nim-proxy -p 127.0.0.1:8000:8000 \
@@ -36,14 +43,7 @@ docker run -d --name nim-proxy -p 127.0.0.1:8000:8000 \
   ghcr.io/miztertea/nim-proxy:latest
 ```
 
-Or build from source with the hardened compose defaults:
-
-```sh
-cp .env.example .env        # paste keys into NIM_API_KEYS, then pick an auth mode (below)
-docker compose up -d --build
-```
-
-Or without Docker: `NIM_API_KEYS=nvapi-xxx,nvapi-yyy INSECURE_NO_AUTH=true cargo run --release`
+Or build from source: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`, or without Docker: `NIM_API_KEYS=nvapi-xxx,nvapi-yyy INSECURE_NO_AUTH=true cargo run --release`
 
 3. Open the dashboard at `http://localhost:8000/` and point your client at `http://localhost:8000/v1`.
 
