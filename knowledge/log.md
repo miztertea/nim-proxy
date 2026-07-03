@@ -6,6 +6,33 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-03] ingest — dashboard operator-console redesign
+
+Presentation-only redesign of `src/dashboard.html` (data layer, metrics, and
+history contracts untouched); see
+[dashboard-operator-console-redesign](decisions/dashboard-operator-console-redesign.md)
+and the rewritten [dashboard](architecture/dashboard.md) architecture page.
+
+- **IA collapsed from six tabs to five**: `Overview · Models · Clients ·
+  Reliability · Capacity`. Compare merged into Models as a scorecard section;
+  Harnesses/Proxy/Keys renamed to Clients/Reliability/Capacity.
+- **Dark-only.** The light palette and `prefers-color-scheme` handling were
+  deleted — a committed design choice, not an oversight.
+- **New interactions on every chart and table**: line-chart hover crosshair
+  with a per-series tooltip snapped to the nearest sample, and click-to-sort
+  tables (sticky header, capped height, internal scroll) whose sort order and
+  scroll position survive the 3s live re-render.
+- **CSP extended** in `src/main.rs`: `style-src` gained
+  `https://fonts.googleapis.com`, a new `font-src` allows
+  `https://fonts.gstatic.com` — needed for the Space Grotesk / Spline Sans
+  Mono webfonts (system-font fallback offline). Everything else in the CSP is
+  unchanged; `tests/e2e.rs` now asserts `font-src https://fonts.gstatic.com`
+  alongside the existing CSP checks.
+- No new `innerHTML` sink bypasses `esc()` — the redesign added interaction
+  state (sort index, hover index) but no new dynamic-string interpolation
+  path; see the security-invariant note in
+  [dashboard](architecture/dashboard.md).
+
 ## [2026-07-03] ops — v0.5.0 first public release prep
 
 Repo went public; cutting the first tagged release (which also gives

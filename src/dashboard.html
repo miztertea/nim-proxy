@@ -4,320 +4,412 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NIM Proxy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --surface-1: #fcfcfb; --plane: #f9f9f7;
-  --ink-1: #0b0b0b; --ink-2: #52514e; --ink-3: #898781;
-  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
-  --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300; --s5: #4a3aa7; --s6: #e34948;
-  --q-lo: #86b6ef; --q-hi: #1c5cab;
-  --meter-track: #cde2fb;
-  --good: #0ca30c; --critical: #d03b3b;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface-1: #1a1a19; --plane: #0d0d0d;
-    --ink-1: #ffffff; --ink-2: #c3c2b7; --ink-3: #898781;
-    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
-    --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300; --s5: #9085e9; --s6: #e66767;
-    --q-lo: #9ec5f4; --q-hi: #3987e5;
-    --meter-track: #0d366b;
-  }
+  --bg: #0B0D09; --side: #0E110B; --side-border: #1F2318;
+  --card: rgba(255,255,255,0.03); --card-border: rgba(255,255,255,0.07);
+  --hairline: rgba(255,255,255,0.05); --track: rgba(255,255,255,0.06);
+  --ink-1: #F0F2EC; --ink-2: #C6CDBB; --ink-25: #9BA391; --ink-3: #6F7767;
+  --ink-4: #5A6150; --ink-nav: #8E967F;
+  --green: #76B900; --green-lt: #A7D65A; --green-dk: #4E7A0F;
+  --amber: #D9A521; --amber-lt: #D9C25A; --red: #E36868; --blue: #4D6BFE;
+  --thead: #12150E;
+  --mono: 'Spline Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2A2F22; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 body {
-  margin: 0; background: var(--plane); color: var(--ink-1);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0; display: flex; min-height: 100vh; background: var(--bg); color: var(--ink-1);
+  font: 14px/1.45 'Space Grotesk', system-ui, sans-serif;
 }
-header {
-  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  padding: 20px 28px 0;
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+
+/* ---------- sidebar ---------- */
+#side {
+  width: 216px; flex: none; position: sticky; top: 0; height: 100vh;
+  background: var(--side); border-right: 1px solid var(--side-border);
+  display: flex; flex-direction: column; padding: 20px 12px;
 }
-h1 { font-size: 18px; font-weight: 650; margin: 0; letter-spacing: 0.2px; }
-.sub { color: var(--ink-3); font-size: 12.5px; }
-.live { display: inline-flex; align-items: center; gap: 6px; }
-.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
-.live.down .dot { background: var(--critical); }
-.live.idle .dot { background: var(--ink-3); }
-.bar {
-  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-  padding: 14px 28px 0;
+.brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px 22px; }
+.brand img { flex: none; display: block; border-radius: 9px; }
+.wordmark { font-size: 17px; font-weight: 700; letter-spacing: -0.2px; line-height: 1; white-space: nowrap; }
+.wordmark b { color: var(--green); font-weight: 700; }
+#side nav { display: flex; flex-direction: column; gap: 2px; }
+#side nav button {
+  display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px;
+  font-size: 13.5px; color: var(--ink-nav); white-space: nowrap;
 }
-.bar .group { display: flex; gap: 2px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
-.bar button {
-  border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; font-weight: 550;
-  padding: 5px 11px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+#side nav button .nbar { width: 3px; height: 16px; border-radius: 2px; background: transparent; flex: none; }
+#side nav button svg { flex: none; stroke: var(--ink-3); }
+#side nav button:hover { color: var(--ink-1); }
+#side nav button[aria-selected="true"] { color: var(--ink-1); background: rgba(118,185,0,0.12); }
+#side nav button[aria-selected="true"] .nbar { background: var(--green); }
+#side nav button[aria-selected="true"] svg { stroke: var(--green); }
+.foot {
+  margin-top: auto; padding: 14px 10px 2px; border-top: 1px solid var(--side-border);
+  font: 400 11px var(--mono); color: var(--ink-3); display: flex; flex-direction: column; gap: 6px;
 }
-.bar button:hover { color: var(--ink-1); }
-.bar button[aria-pressed="true"] { background: var(--plane); color: var(--ink-1); box-shadow: inset 0 0 0 1px var(--border); }
-.bar input[type="datetime-local"] {
-  font: inherit; font-size: 12.5px; color: var(--ink-1); background: var(--surface-1);
-  border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px;
+.live { display: inline-flex; align-items: center; gap: 7px; color: var(--green-lt); font: inherit; }
+.live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(118,185,0,0.7); flex: none; }
+.live.idle { color: var(--ink-3); } .live.idle .dot { background: var(--ink-3); box-shadow: none; }
+.live.down { color: var(--red); } .live.down .dot { background: var(--red); box-shadow: 0 0 8px rgba(227,104,104,0.7); }
+
+/* ---------- main column ---------- */
+.main {
+  flex: 1; min-width: 0; overflow-x: hidden; padding: 22px 26px 40px;
+  background: radial-gradient(1100px 400px at 82% -14%, rgba(118,185,0,0.07), transparent 66%);
 }
-.bar .apply { background: var(--s1); color: #fff; border-radius: 7px; }
-#custom { display: none; gap: 6px; align-items: center; }
-#custom.show { display: flex; }
-#rangeinfo { color: var(--ink-3); font-size: 12.5px; }
-nav { display: flex; gap: 4px; padding: 12px 28px 0; }
-nav button {
-  border: 0; background: none; color: var(--ink-2); font: inherit; font-weight: 550;
-  padding: 7px 14px; border-radius: 8px; cursor: pointer;
+.topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+#pagetitle { font-size: 19px; font-weight: 600; }
+.tright { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#rangeinfo { font: 400 11px var(--mono); color: var(--ink-3); }
+.pills {
+  display: flex; gap: 2px; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--card-border); border-radius: 99px; padding: 3px;
 }
-nav button:hover { background: var(--surface-1); }
-nav button[aria-selected="true"] { background: var(--surface-1); color: var(--ink-1); box-shadow: inset 0 0 0 1px var(--border); }
-main { padding: 16px 28px 40px; max-width: 1220px; }
+.pills button {
+  display: inline-flex; align-items: center; gap: 7px;
+  font: 500 11.5px var(--mono); padding: 4px 11px; border-radius: 99px; color: var(--ink-3); white-space: nowrap;
+}
+.pills button:hover { color: var(--ink-2); }
+.pills button[aria-pressed="true"] { color: var(--green-lt); background: rgba(118,185,0,0.14); }
+.pills button svg { stroke: var(--ink-nav); }
+#custom { display: none; align-items: center; gap: 8px; margin: -8px 0 16px; font: 400 11.5px var(--mono); color: var(--ink-3); }
+#custom.show { display: flex; flex-wrap: wrap; }
+#custom input[type="datetime-local"] {
+  font: 500 11.5px var(--mono); color: var(--ink-1); background: rgba(255,255,255,0.04);
+  border: 1px solid var(--card-border); border-radius: 8px; padding: 5px 9px; color-scheme: dark;
+}
+#custom .apply { background: var(--green); color: #0A0A0A; font: 600 11.5px var(--mono); border-radius: 99px; padding: 5px 13px; }
+
+/* ---------- cards & grids ---------- */
 section[hidden] { display: none; }
-.tiles { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; align-items: stretch; }
-.tile {
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px 16px 10px; min-width: 126px; flex: 0 1 auto;
-}
-.tile .label { color: var(--ink-3); font-size: 12px; }
-.tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
-.tile.hero .value { font-size: 48px; font-weight: 650; line-height: 1.1; }
-.tile .unit { color: var(--ink-2); font-size: 13px; font-weight: 500; margin-left: 2px; }
-.gauge { display: flex; flex-direction: column; align-items: center; padding: 12px 20px 8px; }
-.gauge svg { display: block; }
-.gauge .label { margin-top: -4px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
-.card {
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
-  padding: 14px 16px; min-width: 0;
-}
-.card.wide { grid-column: 1 / -1; }
-.card h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; }
-.card h2 .toggle { border: 1px solid var(--border); background: none; color: var(--ink-3); font-size: 11px; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
-.legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
-.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-th { text-align: left; color: var(--ink-3); font-size: 11.5px; font-weight: 550; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--grid); }
-td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-tr:last-child td { border-bottom: 0; }
-.swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 7px; }
-td.best { color: var(--good); font-weight: 650; }
-.meter .name.wide { width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 16px 20px; min-width: 0; }
+.card h2 { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 500; margin: 0 0 10px; color: var(--ink-1); }
+.card h2 .note { font: 400 11.5px var(--mono); color: var(--ink-3); font-weight: 400; }
+.card h2 .hr { margin-left: auto; font: 500 12px var(--mono); color: var(--green-lt); }
+.hic { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--green); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.tiles.sm { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 14px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.gquad { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.gcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.mb { margin-bottom: 14px; }
 .empty { color: var(--ink-3); padding: 26px 0; text-align: center; font-size: 13px; }
-.meter { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
-.meter .name { width: 64px; color: var(--ink-2); font-size: 12.5px; flex: none; }
-.meter .track { flex: 1; height: 16px; background: var(--meter-track); border-radius: 0 4px 4px 0; overflow: hidden; }
-.meter .fill { display: block; height: 100%; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
-.meter .val { width: 46px; font-variant-numeric: tabular-nums; font-size: 12.5px; }
-.modelcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.mcard { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 12px; position: relative; }
-.mcard .rank { position: absolute; top: 12px; right: 14px; color: var(--ink-3); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.mcard .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.mcard .logo {
-  width: 36px; height: 36px; border-radius: 9px; flex: none;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 650; font-size: 13px; color: #fff; letter-spacing: 0.3px;
-  background: var(--plane); border: 1px solid var(--border);
-}
-.mcard .logo img { width: 22px; height: 22px; }
-.mcard .name { font-weight: 600; line-height: 1.25; font-size: 13.5px; overflow-wrap: anywhere; }
-.mcard .pub { color: var(--ink-3); font-size: 11.5px; }
-.mcard .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px 10px; margin-top: 12px; }
-.mcard .stat .l { color: var(--ink-3); font-size: 10.5px; }
-.mcard .stat .v { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.medal { margin-right: 6px; }
+.subhead { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; font-size: 14px; font-weight: 500; }
+.subhead .note { font: 400 11.5px var(--mono); color: var(--ink-3); font-weight: 400; }
+
+/* ---------- KPI metric cards ---------- */
+.kpi { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 14px 16px 0; overflow: hidden; height: 126px; }
+.kpi.hero { padding: 15px 17px 0; height: 132px; }
+.kpihead { display: flex; align-items: center; justify-content: space-between; }
+.kpilabel { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-25); }
+.kpilabel svg { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--green); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.kpival { font-size: 23px; font-weight: 600; letter-spacing: -0.5px; margin-top: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kpi.hero .kpival { font-size: 32px; letter-spacing: -1px; margin-top: 12px; }
+.kpisub { font: 400 10.5px var(--mono); color: var(--ink-3); margin-top: 3px; }
+.kpispark { display: block; position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 32px; }
+.kpi.hero .kpispark { height: 46px; }
+.chip { font: 600 11px var(--mono); border-radius: 99px; padding: 2px 8px; white-space: nowrap; }
+.chip.good { color: var(--green-lt); background: rgba(118,185,0,0.14); }
+.chip.bad { color: var(--red); background: rgba(227,104,104,0.12); }
+.tile { background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px 16px; }
+.tile .tlabel { font-size: 11.5px; color: var(--ink-25); }
+.tile .tval { font-size: 24px; font-weight: 600; letter-spacing: -0.5px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.tile .tval .unit { font: 400 12px var(--mono); color: var(--ink-3); margin-left: 3px; }
+
+/* ---------- charts ---------- */
+.chart { position: relative; }
+.chart svg { display: block; cursor: crosshair; }
+svg text { fill: var(--ink-3); font: 400 10px var(--mono); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-25); }
+.legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; flex: none; }
 #tooltip {
   position: fixed; pointer-events: none; z-index: 10; display: none;
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); min-width: 130px;
+  background: var(--thead); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  padding: 7px 9px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); white-space: nowrap; min-width: 130px;
 }
-#tooltip .t { color: var(--ink-3); margin-bottom: 4px; }
-#tooltip .row { display: flex; justify-content: space-between; gap: 14px; }
-#tooltip .row b { font-variant-numeric: tabular-nums; font-weight: 600; }
-svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+#tooltip .t { font: 400 10px var(--mono); color: var(--ink-3); margin-bottom: 4px; }
+#tooltip .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 12px; padding: 1px 0; }
+#tooltip .row > span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+#tooltip .row b { font: 500 12px var(--mono); color: var(--ink-1); font-variant-numeric: tabular-nums; font-weight: 500; }
+.sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; }
+
+/* ---------- tables ---------- */
+.scroll { overflow: auto; margin: 0 -4px; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  position: sticky; top: 0; background: var(--thead); font: 550 11px var(--mono);
+  color: var(--ink-nav); padding: 9px 10px; z-index: 1; cursor: pointer; user-select: none;
+  white-space: nowrap; text-align: right;
+}
+th.l { text-align: left; }
+th.on { color: var(--green-lt); }
+td {
+  padding: 8px 10px; border-top: 1px solid var(--hairline); font: 500 12px var(--mono);
+  color: var(--ink-2); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+td.l { text-align: left; color: var(--ink-1); }
+td.best { color: var(--green-lt); font-weight: 600; }
+td .sw { margin-right: 8px; vertical-align: baseline; }
+.dim { color: var(--ink-4); } .warnc { color: var(--amber-lt); } .critc { color: var(--red); } .savec { color: var(--green-lt); }
+
+/* ---------- key-value lists, bars, leaderboards ---------- */
+.kv { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--hairline); font-size: 12.5px; }
+.kv:last-child { border-bottom: 0; }
+.kv > span:first-child { color: var(--ink-25); }
+.kv b { font: 500 11.5px var(--mono); color: var(--ink-1); font-weight: 500; }
+.kv.warn b { color: var(--amber-lt); } .kv.crit b { color: var(--red); } .kv.zero b { color: var(--ink-3); }
+.brow { display: flex; align-items: center; gap: 11px; padding: 5px 0; font-size: 12.5px; }
+.brow .bname { width: 110px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brow .btrack { flex: 1; height: 9px; background: var(--track); border-radius: 99px; overflow: hidden; }
+.brow .btrack span { display: block; height: 100%; border-radius: 99px; min-width: 2px; }
+.brow .bval { width: 52px; flex: none; text-align: right; font: 500 11.5px var(--mono); color: var(--ink-25); }
+.lead { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.lead .logo {
+  width: 30px; height: 30px; flex: none; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  font: 600 12px 'Space Grotesk', sans-serif; color: #fff; overflow: hidden;
+}
+.lead .logo img { width: 19px; height: 19px; }
+.lead .lbody { flex: 1; min-width: 0; }
+.lead .lrow { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; gap: 8px; }
+.lead .lrow .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead .lrow .lval { font: 500 12px var(--mono); color: var(--ink-25); flex: none; }
+.lead .ltrack { height: 6px; background: var(--track); border-radius: 99px; overflow: hidden; }
+.lead .ltrack span { display: block; height: 100%; border-radius: 99px; min-width: 2px; }
+
+/* ---------- rings, hero tiles, model cards ---------- */
+.rings { display: flex; gap: 8px; }
+.ringwrap { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.ring { position: relative; width: 76px; height: 76px; }
+.ring .rtext { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 600 15px 'Space Grotesk', sans-serif; }
+.ringwrap .rlabel { font-size: 12px; font-weight: 500; margin-top: 8px; }
+.ringwrap .rsub { font: 400 10px var(--mono); color: var(--ink-3); margin-top: 3px; line-height: 1.3; }
+.htile { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 16px 20px; min-width: 0; }
+.hlabel { font-size: 12px; color: var(--ink-25); }
+.hlabel .note { font: 400 10px var(--mono); color: var(--ink-3); }
+.hbig { font-size: 34px; font-weight: 600; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.htrack { height: 6px; background: var(--track); border-radius: 99px; overflow: hidden; }
+.htrack span { display: block; height: 100%; border-radius: 99px; }
+.stat .l { font: 400 10px var(--mono); color: var(--ink-3); }
+.stat .v { font-size: 14px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.mcard { position: relative; background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px 16px 12px; }
+.mcard .rank { position: absolute; top: 13px; right: 15px; font: 600 12px var(--mono); color: var(--ink-4); }
+.mcard .mbrand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.mcard .logo {
+  width: 34px; height: 34px; flex: none; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+  font: 600 13px 'Space Grotesk', sans-serif; color: #fff; overflow: hidden;
+}
+.mcard .logo img { width: 21px; height: 21px; }
+.mcard .mname { font-size: 13.5px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcard .mpub { font: 400 11px var(--mono); color: var(--ink-3); margin-top: 2px; }
+.mcard .mstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; margin-top: 14px; }
+.mcard .mbrand > div { min-width: 0; padding-right: 20px; }
+
+/* perf band */
+.perf3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 22px; margin-top: 10px; }
+.ptrack { position: relative; height: 6px; background: var(--track); border-radius: 99px; margin-bottom: 22px; }
+.ptrack .p50 { position: absolute; top: 50%; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border-radius: 50%; background: var(--green-lt); box-shadow: 0 0 0 3px rgba(118,185,0,0.18); }
+.ptrack .p95 { position: absolute; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--bg); border: 2px solid var(--ink-3); }
+.pvals { display: flex; justify-content: space-between; }
+.pvals .l { font: 400 10px var(--mono); color: var(--ink-3); }
+.pvals .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* seg bars (latency composition, error taxonomy, load split) */
+.segbar { display: flex; border-radius: 6px; overflow: hidden; gap: 2px; }
+.segbar div { min-width: 2px; }
+.seglegend { display: flex; flex-wrap: wrap; gap: 16px; }
+.seglegend .sl { display: flex; align-items: center; gap: 8px; }
+.seglegend .sl .sll { font-size: 12px; color: var(--ink-2); }
+.seglegend .sl .slv { font: 500 13px var(--mono); color: var(--ink-1); }
+
+@media (max-width: 860px) {
+  #side { width: 58px; padding: 20px 8px; }
+  #side .wordmark, #side nav .label, .foot span:not(.dot), .foot #uptime, .foot #verinfo, .live #liveText { display: none; }
+  #side nav button { justify-content: center; padding: 9px 0; }
+  #side nav button .nbar { display: none; }
+  .brand { justify-content: center; padding: 2px 0 22px; }
+  .main { padding: 18px 14px 40px; }
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>NIM&nbsp;Proxy</h1>
-  <span class="live" id="live"><span class="dot"></span><span id="liveText">connecting</span></span>
-  <span class="sub" id="uptime"></span>
-  <span class="sub" id="verinfo"></span>
-</header>
 
-<div class="bar">
-  <div class="group" id="ranges">
-    <button data-range="live" aria-pressed="true">Live</button>
-    <button data-range="3600">1h</button>
-    <button data-range="21600">6h</button>
-    <button data-range="86400">24h</button>
-    <button data-range="604800">7d</button>
-    <button data-range="2592000">30d</button>
-    <button data-range="custom">Custom</button>
+<aside id="side">
+  <div class="brand">
+    <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEQAAABECAYAAAA4E5OyAAAcrklEQVR42pWce5BlV3Xef2vvc+693bd7+jGv7nkgzYxGQm8kJFkkIjIxWDxkZDDjihKbEgGC47hcCXFViioMpSon5Tio/IdTDg8TYwjGaAgKDjEEYgthIewgOcJEQs+Z0cx0z0xPv7vv85y9V/7Y555z7qOFc0tdmr733PNYe61vfetba7cw/JITJ06YkydPOhHhA7/yK7evr6y9u9lu/Uyn3T6eJMlU6pyICGjxJUVBFUUwAuSfK4ggSHhLQdX3LoWiqCqS/R7+670fTpNdAIS+a4bPpHeq/DjVcFAURWqtXRkbG3uuXq//z8MH57/60EMPPQtw9913R4899lg69PDlX1Q1PCjo/b/8y3dtrG98ZHNz8y2tZituNBt0u1289xR3mt10cXe982Q3LJmRsn+XzJc/nZJ/nn+vdD5Vzb87+HnZiNkBhb2yf1trqVYq1Ot1arWxxtTUrq8dOjD/bz/1qU89C5jsZnTIIB//+MfNgw8+6FXV3vvOn/+djY2ND29sbrCxsUmaJi7cs0hxPzLSsjrwEOUH+f959a3+yAOCJ5WNUDZq6X1FwyuuxHZmepZdU7vaMzOzH/3TR/7rQ6raZxQpP8/DDz+867Of+6OTa6trb1lauuS7SaIiYgcffpRBRr56N1Xy/fIq6yg3FSm9J3nI/YQLDRtPS6Fc3Iuqeler1qL5+Xmmdk39wTe/8T8+6L23gAfU9DDjySefjD73+f/y35YvL79lcXEhSdLUWGutMabPCDJoRaXfE1RRr3jv8dnDK+CcwzlHQJni2Nyr0PKpBt7ToYfVsqP3cENzhxg6HyKIiBhjo3ano2fPnk1WVlc/cM877v2kiLgTJ04YAHvixAl78uRJ98q5hU+srq7ef+Hiha5AxRhTPHg4Wd8KZoEzeNl8VUTAe0+n08YrxHGMiJB0E7rdLgDGmgCgOeYUnjMUkgMYJCIBAUZ4mgx8rxTpvfdE1dvt7e0kjuI7brn1lvOPfPWrT504ccIKwP3333/H6bPn/npxcTF1zlkJr+xEmmUGHfbH8qW1fy3b7Ta1Wo3jV13FwYMHieMY5xxpmnDp0hLnzp9ndW0VECpxTNkT6WGQ5OYpgLX8OYNhMSJj9I7TYV/z3mutVtX9+/Zv3Xj9ddd++tOfvmhFhD379n9mZXnleLvVUmOtkcLFRlg6X8J+Fy6FTavd4sorr+ANd97J+Pg4a2urrKyssL29RafbZXJigiuvuIK5uTkAthsN2p023nlEpN845ZXv5e2Bz/JQLt/vACYpI3FQkiRxURSPqwovvfjCt+S9733/TT9+/tknL166GOXn0SKbabEsfQ89CIwIuDTgxE033sjBAwc4v7DA9vZ2lv4Er4IxLjvcMjmxi+npaZxzrK+vs3T5MhsbGzRbLeIowpgiCHoP/XfNVzKQ+3QI77WXlTSOIubmD1y+7963v9bu3Tf3L9fW1+5ut1peRIqoHEibQ6fsrZQEwtXtdInjmDtuv52JiQleOvUynXYnGNZ42i2Irae9XaHdMDjvaXe2WV5Zod1uUa1V2btnL4cOHWR2dpbllVW8c/n5yyvQjzGjMkyAbqUAV+nP1322S9NUq9XKxFZj+2l74OCB31rfWD/knMvARvuvPuocJbLlvafdabN3zx7uuP02Wq0WZ8+dRQGvjjTxrC9Zjt6wxQf/48tMzbWZf00TMcrl8xE2VjrtLpubW6yvr7O1vUV9vM7+fftYuHABI7IDXA6m6ywsSgs1iCVaJnX9IO2NMTJeG9+M2p3uMZem+TP3HyhDpCq4Wrhup9MmjmNuuP569u3dy/nzC2xtbwVDpSlpChOzHd79r1e44W0rxLMpdxzfYhfwlX9/kGeeOEBUTcONmkDv0zTlwsUL7Nu3n/r4OM1mkyiKCq+UYqG0R87KhYCU2SxDYV4G5YIBI0mSSLPdujoyRvY473ekhT3O4DNfFYQk6QLC4YOHOHT4MO12i+dfeAGXgWKPQTgndLpdrn77EvGM0m4Y1AuNcY9YRb3L+MkwcHc6HYwxIVzzrNNLuT00DYFBji9acKOe3TRDE90BfzT4unMOVOeiXphIP70r1QTg8xCBTrfD7OwsR48cRdWzsLBAo7GNsTYzXsFITeRYfqXKM9+e4e//whptFGMVRHnNLduIcXivqM9WM7sPEUOSJDSbTay1lHFNRIM3GbAWxOYlYm/1sqgR1As+Be9zu+QEvXjmgvIbY6pRXpz14k9G0O7MGEk3Yc+ePVx9/GoWFxfY3NzK0qQtjJgthaoi2UpdOg3jVtlGSFMhNsrS6Qpp6omcwzkt4lyVWrXK6uoqaZoSxVFG9HrGABsrUSV4ICYLkxLkqQdNw++2opAInkDOtQTEfWCbka3Iqw/x1SOgA67VM4rznmq1ypErruTMmdO0222staW03LuZAoi9F8Z3weN/MsOB67rcdu8246I8/0zE1x6qkbJOo6ngBclSrLWWpvdsbW5hrMkTngi5MWwFoopy9eu6TEy7APqSeRoSPMLB+pLhzP+tBmxSxfueBFEsfg+IVYTUeaI8Y+SgIzkY5fWBCC5xHL/qOCsryzQaDaIoyoBKRgoK6pUkTfA+JW14fv8DM1z1U1VuvNvx6OcmWV2oU5+MIBVsZLCZfpImjq3OZYwtdBHJUq+xiqkotQnPP/nYJjff08TnCUX7CJgqiIev/NY0j35xAhuBd5qHdCFflIo/9USUQkazkkookSCBbtJl9+7dxFHE4uIKIgaXOoy1WWyDEYOipGlKmnZR9QgGtErFVqmMCQs/mGL52Q5X3eK5+74Wu+a7TOxOqO3yJKmnsR2xdrbKNz8ptDtSYqKACcZInXLnzzW5460N1loBhHUEFfMO6nXPtW9q8d0vjwfcSQR1JcJfjrSeqKQlrlFUyqVKVBVrLPPzc1y6dDGEhNHsoi6vObquQ+q64bu+htVxJiYrHDjiuOLmTa68bZ0jr99m9nAbUNoKm2uwvW7YvGzpbobzXfkPlP3fmuWFpypM7DI5S+6FizHK0dd3afuQQcQG79ac0ZaqcIXLr1iwPvAZMQW505FqAVFOWFT7mF/vtzRNmZ2ZwaUpW1vb2ChCvQ8rZwzqHUnSwSuQjDNWG+Pg1Qk337PCzW9dY//1DRTl8oLhmSdrnP3cDOefrbJ0xtJctXSaBpcIqBBFhuq4INYzPetClokMsbGIUUSU8SnHnisdLnu+AOZS0niKatwJXDhtMbGiqQwRuVF5OMrjR8rqk5bKeKHdadPtJogIzjmMCCqC63ZIU4f4MWrVmOve3OauX7rItW/eoJPAqacq/PnHd/PC42Msn6nQWAsXtbFQqRniimFi0mAjIYoi4ijGiCWOY6w1gLBw4TztToPIGLwqu+c90/sdSSIl3aSfoHlArNLuCMvnLMYorpBLMv1XRhXIAVSH9MgSGbHW0mi2WFtfZ2pqiu3GNs55nOvSbTvGx2ocu73LXe8/x9E72iydjvjib87y3F9McPGliDRRKjWlMuaZna8QxxGCoVc2qQbdxKUel7YDKxWlUpmgPlFn8VKIARspTpV9r0mp71KaLck9pA/Ms4c1MayfN6xdDMep37kwVC2AO9qhPOqrpKw1rKyuMlarUq3WECOkDcOu2ZQHfm+BeE+Hsz+K+fMP7OPF79XoNCCqOapjjtqkJYpiIhuDCi4NOBB+QoapVMaITIWJep0ojknTLusbGzz/wnN4dVTGLBiPCMwdSzGifRjQFwwZPkQCy+cszc0gQnk/rLAN1jWqgyEzIBYLBNLjg1Fa7Q6tdguXCHNXxNz9q5dZWEh58j/s49Rfj+FToT4N1b0eIxWsjbDWYG0wShzHRDbCSEQcVYmjCoLBaQpxg0aywvLFZTbWN+h2PZGpZKET6LqNlfljjrRvwQqakGdLFQTP0ilL0jEhhrygo8C01CEQgWhQCNMhptoTZsAaA0bobAsHrtuivW74s0/Msb3eYmx6jUM3jKGdCXxrDGuqRDYYJbIWExlElG7apGu20FoXP96gOtOgvrvJ7isTLp+ynP12nepkjG1V8SkZ/xAQZXyXZ+8VKanLjFAmWgNlvsdw4eUIdaBOAujnyl+/8KWZQBs8S8qq0ogKKAPb3K081CaU55+o8cqTe2hsL9NKNqnXDH/v/Zs0N5fobhl8Ykm6JuR9AYxDrKMy7qlNQGUMavXwU62FDPPa25TWZcMrPzLENSVth2xnMnIwM+eZ2KukXYZBUXvUPxC4RgMunYky4Sqj7TooL/aLSapKpDuDSL+WUDJKFEHSMXjXZGZ/lfHWbq79qRbHb26yfhm883jv8K5XTGaaigGDYKwQVyCuQq0G1XGo1GByVrnnfW2+8JsxSVfDyvoAqArsv9JTrXtazUDVCw1Ay1I9JlI2Fi0bSzbghxsIFe1rKvZ5S5SnVwpRmVIDqMzicsYrQhSBWE+1DvEE3PpW5egNsLYU2GCaGNIkMEZfKhBtBFEMUaxEFcHGWdVqQlfk+jd1ufXNXZ74eoV4zJN2DCYKMHDgqhQxinoT5IMyP9WSZGIDIWtuBY/J8cNrfzuq3OTKLBUN93oKri+jum6ZDhHaCIEpVsfh8NWeKIKJKYoyPAuxQRelJOxoqRelXukmyj98oMlzP4jZXAkgZyLFxnDgKof3RZExyCRCSyN0Jy6fsSSdcH3fFy4y1BQrNfgw9DHUUWS2MI5kFxUJud0YkAh2TSt7DznSMhssVahiwqoZ098V6DWbcjsZSDvC3qMpb3x3GxWIxhQiZXImZc+hNOCBDHTnytGTcY5LL1rUC+ok68mN1FMLzThLHkbLGmSmTvUOoCSi9IqEULqEct3E4eKzBxyT+zxpWnT9R6U470vtvrKGISXDCDS24I53tzh4NAXjMdaz+6BjYo8jTSQvSQoJp7CMsUprS1g6Z5EMUHsZpr+tPWib4HWmHBI62Cnra3j1k3oRzcFu7qgnGlN8unMPRIHqhAY9IwIbCcaCicEYvIlUxSrjE0p9Upnd7Xj7P28yNgk2hsPXKGMT6kW8N0axBuIajE0UPRPNAHVtybK+lIlWaaiTdETxon2QEE4Q9TWfRhAWSu7YV45nJbmNYf5Yms1zSJAb+9BbUA/xmOcrD07w9DdqVCc83uVhongxccXQbSv7j3W59i5HqsrZpyssPR+DEb7zBaNP/ffY2CjGO4eKp7Up/PR7W9zzq01ajSA/mEhZOmVobkgmf5b7wDKy21j2lsj5fsVsUMbXPvimJPSGn0rNMX+kEIp1qFsS0nXahbPPGE79MKZSy8PSi4jZt+fgbx+YvO6RrdaPf/vxp86/6S8+hwNsZQyqdUXwrrEW27h5xX86MHX95y+3n//I6bMvvbPTUHftm4z15e4DwsWXbeAqPiwGOmrOYLi5LiKYfBKohx1DSLzDbIZRvFcmZzyzhz1JV/r0R6HfozQ1vPd3N3njA1ugMDaprlb3Zu9c/Zkzrzz1kWj/KbfZuXBHtab+zn+8ae7+0Dq1OkQx3uPsvrnpxWeee+LXdh27uL66febuNHH+XR/bNL/w0S3am4IxPWUPLp2O0Ix/lNNsMeU0KoeEqQXDyFEE3bE52ANEsYrzyp6DnvFpl9PsYeyQPIPM7lNec2OCqqj3KtZW2jOTU/e/4x3vm3zxhYWvd7tJPU3hrl/syhtPhGkl771Wq1V33dVXfwiInn7qhW81m50paw1Hb3RSr/fou2Kt0toUVs7abBEk00+LsNGhyj4Tu1Txr5Z2+zBEeg0gzTNNr50wfzQlrmmB5K86+CNcc2fC+HSqSVvM1PT4y/fce4995vnH/7ibNue6DePmjjtz5U2eg8dh7rjznYax9YnKKzfces25m19/y8lGc/Nw2jZu9yFnjt6akrRNvhBRRVm9YNlYNphehevDgw52EUZ1gRXF9JfN/dxDy7CSs01FTMgwNob5454y/S8np9CgDiBbHfc8+5cVkqbws7+2YdRbLp3bvv4/f/pL/2dtuXFvc9Wojb19x4c3md6nTMwq9/z6pomqjuXF7pHP/P6fPH3uzNI7G2uiYsS+7V9tMbXP45zmGcZGgaG2tkyms5RSbo8Kjnbj0Hr1WS0jeatfR8x7DCduMWFcbXzSs/9IaFlKv5hdTA9k7ozAj/8qYv1yzP2/2aA2tczffG2MreWOIqozh1Pzlg+1eO1taZAUDdz0ppQP/sE6T3xpTJZOBZecOeTMXf+oxW1vS3HdsvXDvV54KcI5EC/gpW+0SgaZR7kjqGUJUUZMEpZ1VinPaGSAqjAzp0zPOdJupl7R3+vqnchYpbkprF8SLp21PP94lZ99oM1t7+jS2TYCKpN7lbXTFapVwY55Ok1hel659c1wze3bdNpImqhMzir1eujKlbOoiJJ04fJZm/WWKTp4+upzcL21NmEdlKGqXwdoTE+HyW7AROE8+w4r9elQwOWhIoPngigWNi8Z1i9Y8MJjD1dpbURMzwp75mH/QWFql/CHv76L33vvDGunY1zT8KNv1/g3t+xl4YdjHD4G+w8Y6mN2yBihwoXWpmH1vMEIeCdDA5d5T2Zolq1YbVMOCy2lXi2DrRS9XzEFoB44lga2qv2jF0ZKiU4hipTLrxi21iw4w8qC5btfqlKphWs7hTSFf/FHm2yvGj56924+9sa9fPKfTvOGEx2uuatNYzuod148KkWXP5f+YlhbMGwuF7pNQal6E0Y6ulYrVfXRTqOUI8cus5YhokSxsv9oiuvzx9HpRUVZfDGm2xI0DdXoD75R4aaf6XLwmoROC9JE2H1Fwke/tcy5Z2K214X54449BxzNZpAURHRomqtnEGNh6Yyl3QjFnHrpC5dBZV4H3FiDUprVMjrCbjrMP3r4gShjk549r3G4tIcfMmQO1RCUSRcWX4zQxJC0DGnH0NwwPPqFWqbAh3MkbaHTEg7f0OX6uztM7HZsbZS7bTJaWM5el87EuFTycn9HIXqn0RsFs5Na1ptBz8Olp3hlPjU775na50mTQqAdFg9CbdFYNVx+JcBV2jZ0m4IR4bnvV/jRYxXGJkKj2ths5KJpaG2GBpaNinTeezDRfgQwFtIuLJ22odmd9ij7wNTMzhbJfzVl61Cuf3ryfKm06REyRZg/6qlN+iDYyE6DNiG2VxciNpYN6sEl4BMhbRtcFx774xrNTcFGJdpvQqNJSj3JXr3anw3DOzYz+vJCIGnq+hV2HeLNo4r/nkFkeNazryaU8k8gZWKUA8c8NmTMfEhlqNWlQR5cOm3oNMKqeSe4VEjb4aTnfmz5q0eqjI1rYJalobmSTwzveihJKzaGtYuWrZVwZN6DKc2p9DQeX1bYZNhNjHodMUdGLs2X1S8kNLrjqmP+qCuNIkj/8H9pokdVWXzB4n020eM06Kyp0G0YROH7j9S4eCbKquDSvFhvmWV4KcsCkTVw6ZQE0Nb+DDOk85RHNUd0vMOQX4/r606D9VmsmvCwE9MwezDN8GNQmixOYozS7Rguno5AwfWKLS/BUxLBp4b1S5bvfqlGFI3YD1NW2EbM1/cuefFUhEsN6kzGN6R/Hn5wHn/kzJn2BhvYQVftvzmx4URT+zwTe5Q0GYFZ+QIERX1jKTScRcCnZQUc1BmStsEa+OH/qvLSUxVqEz4nUENbDbII7SNkFtpt4dLpKFzDMaCBjNw7UAqF0oSiliXE0TVPMWdlwsW9h7kjjuq4z/WGwtrF3XrVAKhnLdtrIauoFzQbsusJwD6VkG6bwqNfqJF2TdA2cqV0hzSYvRUAVVhdDHDonRSacN8MawEFWir/B3HPFA8uI0hY7/+Se4iJ4NDVrmB9MkJFKdUXF09Z0q7k1adS6BPeByxJOwZUeflvIp7+dpWxuubti1fdRNTLYuctW6vZNIEj10D6dNNeuxJGTjv0ulBmQEMbGuqXAc0/rir7jzic0j83SjlFSjblDIsv2hwz8FoMuGRh411IxUk7pOW//HKVjRVDFOtwUTQgZfVu+dIZm7HgTCXz/WRrJ/ohw6cX01fmDyTvPFtkSO9SZWKXY88hR9Id6K+UVl59j2AJl05n+JGElcuVqyy7aeYlrmvQ1HDhxYjHH65RrTGg0w4KxORp+sKLBtcN8qH6UpbUV90ZMLJqMSNVsiEgkWy2Q6iOwcRuHxpPUTY4a0M/JIqCSINRxuue889FXDyVNZzdIM71ao7MUxKh2ww19vcfqXDuhYjJKQ8Szt27hrUBN8Qq9V2ezVXDiz+oZBOMRR93JC/6CTsojEHs/vm5jzUajbwLNcgEwwRgsEkUQ6dlmJhR9h72dJsGl0pYna6QdoW0E7SIc89FfO0TE6wtWnwSVlB9z4sG+aIpmk4SaPjiC5b5455KNdQ4aXYNl4R/+66wsmB55HfqnPnbGNSEa7tMGGJwW2FZ+xgpFEmtVrso191w4+LK6uq89z7fo1oYo9dODxkmqii26omqysxcSlQBbIkkhQXFO1i7ZOk2wzhE2g6Gy7vwJdAjG9U2pgfannjMIybMo07u9pioUGekNEW4uWJorhvwQrdlQg3jpCBmKkNjHTpq5k7VW2vNzPTUtyMb2eettXMaZoykfKO5PbOYd4nk9l0+F2FsufAqLuWdgho0lXzVesWWlIZWgioX0qT3QZzxCEnTEFVDS7K1bbKN0f38w7vwXbwhaZMZo8RSldE7SfOphkIQ8IoaY6jVas9E42MT39yINn866Xa9ZFu7tGjw95XyYRLY4F2oYo3Zgb9oIGHqC2P0DKLav0VDCRPHKhpKAZW8Y2+sZOOYg5pG6BL2slTwipJnUEwF9dxXNJyfMu/qeYwgxhgm6/VvRXP7dn/58vLSx8SYMc22dg/uqdV8ZQv+IKlgTLErc1By7OuFDCQwQfpao+V5sbx88eDT8mbE8jUkn79U7WWv4vtSPliLnRaj9/XiBSSO4pff9773PSoA191w02fWNzc+kHS7qYhEI7cI98wk2l8J8yqKWWlSB5WfvBFZSoN+gzMlwxssh9snKrkX9Y+SFUNAI0Yh0kqlEu3ZPfsbf/v00w8ZQI4dueLf1cfGO9neGR2dsnvNi9KK+15YFOkzD4+e+/qBmx7a3tVPogrQLdU8viBxQ9dSycJH+jyy3zV3XAkvIlG1Ujn9rvvu+xRg7IkTJ+wjjzyyeuz4VcudTvfn0jQJouAIja4HhsIgykk/M9QhIaXYy5+7ctYpkVfrmspAX7ZcfEvBpPXVmoZFR2agKlLvva/Vaub41cd/8Q8/+9nnTpw4ke8DtSLi7njDGz61sHDhn3U67VREbI6tAxuHRzu9DpTuMuKW+kVdZLQ2OvQgOzVWyqLIjgcM77VD8N55HR8ft4cPHfzw97/3vd99z3veY0+ePOnKS2wqldi9/vY7P33u/LkPdjodgDQwDaS8s1p2RoFh1lve3CnDhKjPKNIHdiMftO8vQJT/RskovWLgHNkyOEGiSqXCsSuP/MYTTzz+UJqmFnBkD5u/nPNmceH8n77ultcttdvtu7z34845oTSlVSQGKbZlvOpKj+ACA2X3yL8+0Xfs8E7tn7QgAx/5zIgmiiIzVqu9dPzY0V/6znce/Xz2lyFyXd8Ow4TaV86c+d8/f999D29sbMbe6xFE6gqieXUWLO9LMpz2zafpiLo0J4VZN35w6G30z/Dno4/vm48rNluGZoExJooiqdWqp3ZNTn3iXfe98/1f/OIXn8laue7vUPcRZeHCAw88cPjZ5567b2tr663dbnJDmqZ7oygafzXxZojHDKjeWh6jZHBfKUMjWSNcfyjMdEDfVRTv/FYU2cU4rj45Nbnrz+65581ff/DBBzcBOHHCcvKkG7z3/wewUBRk7bMtLAAAAABJRU5ErkJggg==" alt="NIM Proxy" width="34" height="34">
+    <span class="wordmark"><b>NIM</b> Proxy</span>
   </div>
-  <button id="pause" class="group" style="padding:7px 12px" title="Pause live refresh">&#10074;&#10074;</button>
-  <span id="custom">
-    <input type="datetime-local" id="from"> <span class="sub">to</span>
+  <nav role="tablist">
+    <button role="tab" data-tab="overview" aria-selected="true"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5L8 3l6 5.5M3.5 7.5V13h9V7.5"/></svg><span class="label">Overview</span></button>
+    <button role="tab" data-tab="models" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13V7M8 13V3M12 13V9"/></svg><span class="label">Models</span></button>
+    <button role="tab" data-tab="clients" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg><span class="label">Clients</span></button>
+    <button role="tab" data-tab="reliability" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l5 2v4c0 3.5-2.4 6-5 7-2.6-1-5-3.5-5-7v-4z"/></svg><span class="label">Reliability</span></button>
+    <button role="tab" data-tab="capacity" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11a6 6 0 0112 0M8 11l3-3.5"/></svg><span class="label">Capacity</span></button>
+  </nav>
+  <div class="foot">
+    <button class="live" id="live" title="Click to pause/resume the live poll"><span class="dot"></span><span id="liveText">connecting</span></button>
+    <span id="uptime"></span>
+    <span id="verinfo"></span>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <span id="pagetitle">Overview</span>
+    <div class="tright">
+      <span id="rangeinfo"></span>
+      <div class="pills" id="ranges">
+        <button data-range="live" aria-pressed="true">Live</button>
+        <button data-range="3600">1h</button>
+        <button data-range="21600">6h</button>
+        <button data-range="86400">24h</button>
+        <button data-range="604800">7d</button>
+        <button data-range="2592000">30d</button>
+        <button data-range="custom"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke-linecap="round"/></svg>Custom</button>
+      </div>
+    </div>
+  </div>
+  <div id="custom">
+    <input type="datetime-local" id="from"> <span>to</span>
     <input type="datetime-local" id="to">
     <button class="apply" id="applyRange">Apply</button>
-  </span>
-  <span id="rangeinfo"></span>
-</div>
+  </div>
 
-<nav role="tablist">
-  <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
-  <button role="tab" data-tab="models" aria-selected="false">Models</button>
-  <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
-  <button role="tab" data-tab="harnesses" aria-selected="false">Harnesses</button>
-  <button role="tab" data-tab="proxy" aria-selected="false">Proxy</button>
-  <button role="tab" data-tab="keys" aria-selected="false">Keys</button>
-</nav>
+  <svg width="0" height="0" style="position:absolute"><defs>
+    <linearGradient id="gGreen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#76B900" stop-opacity="0.35"/><stop offset="1" stop-color="#76B900" stop-opacity="0"/></linearGradient>
+    <linearGradient id="gMuted" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8E967F" stop-opacity="0.20"/><stop offset="1" stop-color="#8E967F" stop-opacity="0"/></linearGradient>
+  </defs></svg>
 
-<main>
+  <main>
   <section id="tab-overview">
-    <div class="tiles">
-      <div class="tile hero"><div class="label" id="o-savedLabel">Dollars saved (vs reference pricing)</div><div class="value" id="o-saved">$0.00</div></div>
-      <div class="tile gauge"><div id="o-cap"></div><div class="label">Capacity used</div></div>
-      <div class="tile gauge"><div id="o-ok"></div><div class="label">Success rate</div></div>
-      <div class="tile"><div class="label" id="o-reqsLabel">Requests</div><div class="value" id="o-reqs">0</div></div>
-      <div class="tile"><div class="label">Tokens out</div><div class="value" id="o-ctok">0</div></div>
-      <div class="tile"><div class="label">Avg TTFT</div><div class="value" id="o-ttft">–</div></div>
-      <div class="tile"><div class="label">Avg speed</div><div class="value" id="o-tps">–</div></div>
+    <div class="tiles" id="o-kpis"></div>
+    <div class="row">
+      <div class="card" style="flex:3 1 380px">
+        <h2><svg class="hic" viewBox="0 0 16 16"><path d="M1 8h3l2-5 3 11 2-6h4"/></svg>Traffic <span class="note">requests / min</span><span class="hr" id="o-reqnow"></span></h2>
+        <div id="o-traffic"></div>
+      </div>
+      <div class="card" style="flex:1 1 300px;min-width:300px;display:flex;flex-direction:column">
+        <h2><svg class="hic" viewBox="0 0 16 16"><path d="M8 1.5A6.5 6.5 0 108 14.5"/><path d="M8 8l3.5-2.5"/></svg>Capacity &amp; reliability</h2>
+        <div class="rings" id="o-rings"></div>
+        <div style="margin-top:14px;padding-top:6px;border-top:1px solid var(--hairline)" id="o-health"></div>
+      </div>
     </div>
-    <div class="cards">
+    <div class="card mb">
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M9 1.5L3 9h4l-1 5.5L13 7H9z"/></svg>Performance <span class="note">median &amp; p95 across the window</span></h2>
+      <div class="perf3" id="o-perf"></div>
+    </div>
+    <div class="grid2">
       <div class="card">
-        <h2>Requests per minute</h2>
-        <div id="spark-reqs"></div>
-      </div>
-      <div class="card">
-        <h2>Completion tokens per minute</h2>
-        <div id="spark-tok"></div>
-      </div>
-      <div class="card">
-        <h2>Dollars saved, cumulative</h2>
-        <div id="spark-saved"></div>
-      </div>
-      <div class="card">
-        <h2>Health</h2>
-        <div id="o-health"></div>
-      </div>
-      <div class="card">
-        <h2>Top models</h2>
+        <h2><svg class="hic" viewBox="0 0 16 16"><path d="M4 13V7M8 13V3M12 13V9"/></svg>Top models <span class="note">tokens out</span></h2>
         <div id="o-topmodels"></div>
       </div>
       <div class="card">
-        <h2>Top harnesses</h2>
+        <h2><svg class="hic" viewBox="0 0 16 16"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg>Top harnesses <span class="note">tokens out</span></h2>
         <div id="o-topharness"></div>
       </div>
     </div>
   </section>
 
   <section id="tab-models" hidden>
-    <div class="tiles">
-      <div class="tile hero"><div class="label" id="savedLabel">Dollars saved (vs reference pricing)</div><div class="value" id="m-saved">$0.00</div></div>
-      <div class="tile"><div class="label">Completion tokens</div><div class="value" id="m-ctok">0</div></div>
-      <div class="tile"><div class="label">Prompt tokens</div><div class="value" id="m-ptok">0</div></div>
-      <div class="tile"><div class="label">Avg TTFT</div><div class="value" id="m-ttft">–</div></div>
-      <div class="tile"><div class="label">Avg speed</div><div class="value" id="m-tps">–</div></div>
+    <div class="tiles sm" id="m-kpis"></div>
+    <div class="card mb">
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M1 8h3l2-5 3 11 2-6h4"/></svg>Completion tokens per minute <span class="note">by model</span></h2>
+      <div id="chart-modeltok"></div>
+      <div class="legend" id="legend-modeltok"></div>
     </div>
-    <div class="modelcards" id="modelcards"></div>
-    <div class="cards">
-      <div class="card wide">
-        <h2>Completion tokens per minute, by model</h2>
-        <div id="chart-modeltok"></div>
-        <div class="legend" id="legend-modeltok"></div>
-      </div>
+    <div class="gquad">
       <div class="card">
-        <h2>Time to first token</h2>
+        <h2 style="margin-bottom:2px">Time to first token</h2>
+        <div class="note" style="font:400 10.5px var(--mono);color:var(--ink-3);margin-bottom:8px">p50 / p95</div>
         <div id="chart-ttft"></div>
-        <div class="legend" id="legend-ttft"></div>
+        <div class="legend" id="q-ttft"></div>
       </div>
       <div class="card">
-        <h2>Generation speed</h2>
+        <h2 style="margin-bottom:2px">Generation speed</h2>
+        <div class="note" style="font:400 10.5px var(--mono);color:var(--ink-3);margin-bottom:8px">tok/s</div>
         <div id="chart-tps"></div>
-        <div class="legend" id="legend-tps"></div>
+        <div class="legend" id="q-tps"></div>
       </div>
       <div class="card">
-        <h2>Inter-token latency (TPOT)</h2>
+        <h2 style="margin-bottom:2px">Inter-token latency</h2>
+        <div class="note" style="font:400 10.5px var(--mono);color:var(--ink-3);margin-bottom:8px">TPOT</div>
         <div id="chart-tpot"></div>
-        <div class="legend" id="legend-tpot"></div>
+        <div class="legend" id="q-tpot"></div>
       </div>
       <div class="card">
-        <h2>Upstream latency</h2>
+        <h2 style="margin-bottom:2px">Upstream latency</h2>
+        <div class="note" style="font:400 10.5px var(--mono);color:var(--ink-3);margin-bottom:8px">p50 / p95</div>
         <div id="chart-upstream"></div>
-        <div class="legend" id="legend-upstream"></div>
+        <div class="legend" id="q-upstream"></div>
       </div>
-      <div class="card">
-        <h2>Dollars saved, cumulative</h2>
-        <div id="chart-saved"></div>
-      </div>
-      <div class="card">
-        <h2>How responses end</h2>
+    </div>
+    <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+      <div class="card" style="flex:1.5">
+        <h2><svg class="hic" viewBox="0 0 16 16"><path d="M2 8h5M2 4h9M2 12h7"/></svg>How responses end <span class="hr" id="m-fincount" style="color:var(--ink-3);font-weight:400"></span></h2>
         <div id="table-finish"></div>
       </div>
       <div class="card">
-        <h2>Reasoning vs output tokens</h2>
+        <h2><svg class="hic" viewBox="0 0 16 16"><path d="M8 1.5a4 4 0 00-2.5 7.1V11h5V8.6A4 4 0 008 1.5zM6 13h4M6.5 15h3"/></svg>Reasoning vs output</h2>
         <div id="meters-reasoning"></div>
       </div>
-      <div class="card wide">
-        <h2>Per model</h2>
-        <div id="table-models"></div>
-      </div>
+    </div>
+    <div class="card mb">
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M8 2v12M3 5l5-3 5 3M3 11l5 3 5-3"/></svg>Model scorecard <span class="note">top models head to head · best in each column highlighted</span></h2>
+      <div id="compare-scorecard"></div>
+    </div>
+    <div class="card mb">
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M9 1.5L3 9h4l-1 5.5L13 7H9z"/></svg>Head to head <span class="note">generation speed</span></h2>
+      <div id="compare-bars"></div>
+    </div>
+    <div class="subhead"><svg class="hic" viewBox="0 0 16 16"><path d="M4 13V7M8 13V3M12 13V9"/></svg>Leading models <span class="note" id="m-cardnote"></span></div>
+    <div class="gcards" id="modelcards"></div>
+    <div class="card">
+      <h2><svg class="hic" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 6h13M6 6v7.5"/></svg>Per model <span class="note" id="m-tablecount"></span></h2>
+      <div id="table-models"></div>
     </div>
   </section>
 
-  <section id="tab-compare" hidden>
-    <div class="cards">
-      <div class="card wide">
-        <h2>Model scorecard <span class="sub" style="font-weight:400">best in each column highlighted</span></h2>
-        <div id="compare-scorecard"></div>
-      </div>
-      <div class="card wide">
-        <h2>Head to head</h2>
-        <div id="compare-bars"></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="tab-harnesses" hidden>
-    <div class="tiles">
-      <div class="tile"><div class="label">Harnesses</div><div class="value" id="h-count">0</div></div>
-      <div class="tile"><div class="label">Streaming share</div><div class="value" id="h-stream">–</div></div>
-      <div class="tile"><div class="label">Avg tools / request</div><div class="value" id="h-tools">–</div></div>
-      <div class="tile"><div class="label">Avg messages / request</div><div class="value" id="h-msgs">–</div></div>
-      <div class="tile"><div class="label">Tool-using requests</div><div class="value" id="h-toolpct">–</div></div>
-    </div>
-    <div class="cards">
+  <section id="tab-clients" hidden>
+    <div class="tiles sm" id="h-kpis"></div>
+    <div class="grid2">
       <div class="card">
-        <h2>Tool intensity <span class="sub" style="font-weight:400">avg tools offered / request</span></h2>
+        <h2>Tool intensity <span class="note">avg tools / request</span></h2>
         <div id="h-toolint"></div>
       </div>
       <div class="card">
-        <h2>Conversation depth <span class="sub" style="font-weight:400">avg messages / request</span></h2>
+        <h2>Conversation depth <span class="note">avg messages / request</span></h2>
         <div id="h-depth"></div>
       </div>
       <div class="card">
-        <h2>Sampling fingerprint <span class="sub" style="font-weight:400">avg temperature</span></h2>
+        <h2>Sampling fingerprint <span class="note">avg temperature</span></h2>
         <div id="h-temp"></div>
       </div>
       <div class="card">
-        <h2>Streaming vs buffered</h2>
+        <h2>Streaming share <span class="note">% streamed</span></h2>
         <div id="h-streammix"></div>
       </div>
-      <div class="card wide">
-        <h2>Per harness</h2>
-        <div id="table-harness"></div>
-      </div>
+    </div>
+    <div class="card">
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg>Per harness <span class="note">click a column to sort</span></h2>
+      <div id="table-harness"></div>
     </div>
   </section>
 
-  <section id="tab-proxy" hidden>
-    <div class="tiles">
-      <div class="tile gauge"><div id="g-cap"></div><div class="label">Capacity used</div></div>
-      <div class="tile gauge"><div id="g-ok"></div><div class="label">Success rate</div></div>
-      <div class="tile"><div class="label" id="reqsLabel">Requests</div><div class="value" id="p-reqs">0</div></div>
-      <div class="tile"><div class="label">Requests/min</div><div class="value" id="p-rpm">0</div></div>
-      <div class="tile"><div class="label">Active now</div><div class="value" id="p-active">0</div></div>
-      <div class="tile"><div class="label">Queued</div><div class="value" id="p-queued">0</div></div>
-      <div class="tile"><div class="label">Avg queue wait</div><div class="value" id="p-wait">–</div></div>
-      <div class="tile"><div class="label">Avg upstream</div><div class="value" id="p-lat">–</div></div>
+  <section id="tab-reliability" hidden>
+    <div class="row">
+      <div class="htile" style="flex:1 1 240px" id="r-avail"></div>
+      <div class="htile" style="flex:2 1 380px" id="r-time"></div>
+      <div class="htile" style="flex:1 1 240px" id="r-load"></div>
     </div>
-    <div class="cards">
+    <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
       <div class="card">
         <h2>Requests per minute</h2>
         <div id="chart-reqrate"></div>
@@ -328,22 +420,26 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <div class="legend" id="legend-outcomes"></div>
       </div>
       <div class="card">
-        <h2>Non-success outcomes</h2>
-        <div id="table-outcomes"></div>
-      </div>
-      <div class="card">
         <h2>In flight &amp; queued</h2>
         <div id="chart-load"></div>
         <div class="legend" id="legend-load"></div>
       </div>
+    </div>
+    <div class="grid2" style="grid-template-columns:1fr 1.4fr">
       <div class="card">
         <h2>Queue wait</h2>
         <div id="chart-qwait"></div>
         <div class="legend" id="legend-qwait"></div>
       </div>
       <div class="card">
-        <h2>Activity by hour <button class="toggle" id="heatToggle">table</button></h2>
+        <h2>Activity by hour</h2>
         <div id="heatmap"></div>
+      </div>
+    </div>
+    <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+      <div class="card">
+        <h2>Non-success outcomes</h2>
+        <div id="table-outcomes"></div>
       </div>
       <div class="card">
         <h2>Reliability &amp; security</h2>
@@ -353,26 +449,22 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <h2>Request types</h2>
         <div id="table-reqtypes"></div>
       </div>
-      <div class="card wide">
-        <h2>Per client</h2>
-        <div id="table-clients"></div>
-      </div>
+    </div>
+    <div class="card">
+      <h2>Per client <span class="note">click a column to sort</span></h2>
+      <div id="table-clients"></div>
     </div>
   </section>
 
-  <section id="tab-keys" hidden>
-    <div class="tiles">
-      <div class="tile"><div class="label">Key lanes</div><div class="value" id="k-lanes">0</div></div>
-      <div class="tile"><div class="label">Aggregate capacity</div><div class="value" id="k-cap">0<span class="unit">rpm</span></div></div>
-      <div class="tile"><div class="label">Rate-limit hits (429)</div><div class="value" id="k-429">0</div></div>
-      <div class="tile"><div class="label">Other benches</div><div class="value" id="k-5xx">0</div></div>
-      <div class="tile"><div class="label">Conversation stickiness</div><div class="value" id="k-sticky">–</div></div>
-      <div class="tile"><div class="label">Headroom now</div><div class="value" id="k-headroom">–</div></div>
-      <div class="tile"><div class="label" title="Keys to keep peak demand under budget">Keys for peak</div><div class="value" id="k-needed">–</div></div>
+  <section id="tab-capacity" hidden>
+    <div class="row">
+      <div class="htile" style="flex:2 1 380px" id="k-sat"></div>
+      <div class="htile" style="flex:1 1 220px" id="k-prov"></div>
+      <div class="htile" style="flex:1 1 220px" id="k-pressure"></div>
     </div>
-    <div class="cards">
+    <div class="grid2">
       <div class="card">
-        <h2>Lane utilization, trailing 60s</h2>
+        <h2>Lane utilization <span class="note">trailing 60s</span></h2>
         <div id="meters"></div>
       </div>
       <div class="card">
@@ -380,30 +472,28 @@ svg text { fill: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-
         <div id="chart-benches"></div>
         <div class="legend" id="legend-benches"></div>
       </div>
-      <div class="card wide">
-        <h2>Per lane</h2>
-        <div id="table-lanes"></div>
-      </div>
+    </div>
+    <div class="card">
+      <h2>Per lane <span class="note">click a column to sort</span></h2>
+      <div id="table-lanes"></div>
     </div>
   </section>
-</main>
+  </main>
+</div>
 <div id="tooltip"></div>
 
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-const SLOTS = ['--s1','--s2','--s3','--s4','--s5','--s6'];
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const dark = matchMedia('(prefers-color-scheme: dark)').matches;
 // HTML-escape any value that reaches innerHTML. Model ids and client names
 // originate from request data; the server sanitizes them, but escape here too
 // so a stray character can never become markup (defense in depth vs XSS).
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// Sequential blue ramp for the heatmap (light: light→dark = more).
-const RAMP = dark
-  ? ['#0d366b','#104281','#184f95','#1c5cab','#256abf','#2a78d6','#3987e5']
-  : ['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'];
+// Sequential green ramp for the heatmap (dark → bright = more).
+const RAMP = ['#141A0E','#233312','#33501A','#4E7A0F','#76B900','#A7D65A'];
+const MED = '#A7D65A', P95 = '#6F7767';   // quantile pair: filled median, muted p95
 
 /* ---------- formatting ---------- */
 const fmt = n => !isFinite(n) ? '–'
@@ -412,7 +502,7 @@ const fmt = n => !isFinite(n) ? '–'
   : Math.abs(n) >= 1e4 ? (n/1e3).toFixed(1)+'K'
   : Math.abs(n) >= 100 ? Math.round(n).toLocaleString()
   : Math.abs(n) >= 10 ? n.toFixed(1).replace(/\.0$/,'')
-  : n.toFixed(n === Math.round(n) ? 0 : 2);
+  : n.toFixed(2).replace(/\.?0+$/, '');
 const money = n => '$' + (n >= 1000 ? fmt(n) : n.toFixed(2));
 const secs = s => !isFinite(s) ? '–' : s < 1 ? Math.round(s*1000)+' ms' : s < 90 ? s.toFixed(1)+' s' : Math.round(s/60)+' min';
 const ago = s => { s = Math.max(0, Math.round(s));
@@ -471,7 +561,6 @@ const POLL_MS = 3000, KEEP = 400;
 let samples = [];              // [{t(ms), rows}]
 let mode = { kind: 'live', paused: false };
 let cfg = { lanes: 0, rpm: 40, price_in: 0.5, price_out: 2.0, started: Date.now()/1000, version: '' };
-let heatAsTable = false;
 
 function rate(cur, prev, curT, prevT) {
   if (prev === undefined || cur < prev || curT <= prevT) return 0;
@@ -496,6 +585,29 @@ function wgroups(name, key, f) {
   }
   return cur;
 }
+/* windowed histogram buckets: lifetime in live mode, delta over view in range mode */
+function wbuckets(metric, f) {
+  const cur = buckets(samples[samples.length-1].rows, metric, f);
+  if (mode.kind === 'live' || samples.length < 2) return cur;
+  return deltaBuckets(cur, buckets(samples[0].rows, metric, f));
+}
+/* pairwise windowed average of a histogram's sum/count — a trend line for
+   "avg X per poll interval" (TTFT, speed, …) */
+const avgSeries = (sumName, cntName, f) => samples.slice(1).map((s, i) => {
+  const dS = sum(s.rows, sumName, f) - sum(samples[i].rows, sumName, f);
+  const dN = sum(s.rows, cntName, f) - sum(samples[i].rows, cntName, f);
+  return dN > 0 && dS >= 0 ? { t: s.t, v: dS / dN } : null;
+}).filter(Boolean);
+
+/* quantile median/p95 series from windowed bucket deltas over `samples`;
+   `filter` narrows the source buckets (e.g. source="usage"). */
+const quantSeries = (metric, filter) => [[0.5, 'median', MED], [0.95, 'p95', P95]].map(([q, name, color]) => ({
+  name, color,
+  pts: samples.slice(1).map((s, i) => {
+    const bA = s2 => buckets(s2.rows, metric, filter);
+    return { t: s.t, v: quantile(deltaBuckets(bA(s), bA(samples[i])), q) };
+  }).filter(p => isFinite(p.v)),
+}));
 
 /* ---------- tooltip ---------- */
 const tip = $('tooltip');
@@ -506,58 +618,76 @@ function showTip(x, y, html) {
   tip.style.top = Math.max(8, Math.min(y - h - 12, innerHeight - h - 8)) + 'px';
 }
 const hideTip = () => tip.style.display = 'none';
+/* last mouse position, so hover survives the 3s live re-render */
+let mouse = { x: -1, y: -1 };
+addEventListener('mousemove', ev => { mouse.x = ev.clientX; mouse.y = ev.clientY; }, { passive: true });
 
-/* ---------- line chart ---------- */
-function lineChart(el, series, unitFmt) {
-  el.innerHTML = '';
+/* ---------- line chart: full-bleed plot, overlay y-labels, hover crosshair
+   + snapped per-series dots + tooltip card ---------- */
+function lineChart(el, series, unitFmt, opts = {}) {
+  const H = opts.height || 190;
+  el.classList.add('chart');
   const live = series.filter(s => s.pts.length > 1);
   if (!live.length) { el.innerHTML = '<div class="empty">No data in this window</div>'; return; }
-  const W = el.clientWidth || 500, H = 190, PL = 42, PR = 14, PT = 10, PB = 22;
+  const W = el.clientWidth || 500, PT = 16, PB = 16;
   const t0 = Math.min(...live.map(s => s.pts[0].t));
   const t1 = Math.max(...live.map(s => s.pts[s.pts.length-1].t));
   let vmax = Math.max(1e-6, ...live.flatMap(s => s.pts.map(p => p.v)));
   if (vmax <= 1e-6) vmax = 1; // all-zero series: show a 0..1 scale
   if (vmax >= 0.5) { const step = Math.pow(10, Math.floor(Math.log10(vmax))); vmax = Math.ceil(vmax / (step/2)) * (step/2); }
-  const X = t => PL + (W-PL-PR) * (t - t0) / Math.max(1, t1 - t0);
-  const Y = v => PT + (H-PT-PB) * (1 - v / vmax);
+  const X = t => W * (t - t0) / Math.max(1, t1 - t0);
+  const Y = v => PT + (H-PT-PB) * (1 - Math.min(v, vmax) / vmax);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.setAttribute('width', '100%'); svg.setAttribute('height', H);
   let g = '';
   for (let i = 0; i <= 3; i++) {
     const v = vmax * i / 3, y = Y(v);
-    g += `<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="${css('--grid')}" stroke-width="1"/>`;
-    g += `<text x="${PL-6}" y="${y+3.5}" text-anchor="end">${unitFmt(v)}</text>`;
+    g += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${css('--hairline')}" stroke-width="1"/>`;
+    if (i > 0) g += `<text x="${W-3}" y="${y-4}" text-anchor="end">${unitFmt(v)}</text>`;
   }
   const span = t1 - t0;
   const tlab = t => span > 36e5 * 26
     ? new Date(t).toLocaleDateString([], {month:'short', day:'numeric'})
     : new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  g += `<text x="${PL}" y="${H-6}">${tlab(t0)}</text><text x="${W-PR}" y="${H-6}" text-anchor="end">${tlab(t1)}</text>`;
+  g += `<text x="0" y="${H-4}" fill="${css('--ink-4')}">${tlab(t0)}</text><text x="${W}" y="${H-4}" text-anchor="end" fill="${css('--ink-4')}">${tlab(t1)}</text>`;
   for (const s of live) {
-    const d = s.pts.map((p,i) => `${i?'L':'M'}${X(p.t).toFixed(1)},${Y(Math.min(p.v, vmax)).toFixed(1)}`).join('');
+    const d = s.pts.map((p,i) => `${i?'L':'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+    if (s.area) g += `<path d="${d}L${X(s.pts[s.pts.length-1].t).toFixed(1)},${H-PB}L${X(s.pts[0].t).toFixed(1)},${H-PB}Z" fill="${s.area === true ? 'url(#gGreen)' : s.area}"/>`;
     g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     const e = s.pts[s.pts.length-1];
-    g += `<circle cx="${X(e.t)}" cy="${Y(Math.min(e.v, vmax))}" r="4" fill="${s.color}" stroke="${css('--surface-1')}" stroke-width="2"/>`;
+    g += `<circle cx="${X(e.t)}" cy="${Y(e.v)}" r="3.5" fill="${s.color}" stroke="${css('--bg')}" stroke-width="1.5"/>`;
   }
-  g += `<line id="xh" x1="0" y1="${PT}" x2="0" y2="${H-PB}" stroke="${css('--axis')}" stroke-width="1" visibility="hidden"/>`;
+  g += `<g id="hoverg" visibility="hidden"><line id="xh" x1="0" y1="${PT}" x2="0" y2="${H-PB}" stroke="rgba(255,255,255,0.28)" stroke-width="1"/></g>`;
   svg.innerHTML = g;
-  el.appendChild(svg);
-  const xh = svg.querySelector('#xh');
-  svg.addEventListener('mousemove', ev => {
+  el.innerHTML = ''; el.appendChild(svg);
+  const hoverg = svg.querySelector('#hoverg'), xh = svg.querySelector('#xh');
+  const hover = (clientX, clientY) => {
     const r = svg.getBoundingClientRect();
-    const mx = (ev.clientX - r.left) * W / r.width;
-    const t = t0 + (mx - PL) / Math.max(1e-9, W-PL-PR) * (t1 - t0);
-    xh.setAttribute('x1', mx); xh.setAttribute('x2', mx); xh.setAttribute('visibility', 'visible');
-    let html = `<div class="t">${new Date(t).toLocaleString()}</div>`;
+    const t = t0 + (clientX - r.left) / Math.max(1, r.width) * (t1 - t0);
+    // snap to the nearest sample of the densest series
+    const ref = live.reduce((a, s) => s.pts.length > a.pts.length ? s : a);
+    let best = ref.pts[0];
+    for (const p of ref.pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+    const mx = X(best.t);
+    xh.setAttribute('x1', mx); xh.setAttribute('x2', mx);
+    let dots = '';
+    let html = `<div class="t">${new Date(best.t).toLocaleString()}</div>`;
     for (const s of live) {
-      let best = s.pts[0];
-      for (const p of s.pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
-      html += `<div class="row"><span><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}</span><b>${unitFmt(best.v)}</b></div>`;
+      let p = s.pts[0];
+      for (const q of s.pts) if (Math.abs(q.t - best.t) < Math.abs(p.t - best.t)) p = q;
+      dots += `<circle cx="${X(p.t)}" cy="${Y(p.v)}" r="4" fill="${s.color}" stroke="${css('--bg')}" stroke-width="1.5"/>`;
+      html += `<div class="row"><span><i class="sw" style="background:${s.color}"></i>${esc(s.name)}</span><b>${unitFmt(p.v)}</b></div>`;
     }
-    showTip(ev.clientX, ev.clientY, html);
-  });
-  svg.addEventListener('mouseleave', () => { xh.setAttribute('visibility','hidden'); hideTip(); });
+    hoverg.innerHTML = xh.outerHTML + dots;
+    hoverg.setAttribute('visibility', 'visible');
+    showTip(clientX, clientY, html);
+  };
+  svg.addEventListener('mousemove', ev => hover(ev.clientX, ev.clientY));
+  svg.addEventListener('mouseleave', () => { hoverg.setAttribute('visibility', 'hidden'); hideTip(); });
+  // re-apply hover if the pointer is already over this chart (live re-render)
+  const r = svg.getBoundingClientRect();
+  if (mouse.x >= r.left && mouse.x <= r.right && mouse.y >= r.top && mouse.y <= r.bottom) hover(mouse.x, mouse.y);
 }
 
 function legend(el, series) {
@@ -566,85 +696,144 @@ function legend(el, series) {
     : '';
 }
 
-/* ---------- horizontal bar rows: one labeled, scaled bar per entity ----------
-   entries: [{name, v, color?}]; `fmtV` formats the value, bars scale to the
-   max. Reuses the .meter markup so it matches the lane utilization bars. */
-function barRows(el, entries, fmtV) {
+/* ---------- sortable growable table ----------
+   cols: [{label, align?('l'), str?, best?('min'|'max'), fmt}], rows: [{vals, cells}]
+   where vals are sortable primitives and cells pre-escaped HTML strings.
+   Sort state persists across re-renders (Map by table id); scroll position is
+   saved/restored around the innerHTML swap so the 3s live poll doesn't jump. */
+const sortState = new Map();
+function sortTable(el, id, cols, rows, opts = {}) {
+  if (!rows.length) { el.innerHTML = `<div class="empty">${opts.empty || 'No traffic yet'}</div>`; return; }
+  const st = sortState.get(id) || { idx: opts.defaultIdx ?? 1, asc: opts.defaultAsc ?? false };
+  sortState.set(id, st);
+  const sorted = [...rows].sort((a, b) => {
+    const av = a.vals[st.idx], bv = b.vals[st.idx];
+    if (typeof av === 'string' || typeof bv === 'string')
+      return st.asc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    const an = isFinite(av) ? av : -Infinity, bn = isFinite(bv) ? bv : -Infinity;
+    return st.asc ? an - bn : bn - an;
+  });
+  const bests = cols.map((c, i) => {
+    if (!c.best || rows.length < 2) return null;
+    const vs = rows.map(r => r.vals[i]).filter(v => typeof v === 'number' && isFinite(v));
+    return vs.length ? (c.best === 'max' ? Math.max(...vs) : Math.min(...vs)) : null;
+  });
+  let h = `<div class="scroll" style="max-height:${opts.maxH || 420}px"><table style="min-width:${opts.minW || 0}px"><thead><tr>` +
+    cols.map((c, i) =>
+      `<th class="${c.align === 'l' ? 'l' : ''}${i === st.idx ? ' on' : ''}" data-i="${i}">${esc(c.label)}${i === st.idx ? (st.asc ? ' ↑' : ' ↓') : ''}</th>`
+    ).join('') + '</tr></thead><tbody>' +
+    sorted.map(r => '<tr>' + r.cells.map((cell, i) => {
+      const best = bests[i] !== null && r.vals[i] === bests[i];
+      return `<td class="${cols[i].align === 'l' ? 'l' : ''}${best ? ' best' : ''}">${cell}</td>`;
+    }).join('') + '</tr>').join('') + '</tbody></table></div>';
+  const prev = el.querySelector('.scroll');
+  const top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;
+  el.innerHTML = h;
+  const sc = el.querySelector('.scroll');
+  sc.scrollTop = top; sc.scrollLeft = left;
+  for (const th of el.querySelectorAll('th')) th.addEventListener('click', () => {
+    const i = +th.dataset.i;
+    if (st.idx === i) st.asc = !st.asc;
+    else { st.idx = i; st.asc = !!cols[i].str; }   // strings default A→Z, numbers big-first
+    sortTable(el, id, cols, rows, opts);
+  });
+}
+
+/* ---------- horizontal bar rows ----------
+   Bars scale to the max entry, or to `maxV` when the metric has an absolute
+   scale (percentages, utilization). */
+function barList(el, entries, fmtV, maxV) {
   const vals = entries.filter(e => isFinite(e.v));
   if (!vals.length) { el.innerHTML = '<div class="empty">No data yet</div>'; return; }
-  const max = Math.max(1e-9, ...vals.map(e => e.v));
-  el.innerHTML = entries.map(e => {
-    const w = isFinite(e.v) ? Math.max(2, e.v / max * 100) : 0;
-    return `<div class="meter"><span class="name wide" title="${esc(e.name)}">${esc(e.name)}</span>` +
-      `<span class="track"><span class="fill" style="width:${w.toFixed(0)}%;background:${e.color || css('--s1')}"></span></span>` +
-      `<span class="val">${isFinite(e.v) ? fmtV(e.v) : '–'}</span></div>`;
-  }).join('');
+  const max = maxV || Math.max(1e-9, ...vals.map(e => e.v));
+  el.innerHTML = entries.map(e =>
+    `<div class="brow"><span class="bname" title="${esc(e.name)}">${esc(e.label ?? e.name)}</span>` +
+    `<span class="btrack">${isFinite(e.v) ? `<span style="width:${Math.max(2, e.v / max * 100).toFixed(0)}%;background:${e.color}"></span>` : ''}</span>` +
+    `<span class="bval">${isFinite(e.v) ? fmtV(e.v) : '–'}</span></div>`).join('');
 }
 
-/* ---------- scorecard: entities as rows, metrics as columns, best-in-column
-   highlighted. cols: [{label, get(row)->number, fmt, best:'min'|'max'}]. ---------- */
-function scorecard(el, rows, nameOf, cols) {
-  if (!rows.length) { el.innerHTML = '<div class="empty">No traffic yet</div>'; return; }
-  const bestOf = c => {
-    const vs = rows.map(c.get).filter(isFinite);
-    if (!vs.length) return null;
-    return c.best === 'max' ? Math.max(...vs) : Math.min(...vs);
-  };
-  const bests = cols.map(bestOf);
-  let h = '<table><tr><th>' + nameOf.head + '</th>' +
-    cols.map(c => `<th class="num">${esc(c.label)}</th>`).join('') + '</tr>';
-  for (const r of rows) {
-    h += '<tr><td>' + nameOf.cell(r) + '</td>' + cols.map((c, i) => {
-      const v = c.get(r);
-      const best = bests[i] !== null && isFinite(v) && v === bests[i] && rows.length > 1;
-      return `<td class="num${best ? ' best' : ''}">${isFinite(v) ? c.fmt(v) : '–'}</td>`;
-    }).join('') + '</tr>';
-  }
-  el.innerHTML = h + '</table>';
+/* leaderboard rows: chip square + name + value + thin progress bar */
+function leaderList(el, entries, fmtV) {
+  if (!entries.length) { el.innerHTML = '<div class="empty">No traffic yet</div>'; return; }
+  const max = Math.max(1e-9, ...entries.map(e => e.v));
+  el.innerHTML = entries.map(e =>
+    `<div class="lead">${e.chip}<div class="lbody">` +
+    `<div class="lrow"><span class="lname" title="${esc(e.name)}">${esc(e.label ?? e.name)}</span><span class="lval">${fmtV(e.v)}</span></div>` +
+    `<div class="ltrack"><span style="width:${Math.max(2, e.v / max * 100).toFixed(0)}%;background:${e.color}"></span></div>` +
+    `</div></div>`).join('');
 }
 
-/* ---------- arc gauge: a meter bent into 270 degrees ----------
-   `color` is a CSS var name (default --s1); pass a threshold color so the
-   dial itself signals saturation/health, not just the number. */
-function arcGauge(el, ratio, text, color) {
-  const R = 40, C = 48, SW = 9, start = 135, sweep = 270;
-  const clamped = Math.max(0, Math.min(1, ratio));
-  const arc = (from, deg, stroke) => {
-    const p = a => { const r = (a-90) * Math.PI/180; return `${C + R*Math.cos(r)},${C + R*Math.sin(r)}`; };
-    const large = deg > 180 ? 1 : 0;
-    return `<path d="M${p(from)} A${R},${R} 0 ${large} 1 ${p(from+deg)}" fill="none" stroke="${stroke}" stroke-width="${SW}" stroke-linecap="round"/>`;
-  };
-  el.innerHTML = `<svg width="96" height="86" viewBox="0 0 96 90" role="img" aria-label="${text}">
-    ${arc(start, sweep, css('--meter-track'))}
-    ${clamped > 0.005 ? arc(start, sweep * clamped, css(color || '--s1')) : ''}
-    <text x="${C}" y="${C+5}" text-anchor="middle" style="font-size:17px;font-weight:650;fill:${css('--ink-1')}">${text}</text>
-  </svg>`;
+/* ---------- ring gauge ---------- */
+function ringGauge(el, ratio, text, color, label, sub) {
+  const C = 2 * Math.PI * 34, cl = Math.max(0, Math.min(1, ratio));
+  el.innerHTML = `<div class="ring"><svg width="76" height="76" viewBox="0 0 84 84" role="img" aria-label="${esc(label)} ${esc(text)}">
+    <circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"/>
+    ${cl > 0.004 ? `<circle cx="42" cy="42" r="34" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(C*cl).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 42 42)"/>` : ''}
+    </svg><span class="rtext">${text}</span></div>
+    <div class="rlabel">${esc(label)}</div><div class="rsub">${sub}</div>`;
 }
 
-/* ---------- activity heatmap: weekday x hour, sequential ramp ---------- */
+/* ---------- KPI metric cards ---------- */
+const ICONS = {
+  pulse: '<path d="M1 8h3l2-5 3 11 2-6h4"/>',
+  stack: '<path d="M8 1.5l6 3-6 3-6-3zM2 8l6 3 6-3M2 11.5l6 3 6-3"/>',
+  coin: '<path d="M8 1.5A6.5 6.5 0 108 14.5 6.5 6.5 0 008 1.5zM8 4.5v7M9.8 6a2 2 0 00-3.6 1.2c0 2 3.6 1 3.6 2.8A2 2 0 016.2 10.5"/>',
+  check: '<path d="M2.5 8.5l3.5 3.5 7.5-8"/>',
+  clock: '<path d="M8 4v4l2.5 1.5M8 1.5A6.5 6.5 0 108 14.5 6.5 6.5 0 008 1.5z"/>',
+  bolt: '<path d="M9 1.5L3 9h4l-1 5.5L13 7H9z"/>',
+  grid: '<path d="M2 8h5M2 4h9M2 12h7"/>',
+};
+function sparkSvg(pts, green, hero) {
+  if (!pts || pts.length < 2) return '';
+  const W = 300, H = hero ? 58 : 44, vs = pts.map(p => p.v);
+  const vmax = Math.max(1e-9, ...vs);
+  const X = i => W * i / (vs.length - 1), Y = v => 4 + (H - 8) * (1 - Math.min(v, vmax) / vmax);
+  const d = vs.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1)).join('');
+  return `<svg class="kpispark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+    `<path d="${d}L${W},${H}L0,${H}Z" fill="url(#${green ? 'gGreen' : 'gMuted'})"/>` +
+    `<path d="${d}" fill="none" stroke="${green ? MED : '#8E967F'}" stroke-width="1.5"/></svg>`;
+}
+/* trend chip: second half of the window vs the first half */
+function deltaChip(pts, downIsGood) {
+  if (!pts || pts.length < 6) return '';
+  const mid = Math.floor(pts.length / 2);
+  const a = pts.slice(0, mid).reduce((x, p) => x + p.v, 0) / mid;
+  const b = pts.slice(mid).reduce((x, p) => x + p.v, 0) / (pts.length - mid);
+  if (!(a > 0)) return '';
+  const d = (b - a) / a * 100;
+  if (!isFinite(d) || Math.abs(d) < 0.05) return '';
+  const good = downIsGood ? d <= 0 : d >= 0;
+  return `<span class="chip ${good ? 'good' : 'bad'}" title="second half of this window vs the first">${d >= 0 ? '+' : ''}${Math.abs(d) >= 10 ? d.toFixed(0) : d.toFixed(1)}%</span>`;
+}
+/* k: {icon, label, value, sub, delta?, valColor?, pts?, green?} */
+function kpiCards(el, defs, hero) {
+  el.innerHTML = defs.map(k =>
+    `<div class="kpi${hero ? ' hero' : ''}">` +
+    `<div class="kpihead"><span class="kpilabel"><svg viewBox="0 0 16 16">${ICONS[k.icon] || ''}</svg>${esc(k.label)}</span>${k.delta || ''}</div>` +
+    `<div class="kpival"${k.valColor ? ` style="color:${k.valColor}"` : ''}>${k.value}</div>` +
+    `<div class="kpisub">${k.sub || ''}</div>` +
+    sparkSvg(k.pts, k.green, hero) + `</div>`).join('');
+}
+
+/* one metric-list row: label, right-aligned mono value, optional tone */
+const metricRow = (l, v, tone) => `<div class="kv${tone ? ' ' + tone : ''}"><span>${l}</span><b>${v}</b></div>`;
+
+/* ---------- activity heatmap: weekday x hour, sequential green ramp ---------- */
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 function heatmap(el, matrix, vmax) {
   if (!vmax) { el.innerHTML = '<div class="empty">No data in this window</div>'; return; }
-  if (heatAsTable) {
-    let t = '<table><tr><th></th>' + [0,6,12,18].map(h => `<th class="num">${h}:00</th>`).join('') + '</tr>';
-    for (let d = 0; d < 7; d++)
-      t += `<tr><td>${DAYS[d]}</td>` + [0,6,12,18].map(h =>
-        `<td class="num">${fmt(matrix[d].slice(h, h+6).reduce((a,b) => a+b, 0))}</td>`).join('') + '</tr>';
-    el.innerHTML = t + '</table>';
-    return;
-  }
-  const CW = 13, CH = 17, GAP = 2, PL = 34, PT = 14;
-  const W = PL + 24*(CW+GAP), H = PT + 7*(CH+GAP) + 4;
+  const CW = 26, CH = 18, GAP = 3, PL = 36, PT = 18;
+  const W = PL + 24*(CW+GAP), H = PT + 7*(CH+GAP);
   let g = '';
   for (let d = 0; d < 7; d++) {
-    g += `<text x="${PL-6}" y="${PT + d*(CH+GAP) + CH - 4}" text-anchor="end">${DAYS[d]}</text>`;
+    g += `<text x="${PL-8}" y="${PT + d*(CH+GAP) + CH - 4}" text-anchor="end">${DAYS[d]}</text>`;
     for (let h = 0; h < 24; h++) {
       const v = matrix[d][h];
-      const color = v ? RAMP[Math.min(RAMP.length-1, Math.floor(v/vmax*(RAMP.length-0.001)))] : css('--grid');
+      const color = v ? RAMP[Math.min(RAMP.length-1, Math.floor(v/vmax*(RAMP.length-0.001)))] : css('--thead');
       g += `<rect x="${PL + h*(CW+GAP)}" y="${PT + d*(CH+GAP)}" width="${CW}" height="${CH}" rx="3" fill="${color}" data-d="${d}" data-h="${h}"/>`;
     }
   }
-  for (const h of [0, 6, 12, 18]) g += `<text x="${PL + h*(CW+GAP)}" y="${PT-4}">${h}:00</text>`;
+  for (const h of [0, 6, 12, 18]) g += `<text x="${PL + h*(CW+GAP)}" y="${PT-6}">${h}:00</text>`;
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px">${g}</svg>`;
   el.querySelector('svg').addEventListener('mousemove', ev => {
     const c = ev.target.closest('rect');
@@ -656,13 +845,11 @@ function heatmap(el, matrix, vmax) {
   el.querySelector('svg').addEventListener('mouseleave', hideTip);
 }
 
-/* ---------- model cards: publisher identity from the model id namespace.
-   Logos come from the LobeHub AI-icons CDN when online; the brand-colored
-   monogram is the offline fallback. ---------- */
+/* ---------- entity identity: publishers, clients, colors ---------- */
 const PUBLISHERS = {
   'meta': { name: 'Meta', slug: 'meta-color', color: '#0668E1' },
   'deepseek-ai': { name: 'DeepSeek', slug: 'deepseek-color', color: '#4D6BFE' },
-  'moonshotai': { name: 'Moonshot AI', slug: 'moonshot', color: '#1B1B1F' },
+  'moonshotai': { name: 'Moonshot AI', slug: 'moonshot', color: '#16B8C0' },
   'nvidia': { name: 'NVIDIA', slug: 'nvidia-color', color: '#76B900' },
   'qwen': { name: 'Qwen', slug: 'qwen-color', color: '#615CED' },
   'mistralai': { name: 'Mistral AI', slug: 'mistral-color', color: '#FA520F' },
@@ -675,6 +862,7 @@ const PUBLISHERS = {
   'zhipuai': { name: 'Zhipu AI', slug: 'zhipu-color', color: '#3859FF' },
   'z-ai': { name: 'Z.ai', slug: 'zhipu-color', color: '#3859FF' },
   'minimaxai': { name: 'MiniMax', slug: 'minimax-color', color: '#F23F5D' },
+  'stepfun': { name: 'StepFun', slug: 'stepfun-color', color: '#EE6002' },
   'baichuan-inc': { name: 'Baichuan', slug: 'baichuan-color', color: '#FF6933' },
   '01-ai': { name: '01.AI', slug: 'yi-color', color: '#003425' },
   'writer': { name: 'Writer', slug: 'writer', color: '#160E1B' },
@@ -687,59 +875,56 @@ function publisher(model) {
   const p = PUBLISHERS[ns.toLowerCase()];
   if (p) return p;
   const name = ns || 'unknown';
-  return { name, slug: null, color: '#52514E' };
+  return { name, slug: null, color: '#5A6150' };
 }
 function prettyName(model) {
   const raw = model.includes('/') ? model.split('/').slice(1).join('/') : model;
   return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
     .replace(/\bAi\b/g, 'AI').replace(/\bIt\b/g, 'IT');
 }
-function logoHtml(pub) {
-  const initials = pub.name.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/)
-    .map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
-  const mono = `this.parentElement.style.background='${pub.color}';this.parentElement.style.border='0';this.parentElement.textContent='${initials}'`;
-  if (!pub.slug) return `<span class="logo" style="background:${pub.color};border:0">${initials}</span>`;
-  return `<span class="logo"><img alt="" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/${pub.slug}.svg" onerror="${mono}"></span>`;
+const initialsOf = name => name.replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/)
+  .map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+/* chip square: LobeHub CDN logo when online, brand-colored monogram fallback */
+function chipHtml(pub) {
+  const initials = initialsOf(pub.name);
+  const mono = `this.parentElement.style.background='${pub.color}';this.parentElement.textContent='${initials}'`;
+  if (!pub.slug) return `<span class="logo" style="background:${pub.color}">${initials}</span>`;
+  return `<span class="logo" style="background:rgba(255,255,255,0.05)"><img alt="" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/${pub.slug}.svg" onerror="${mono}"></span>`;
 }
-
-/* ---------- color-follows-entity ----------
-   First six distinct entities take the validated categorical slots; beyond
-   that, a stable hash-to-hue keeps every entity a consistent (if unreserved)
-   color instead of dropping to none. */
-const modelSlots = new Map();
-function slotFor(model) {
-  if (!modelSlots.has(model) && modelSlots.size < SLOTS.length) modelSlots.set(model, SLOTS[modelSlots.size]);
-  return modelSlots.get(model);
-}
+/* known-harness colors, stable hash-to-hue for the rest */
+const CLIENT_COLORS = {
+  'claude-code': '#C15F3C', 'aider': '#2E7D5B', 'opencode': '#5A6150', 'cline': '#4D6BFE',
+  'continue': '#615CED', 'cursor': '#2E96FF', 'roo-code': '#EE6002', 'zed': '#16B8C0',
+  'codex': '#10A37F', 'n8n': '#EA4B71',
+};
 function hueFor(name) {
   let h = 0;
   for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return `hsl(${h % 360} 58% ${dark ? '62%' : '44%'})`;
+  return `hsl(${h % 360} 58% 62%)`;
 }
-/* Resolved color for an entity: a reserved slot if it has one, else a hue. */
-const colorFor = model => { const s = slotFor(model); return s ? css(s) : hueFor(model); };
+const clientColor = c => CLIENT_COLORS[String(c).toLowerCase()] || hueFor(c);
+/* model line color: publisher brand, deduped per chart via hash fallback */
+function seriesColors(models) {
+  const used = new Set();
+  return models.map(m => {
+    let c = publisher(m).color;
+    if (used.has(c)) c = hueFor(m);
+    used.add(c);
+    return c;
+  });
+}
 
-/* quantile median/p95 series from windowed bucket deltas over `samples`;
-   `filter` narrows the source buckets (e.g. source="usage"). */
-const quantSeries = (metric, filter) => [[0.5, 'median', css('--q-lo')], [0.95, 'p95', css('--q-hi')]].map(([q, name, color]) => ({
-  name, color,
-  pts: samples.slice(1).map((s, i) => {
-    const bA = s2 => buckets(s2.rows, metric, filter);
-    return { t: s.t, v: quantile(deltaBuckets(bA(s), bA(samples[i])), q) };
-  }).filter(p => isFinite(p.v)),
-}));
+/* ---------- render ----------
+   Compute every value that crosses tab boundaries once into `c`, then render
+   only the active tab (hidden tabs re-render on switch, so their charts size
+   to a real clientWidth). */
+let activeTab = 'overview';
+const TITLES = { overview: 'Overview', models: 'Models', clients: 'Clients', reliability: 'Reliability', capacity: 'Capacity' };
 
-/* one metric-table row: label, right-aligned value, optional warn coloring */
-const metricRow = (l, v, warn) => `<tr><td>${l}</td><td class="num"${warn ? ' style="color:var(--critical)"' : ''}>${v}</td></tr>`;
-
-/* ---------- render ---------- */
-/* Compute every value that crosses tab boundaries once into `c`, then let each
-   per-tab function read what it needs and own its own DOM. Tabs render grouped
-   rather than interleaved, but every element is still written the same value. */
 function render() {
   if (!samples.length) return;
   const last = samples[samples.length-1], rows = last.rows;
-  const windowLabel = mode.kind === 'live' ? '' : ' in range';
+  const windowLabel = mode.kind === 'live' ? 'lifetime' : 'in range';
 
   /* ----- shared per-model aggregates ----- */
   const ptok = wgroups('nimproxy_prompt_tokens_total', 'model');
@@ -749,9 +934,9 @@ function render() {
   models.sort((a,b) => (ctok.get(b)||0) - (ctok.get(a)||0));
   let saved = 0, allP = 0, allC = 0;
   for (const m of models) {
-    const p = ptok.get(m) || 0, c = ctok.get(m) || 0;
-    allP += p; allC += c;
-    saved += p/1e6*cfg.price_in + c/1e6*cfg.price_out;
+    const p = ptok.get(m) || 0, ct = ctok.get(m) || 0;
+    allP += p; allC += ct;
+    saved += p/1e6*cfg.price_in + ct/1e6*cfg.price_out;
   }
   const wsum = name => windowed(s => sum(s.rows, name));
   const ttftS = wsum('nimproxy_ttft_seconds_sum'), ttftN = wsum('nimproxy_ttft_seconds_count');
@@ -761,11 +946,9 @@ function render() {
     l => l.status !== '200' && l.status !== 'disconnect');
   const ttftMS = wgroups('nimproxy_ttft_seconds_sum', 'model'), ttftMC = wgroups('nimproxy_ttft_seconds_count', 'model');
   const tpsMS = wgroups('nimproxy_tokens_per_second_sum', 'model'), tpsMC = wgroups('nimproxy_tokens_per_second_count', 'model');
-  const errPct = m => {
-    const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0);
-    return t ? `${(e / t * 100).toFixed(e ? 1 : 0)}%` : '–';
-  };
-  // Quality maps shared by the model table, finish-reason panel, and Compare.
+  const errRate = m => { const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0); return t ? e / t * 100 : NaN; };
+  const errPct = m => { const v = errRate(m); return isFinite(v) ? `${v.toFixed(v ? 1 : 0)}%` : '–'; };
+  // Quality maps shared by the model table, finish-reason panel, and scorecard.
   const tpotMS = wgroups('nimproxy_tpot_seconds_sum', 'model'), tpotMC = wgroups('nimproxy_tpot_seconds_count', 'model');
   const finTotal = wgroups('nimproxy_finish_reason_total', 'model');
   const finLen = wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === 'length');
@@ -774,6 +957,7 @@ function render() {
   const truncPct = m => finTotal.get(m) ? (finLen.get(m) || 0) / finTotal.get(m) * 100 : NaN;
   const reasonPct = m => ctok.get(m) ? (reasoningByModel.get(m) || 0) / ctok.get(m) * 100 : NaN;
   const pct = v => isFinite(v) ? v.toFixed(v && v < 10 ? 1 : 0) + '%' : '–';
+  const modelSaved = m => (ptok.get(m)||0)/1e6*cfg.price_in + (ctok.get(m)||0)/1e6*cfg.price_out;
 
   /* cumulative dollars within the view */
   const base = samples[0];
@@ -790,14 +974,16 @@ function render() {
   const recent = reqPts.filter(p => p.t >= (reqPts[reqPts.length-1]?.t || 0) - 60000);
   const curRpm = recent.length ? recent.reduce((a,p) => a+p.v, 0) / recent.length : 0;
   const avgRpm = reqPts.length ? reqPts.reduce((a,p) => a+p.v, 0) / reqPts.length : 0;
+  const peakRpm = reqPts.length ? Math.max(...reqPts.map(p => p.v)) : 0;
   const capacity = Math.max(1, cfg.lanes * cfg.rpm);
-  const capRatio = (mode.kind === 'live' ? curRpm : avgRpm) / capacity;
-  // Blue while there's headroom, amber approaching the cap, red once saturated.
-  const capColor = capRatio >= 0.9 ? '--critical' : capRatio >= 0.7 ? '--s3' : '--s1';
+  const rpmNow = mode.kind === 'live' ? curRpm : avgRpm;
+  const capRatio = rpmNow / capacity;
+  // Green while there's headroom, amber approaching the cap, red once saturated.
+  const capColor = capRatio >= 0.9 ? css('--red') : capRatio >= 0.7 ? css('--amber') : MED;
   const wreq = windowed(s => sum(s.rows, 'nimproxy_requests_total'));
   const wok = windowed(s => sum(s.rows, 'nimproxy_requests_total', l => l.status === '200'));
   const okRatio = wreq ? wok/wreq : 1;
-  const okColor = okRatio < 0.9 ? '--critical' : okRatio < 0.99 ? '--s3' : '--good';
+  const okColor = okRatio < 0.9 ? css('--red') : okRatio < 0.99 ? css('--amber') : css('--green');
 
   /* ----- shared client / harness aggregates ----- */
   const cReq = wgroups('nimproxy_requests_total', 'client');
@@ -811,186 +997,348 @@ function render() {
   const totStreamF = [...streamF.values()].reduce((a, b) => a + b, 0);
   const totGen = totStreamT + totStreamF;
   const totToolReq = [...toolReqs.values()].reduce((a, b) => a + b, 0);
+  const clientSaved = cl => (cP.get(cl)||0)/1e6*cfg.price_in + (cC.get(cl)||0)/1e6*cfg.price_out;
 
   /* ----- shared reliability / security counters ----- */
   const shed = windowed(s => sum(s.rows, 'nimproxy_shed_total'));
   const unauth = windowed(s => sum(s.rows, 'nimproxy_unauthorized_total'));
   const logins = windowed(s => sum(s.rows, 'nimproxy_login_failures_total'));
   const bench429 = windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429'));
+  const benchOther = windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429'));
+  const qwS = wsum('nimproxy_queue_wait_seconds_sum'), qwN = wsum('nimproxy_queue_wait_seconds_count');
+  const upS = wsum('nimproxy_upstream_seconds_sum'), upN = wsum('nimproxy_upstream_seconds_count');
+  const statusG = wgroups('nimproxy_requests_total', 'status');
 
   const c = {
     last, rows, windowLabel,
     ptok, ctok, reqModels, models, saved, allP, allC,
     wsum, ttftS, ttftN, tpsS, tpsN,
-    okByModel, errByModel, ttftMS, ttftMC, tpsMS, tpsMC, errPct,
-    tpotMS, tpotMC, finTotal, finLen, reasoningByModel, tpotAvg, truncPct, reasonPct, pct,
+    okByModel, errByModel, ttftMS, ttftMC, tpsMS, tpsMC, errRate, errPct,
+    tpotMS, tpotMC, finTotal, finLen, reasoningByModel, tpotAvg, truncPct, reasonPct, pct, modelSaved,
     savedAt,
-    reqPts, curRpm, avgRpm, capacity, capRatio, capColor, wreq, okRatio, okColor,
-    cReq, cP, cC, clients, streamT, streamF, toolReqs, totStreamT, totStreamF, totGen, totToolReq,
-    shed, unauth, logins, bench429,
+    reqPts, curRpm, avgRpm, peakRpm, capacity, rpmNow, capRatio, capColor, wreq, wok, okRatio, okColor,
+    cReq, cP, cC, clients, streamT, streamF, toolReqs, totStreamT, totStreamF, totGen, totToolReq, clientSaved,
+    shed, unauth, logins, bench429, benchOther, qwS, qwN, upS, upN, statusG,
   };
-
-  renderModels(c);
-  renderProxy(c);
-  renderKeys(c);
-  renderOverview(c);
-  renderHarnesses(c);
-  renderCompare(c);
+  (RENDERERS[activeTab] || renderOverview)(c);
 }
 
-/* ----- models ----- */
-function renderModels(c) {
-  const { models, ptok, ctok, reqModels, saved, allP, allC, windowLabel,
-    ttftS, ttftN, tpsS, tpsN, okByModel, ttftMS, ttftMC, tpsMS, tpsMC, errPct,
-    finTotal, reasoningByModel, tpotAvg, truncPct, reasonPct, pct, savedAt } = c;
-  $('savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
-  $('m-saved').textContent = money(saved);
-  $('m-ctok').textContent = fmt(allC);
-  $('m-ptok').textContent = fmt(allP);
-  $('m-ttft').textContent = ttftN ? secs(ttftS/ttftN) : '–';
-  $('m-tps').textContent = tpsN ? fmt(tpsS/tpsN) + ' tok/s' : '–';
+/* client monogram chip (harness leaderboards) */
+const clientChip = cl =>
+  `<span class="logo" style="background:${clientColor(cl)}">${esc(initialsOf(String(cl)))}</span>`;
 
-  const top = models.slice(0, 5);
-  const tokSeries = top.map(m => ({
-    name: m.split('/').pop(), color: colorFor(m),
+/* ===== overview ===== */
+function renderOverview(c) {
+  const { windowLabel, saved, capRatio, capColor, okRatio, okColor, wreq, wok, allP, allC,
+    reqPts, savedAt, rows, shed, unauth, logins, bench429, rpmNow, capacity, curRpm,
+    models, ctok, clients, cC, errRate } = c;
+  const ctokPts = rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total'));
+  const okPts = samples.slice(1).map((s, i) => {
+    const dr = sum(s.rows, 'nimproxy_requests_total') - sum(samples[i].rows, 'nimproxy_requests_total');
+    const dok = sum(s.rows, 'nimproxy_requests_total', l => l.status === '200') - sum(samples[i].rows, 'nimproxy_requests_total', l => l.status === '200');
+    return dr > 0 ? { t: s.t, v: Math.max(0, Math.min(100, dok / dr * 100)) } : null;
+  }).filter(Boolean);
+  const savedPts = samples.map(s => ({ t: s.t, v: savedAt(s) }));
+  const savedDiffs = savedPts.slice(1).map((p, i) => ({ t: p.t, v: Math.max(0, p.v - savedPts[i].v) }));
+  kpiCards($('o-kpis'), [
+    { icon: 'pulse', label: 'Requests', value: fmt(wreq), sub: windowLabel, delta: deltaChip(reqPts), pts: reqPts },
+    { icon: 'stack', label: 'Tokens out', value: fmt(allC), sub: `${fmt(allP)} in`, delta: deltaChip(ctokPts), pts: ctokPts },
+    { icon: 'check', label: 'Success rate', value: wreq ? (okRatio * 100).toFixed(2).replace(/\.?0+$/, '') + '%' : '–',
+      sub: `${fmt(wok)} of ${fmt(wreq)}`, delta: deltaChip(okPts), pts: okPts },
+    { icon: 'coin', label: 'Dollars saved', value: money(saved), sub: 'vs reference pricing',
+      valColor: MED, delta: deltaChip(savedDiffs), pts: savedPts, green: true },
+  ], true);
+
+  $('o-reqnow').textContent = fmt(curRpm) + ' now';
+  lineChart($('o-traffic'), [{ name: 'req/min', color: MED, pts: reqPts, area: true }], fmt, { height: 220 });
+
+  $('o-rings').innerHTML = '<div class="ringwrap" id="o-ring-cap"></div><div class="ringwrap" id="o-ring-ok"></div>';
+  ringGauge($('o-ring-cap'), capRatio, Math.round(capRatio * 100) + '%', capColor,
+    'Capacity used', `${fmt(rpmNow)} / ${fmt(capacity)} rpm · ${cfg.lanes} key${cfg.lanes === 1 ? '' : 's'}`);
+  const errShare = wreq ? (wreq - wok) / wreq * 100 : 0;
+  ringGauge($('o-ring-ok'), okRatio, wreq ? Math.round(okRatio * 100) + '%' : '–', okColor,
+    'Success rate', `errors ${errShare.toFixed(errShare && errShare < 10 ? 1 : 0)}% · ${fmt(bench429)} benched`);
+  const sul = shed + unauth + logins;
+  $('o-health').innerHTML =
+    metricRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
+    metricRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
+    metricRow('Rate-limit benches', fmt(bench429), bench429 > 0 ? 'warn' : 'zero') +
+    metricRow('Shed · 401 · failed logins', `${fmt(shed)} · ${fmt(unauth)} · ${fmt(logins)}`, sul > 0 ? 'crit' : 'zero');
+
+  const perfBlock = (label, note, p50, p95, fmtV) => {
+    const scale = Math.max(isFinite(p50) ? p50 : 0, isFinite(p95) ? p95 : 0, 1e-9) * 1.25;
+    const pos = v => Math.min(96, v / scale * 100).toFixed(1) + '%';
+    return `<div><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">` +
+      `<span style="font-size:12.5px;color:var(--ink-2)">${label}</span><span style="font:400 10px var(--mono);color:var(--ink-3)">${note}</span></div>` +
+      `<div class="ptrack">${isFinite(p50) ? `<div class="p50" style="left:${pos(p50)}"></div>` : ''}${isFinite(p95) ? `<div class="p95" style="left:${pos(p95)}"></div>` : ''}</div>` +
+      `<div class="pvals"><div><div class="l">p50</div><div class="v" style="color:var(--green-lt)">${fmtV(p50)}</div></div>` +
+      `<div style="text-align:right"><div class="l">p95</div><div class="v" style="color:var(--ink-2)">${fmtV(p95)}</div></div></div></div>`;
+  };
+  const q = (metric, f) => { const b = wbuckets(metric, f); return [quantile(b, 0.5), quantile(b, 0.95)]; };
+  const [t50, t95] = q('nimproxy_ttft_seconds');
+  const [s50, s95] = q('nimproxy_tokens_per_second', l => l.source === 'usage');
+  const [i50, i95] = q('nimproxy_tpot_seconds');
+  $('o-perf').innerHTML =
+    perfBlock('Time to first token', 'lower is better', t50, t95, secs) +
+    perfBlock('Generation speed', 'higher is better', s50, s95, v => isFinite(v) ? fmt(v) + ' tok/s' : '–') +
+    perfBlock('Inter-token latency', 'lower is better', i50, i95, secs);
+
+  leaderList($('o-topmodels'), models.slice(0, 5).map(m => {
+    const pub = publisher(m);
+    return { name: m, label: prettyName(m), chip: chipHtml(pub), color: pub.color, v: ctok.get(m) || 0 };
+  }), fmt);
+  leaderList($('o-topharness'), clients.slice(0, 5).map(cl =>
+    ({ name: cl, chip: clientChip(cl), color: clientColor(cl), v: cC.get(cl) || 0 })), fmt);
+}
+
+/* ===== models (includes the head-to-head scorecard, ex-Compare tab) ===== */
+function renderModels(c) {
+  const { models, ptok, ctok, reqModels, allP, allC, windowLabel,
+    ttftS, ttftN, tpsS, tpsN, okByModel, ttftMS, ttftMC, tpsMS, tpsMC, errRate, errPct,
+    finTotal, reasoningByModel, tpotAvg, truncPct, reasonPct, pct, modelSaved } = c;
+
+  const chatReqs = [...reqModels.values()].reduce((a, b) => a + b, 0);
+  const qmed = (metric, f) => { const v = quantile(wbuckets(metric, f), 0.5); return isFinite(v) ? v : NaN; };
+  kpiCards($('m-kpis'), [
+    { icon: 'pulse', label: 'Requests', value: fmt(chatReqs), sub: `${models.length} model${models.length === 1 ? '' : 's'}`,
+      pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', l => l.path === '/v1/chat/completions')) },
+    { icon: 'stack', label: 'Completion tokens', value: fmt(allC), sub: windowLabel,
+      pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total')) },
+    { icon: 'grid', label: 'Prompt tokens', value: fmt(allP), sub: windowLabel,
+      pts: rateSeries(s => sum(s.rows, 'nimproxy_prompt_tokens_total')) },
+    { icon: 'clock', label: 'Avg TTFT', value: ttftN ? secs(ttftS / ttftN) : '–',
+      sub: `median ${secs(qmed('nimproxy_ttft_seconds'))}`,
+      pts: avgSeries('nimproxy_ttft_seconds_sum', 'nimproxy_ttft_seconds_count') },
+    { icon: 'bolt', label: 'Avg speed', value: tpsN ? fmt(tpsS / tpsN) + ' tok/s' : '–',
+      sub: `median ${isFinite(qmed('nimproxy_tokens_per_second', l => l.source === 'usage')) ? fmt(qmed('nimproxy_tokens_per_second', l => l.source === 'usage')) + ' tok/s' : '–'}`,
+      pts: avgSeries('nimproxy_tokens_per_second_sum', 'nimproxy_tokens_per_second_count') },
+  ]);
+
+  const top = models.slice(0, 5), topColors = seriesColors(top);
+  const tokSeries = top.map((m, i) => ({
+    name: prettyName(m), color: topColors[i],
     pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total', l => l.model === m)),
   }));
-  lineChart($('chart-modeltok'), tokSeries, fmt);
+  lineChart($('chart-modeltok'), tokSeries, fmt, { height: 220 });
   legend($('legend-modeltok'), tokSeries);
 
-  /* TTFT p50/p95 from bucket deltas between consecutive snapshots */
-  const qSeries = quantSeries('nimproxy_ttft_seconds');
-  lineChart($('chart-ttft'), qSeries, secs);
-  legend($('legend-ttft'), qSeries);
+  /* quantile quad: trend chart + current windowed p50/p95 beneath */
+  const quad = (chartId, valId, metric, f, fmtV) => {
+    const series = quantSeries(metric, f);
+    lineChart($(chartId), series, fmtV, { height: 120 });
+    const b = wbuckets(metric, f);
+    $(valId).innerHTML =
+      `<span><i style="background:${MED}"></i>median ${fmtV(quantile(b, 0.5))}</span>` +
+      `<span><i style="background:${P95}"></i>p95 ${fmtV(quantile(b, 0.95))}</span>`;
+  };
+  quad('chart-ttft', 'q-ttft', 'nimproxy_ttft_seconds', null, secs);
+  quad('chart-tps', 'q-tps', 'nimproxy_tokens_per_second', l => l.source === 'usage', v => isFinite(v) ? fmt(v) + ' tok/s' : '–');
+  quad('chart-tpot', 'q-tpot', 'nimproxy_tpot_seconds', null, secs);
+  quad('chart-upstream', 'q-upstream', 'nimproxy_upstream_seconds', null, secs);
 
-  /* generation speed p50/p95 from tokens_per_second bucket deltas. Filter to
-     source="usage" so the trend reflects real reported throughput, not the
-     ~1-token-per-event estimate used when upstream omits usage. */
-  const tpsSeries = quantSeries('nimproxy_tokens_per_second', l => l.source === 'usage');
-  lineChart($('chart-tps'), tpsSeries, n => fmt(n) + ' tok/s');
-  legend($('legend-tps'), tpsSeries);
-
-  /* cumulative dollars within the view */
-  lineChart($('chart-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
-
-  /* ranked model cards */
-  $('modelcards').innerHTML = models.slice(0, 8).map((m, i) => {
-    const pub = publisher(m), c = ctok.get(m) || 0;
-    const statCell = (l, v) => `<span class="stat"><span class="l">${l}</span><br><span class="v">${v}</span></span>`;
-    return `<div class="mcard"><span class="rank">#${i + 1}</span>
-      <div class="brand">${logoHtml(pub)}
-        <div><div class="name">${esc(prettyName(m))}</div><div class="pub">${esc(pub.name)}</div></div>
-      </div>
-      <div class="stats">
-        ${statCell('requests', fmt(reqModels.get(m) || 0))}
-        ${statCell('tokens out', fmt(c))}
-        ${statCell('saved', money((ptok.get(m) || 0) / 1e6 * cfg.price_in + c / 1e6 * cfg.price_out))}
-        ${statCell('TTFT', ttftMC.get(m) ? secs(ttftMS.get(m) / ttftMC.get(m)) : '–')}
-        ${statCell('tok/s', tpsMC.get(m) ? fmt(tpsMS.get(m) / tpsMC.get(m)) : '–')}
-        ${statCell('errors', errPct(m))}
-      </div></div>`;
-  }).join('');
-
-  $('table-models').innerHTML = !models.length ? '<div class="empty">No traffic yet</div>' :
-    `<table><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Avg TTFT</th><th class="num">Avg tok/s</th><th class="num">TPOT</th><th class="num">Avg reply</th><th class="num">Truncated</th><th class="num">Reasoning</th><th class="num">Errors</th><th class="num">Saved</th></tr>` +
-    models.map(m => {
-      const c = ctok.get(m)||0, ok = okByModel.get(m)||0;
-      return `<tr><td><i class="swatch" style="background:${colorFor(m)}"></i>${esc(m)}</td>` +
-        `<td class="num">${fmt(reqModels.get(m)||0)}</td><td class="num">${fmt(c)}</td>` +
-        `<td class="num">${ttftMC.get(m) ? secs(ttftMS.get(m)/ttftMC.get(m)) : '–'}</td>` +
-        `<td class="num">${tpsMC.get(m) ? fmt(tpsMS.get(m)/tpsMC.get(m)) : '–'}</td>` +
-        `<td class="num">${isFinite(tpotAvg(m)) ? secs(tpotAvg(m)) : '–'}</td>` +
-        `<td class="num">${ok ? fmt(c/ok) + ' tok' : '–'}</td>` +
-        `<td class="num">${pct(truncPct(m))}</td>` +
-        `<td class="num">${pct(reasonPct(m))}</td>` +
-        `<td class="num">${errPct(m)}</td>` +
-        `<td class="num">${money((ptok.get(m)||0)/1e6*cfg.price_in + c/1e6*cfg.price_out)}</td></tr>`;
-    }).join('') + '</table>';
-
-  /* ===== models: extra quality charts ===== */
-  const tpotSeries = quantSeries('nimproxy_tpot_seconds');
-  lineChart($('chart-tpot'), tpotSeries, secs);
-  legend($('legend-tpot'), tpotSeries);
-  const upSeries = quantSeries('nimproxy_upstream_seconds');
-  lineChart($('chart-upstream'), upSeries, secs);
-  legend($('legend-upstream'), upSeries);
-
-  const FINISH = [['stop', 'Completed', css('--s2')], ['length', 'Truncated', css('--s6')],
-    ['tool_calls', 'Tool call', css('--s1')], ['content_filter', 'Filtered', css('--s3')], ['other', 'Other', css('--ink-3')]];
+  /* how responses end */
+  const FINISH = [['stop', 'Completed', ''], ['length', 'Truncated', 'critc'],
+    ['tool_calls', 'Tool call', ''], ['content_filter', 'Filtered', 'warnc'], ['other', 'Other', '']];
   const finByReason = Object.fromEntries(FINISH.map(([r]) => [r, wgroups('nimproxy_finish_reason_total', 'model', l => l.reason === r)]));
-  $('table-finish').innerHTML = !models.some(m => finTotal.get(m)) ? '<div class="empty">No completions yet</div>' :
-    '<table><tr><th>Model</th>' + FINISH.map(([, l]) => `<th class="num">${l}</th>`).join('') + '</tr>' +
-    models.filter(m => finTotal.get(m)).map(m => {
+  const finModels = models.filter(m => finTotal.get(m));
+  $('m-fincount').textContent = finModels.length ? `${finModels.length} model${finModels.length === 1 ? '' : 's'}` : '';
+  sortTable($('table-finish'), 'finish',
+    [{ label: 'Model', align: 'l', str: true }, ...FINISH.map(([, l]) => ({ label: l }))],
+    finModels.map(m => {
       const tot = finTotal.get(m) || 1;
-      return `<tr><td><i class="swatch" style="background:${colorFor(m)}"></i>${esc(prettyName(m))}</td>` +
-        FINISH.map(([r]) => `<td class="num">${pct((finByReason[r].get(m) || 0) / tot * 100)}</td>`).join('') + '</tr>';
-    }).join('') + '</table>';
+      const shares = FINISH.map(([r]) => (finByReason[r].get(m) || 0) / tot * 100);
+      return {
+        vals: [prettyName(m), ...shares],
+        cells: [`<i class="sw" style="background:${publisher(m).color}"></i>${esc(prettyName(m))}`,
+          ...shares.map((v, i) => `<span class="${v >= 0.5 ? FINISH[i][2] : 'dim'}">${pct(v)}</span>`)],
+      };
+    }), { defaultIdx: 1, maxH: 300, minW: 460, empty: 'No completions yet' });
 
   const reasoningModels = models.filter(m => (reasoningByModel.get(m) || 0) > 0);
-  barRows($('meters-reasoning'),
-    reasoningModels.map(m => ({ name: prettyName(m), v: reasonPct(m), color: colorFor(m) })),
-    pct);
   if (!reasoningModels.length) $('meters-reasoning').innerHTML = '<div class="empty">No reasoning-token usage seen</div>';
+  else barList($('meters-reasoning'),
+    reasoningModels.map(m => ({ name: prettyName(m), v: reasonPct(m), color: publisher(m).color })), pct);
+
+  /* scorecard (ex-Compare): best in each column highlighted, still sortable */
+  const avgTtft = m => ttftMC.get(m) ? ttftMS.get(m) / ttftMC.get(m) : NaN;
+  const avgTps = m => tpsMC.get(m) ? tpsMS.get(m) / tpsMC.get(m) : NaN;
+  const avgReply = m => okByModel.get(m) ? (ctok.get(m) || 0) / okByModel.get(m) : NaN;
+  const cmp = models.slice(0, 8);
+  sortTable($('compare-scorecard'), 'scorecard', [
+    { label: 'Model', align: 'l', str: true },
+    { label: 'Requests', best: 'max' }, { label: 'TTFT', best: 'min' }, { label: 'tok/s', best: 'max' },
+    { label: 'TPOT', best: 'min' }, { label: 'Avg reply', best: 'max' }, { label: 'Truncated', best: 'min' },
+    { label: 'Reasoning', best: 'min' }, { label: 'Errors', best: 'min' },
+  ], cmp.map(m => ({
+    vals: [prettyName(m), reqModels.get(m) || 0, avgTtft(m), avgTps(m), tpotAvg(m), avgReply(m), truncPct(m), reasonPct(m), errRate(m)],
+    cells: [`<i class="sw" style="background:${publisher(m).color}"></i>${esc(prettyName(m))}`,
+      fmt(reqModels.get(m) || 0), isFinite(avgTtft(m)) ? secs(avgTtft(m)) : '–', isFinite(avgTps(m)) ? fmt(avgTps(m)) : '–',
+      isFinite(tpotAvg(m)) ? secs(tpotAvg(m)) : '–', isFinite(avgReply(m)) ? fmt(avgReply(m)) + ' tok' : '–',
+      pct(truncPct(m)), pct(reasonPct(m)), pct(errRate(m))],
+  })), { defaultIdx: 1, maxH: 360, minW: 720 });
+  barList($('compare-bars'), cmp.map(m => ({ name: prettyName(m), v: avgTps(m), color: publisher(m).color })),
+    v => fmt(v) + ' tok/s');
+
+  /* leading model cards (top 4; the rest live in the table) */
+  $('m-cardnote').textContent = models.length ? 'top 4 by tokens out · full list in the table below' : '';
+  $('modelcards').innerHTML = models.slice(0, 4).map((m, i) => {
+    const pub = publisher(m), ct = ctok.get(m) || 0, e = errRate(m);
+    const stat = (l, v, cls) => `<div class="stat"><div class="l">${l}</div><div class="v${cls ? ' ' + cls : ''}">${v}</div></div>`;
+    return `<div class="mcard"><span class="rank">#${i + 1}</span>
+      <div class="mbrand">${chipHtml(pub)}
+        <div><div class="mname" title="${esc(m)}">${esc(prettyName(m))}</div><div class="mpub">${esc(pub.name)}</div></div>
+      </div>
+      <div class="mstats">
+        ${stat('requests', fmt(reqModels.get(m) || 0))}
+        ${stat('tokens out', fmt(ct))}
+        ${stat('saved', money(modelSaved(m)), 'savec')}
+        ${stat('TTFT', ttftMC.get(m) ? secs(avgTtft(m)) : '–')}
+        ${stat('tok/s', tpsMC.get(m) ? fmt(avgTps(m)) : '–')}
+        ${stat('errors', errPct(m), isFinite(e) && e > 0 ? 'critc' : 'dim')}
+      </div></div>`;
+  }).join('') || '<div class="empty">No traffic yet</div>';
+
+  /* per-model table */
+  $('m-tablecount').textContent = models.length ? `${models.length} model${models.length === 1 ? '' : 's'} · click a column to sort` : '';
+  sortTable($('table-models'), 'models', [
+    { label: 'Model', align: 'l', str: true }, { label: 'Requests' }, { label: 'Tokens out' },
+    { label: 'Avg TTFT' }, { label: 'Avg tok/s' }, { label: 'TPOT' }, { label: 'Avg reply' },
+    { label: 'Truncated' }, { label: 'Reasoning' }, { label: 'Errors' }, { label: 'Saved' },
+  ], models.map(m => {
+    const ct = ctok.get(m) || 0, ok = okByModel.get(m) || 0, e = errRate(m);
+    return {
+      vals: [m, reqModels.get(m) || 0, ct, avgTtft(m), avgTps(m), tpotAvg(m), ok ? ct / ok : NaN,
+        truncPct(m), reasonPct(m), e, modelSaved(m)],
+      cells: [`<i class="sw" style="background:${publisher(m).color}"></i>${esc(m)}`,
+        fmt(reqModels.get(m) || 0), fmt(ct),
+        ttftMC.get(m) ? secs(avgTtft(m)) : '–', tpsMC.get(m) ? fmt(avgTps(m)) : '–',
+        isFinite(tpotAvg(m)) ? secs(tpotAvg(m)) : '–', ok ? fmt(ct / ok) + ' tok' : '–',
+        `<span class="${truncPct(m) >= 1 ? '' : 'dim'}">${pct(truncPct(m))}</span>`,
+        `<span class="${reasonPct(m) >= 1 ? '' : 'dim'}">${pct(reasonPct(m))}</span>`,
+        `<span class="${isFinite(e) && e > 0 ? 'critc' : 'dim'}">${errPct(m)}</span>`,
+        `<span class="savec">${money(modelSaved(m))}</span>`],
+    };
+  }), { defaultIdx: 2, maxH: 440, minW: 900 });
 }
 
-/* ----- proxy ----- */
-function renderProxy(c) {
-  const { rows, windowLabel, wsum, ttftS, ttftN, reqPts, curRpm, capRatio, capColor,
-    wreq, okRatio, okColor, clients, cReq, cP, cC, shed, unauth, logins, bench429,
-    totStreamT, totStreamF, totGen, totToolReq } = c;
-  $('reqsLabel').textContent = `Requests${windowLabel}`;
-  arcGauge($('g-cap'), capRatio, Math.round(capRatio * 100) + '%', capColor);
-  arcGauge($('g-ok'), okRatio, wreq ? Math.round(okRatio*100) + '%' : '–', okColor);
-
-  $('p-reqs').textContent = fmt(wreq);
-  $('p-rpm').textContent = fmt(curRpm);
-  $('p-active').textContent = fmt(sum(rows, 'nimproxy_active_requests'));
-  $('p-queued').textContent = fmt(sum(rows, 'nimproxy_queue_depth'));
-  const qwS = wsum('nimproxy_queue_wait_seconds_sum'), qwN = wsum('nimproxy_queue_wait_seconds_count');
-  $('p-wait').textContent = qwN ? secs(qwS/qwN) : '–';
-  const upS = wsum('nimproxy_upstream_seconds_sum') + ttftS;
-  const upN = wsum('nimproxy_upstream_seconds_count') + ttftN;
-  $('p-lat').textContent = upN ? secs(upS/upN) : '–';
-
-  lineChart($('chart-reqrate'), [{ name: 'requests/min', color: css('--s1'), pts: reqPts }], fmt);
-  const outcomeSeries = [
-    { name: 'ok', color: css('--s1'), f: l => l.status === '200' },
-    { name: 'errors', color: css('--s6'), f: l => l.status !== '200' && l.status !== 'disconnect' },
-    { name: 'disconnects', color: css('--s3'), f: l => l.status === 'disconnect' },
-  ].map(({name, color, f}) => ({ name, color, pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', f)) }));
-  lineChart($('chart-outcomes'), outcomeSeries, fmt);
-  legend($('legend-outcomes'), outcomeSeries);
-
-  /* non-success outcomes ranked by count — every status the proxy records
-     that isn't a clean 200, with a plain-language reason and its share. */
-  const REASONS = {
-    'disconnect': 'Client disconnected', 'stall': 'Stream stalled',
-    'stream_error': 'Stream error', '504': 'Upstream timeout (504)',
-    '429': 'Rate limited (429)', '400': 'Bad request (400)',
-    '401': 'Unauthorized (401)', '403': 'Forbidden (403)',
-    '404': 'Not found (404)', '502': 'Bad gateway (502)', '503': 'Unavailable (503)',
+/* ===== clients: what each agent is doing ===== */
+function renderClients(c) {
+  const { clients, cReq, cC, wsum, streamT, streamF, totStreamT, totGen, totToolReq, clientSaved } = c;
+  const avgByKey = (sumN, cntN) => {
+    const s = wgroups(sumN, 'client'), n = wgroups(cntN, 'client');
+    return cl => n.get(cl) ? s.get(cl) / n.get(cl) : NaN;
   };
-  const reason = s => REASONS[s] || (/^\d+$/.test(s) ? `HTTP ${s}` : esc(s));
-  const statusG = wgroups('nimproxy_requests_total', 'status');
-  const totReq = [...statusG.values()].reduce((a, b) => a + b, 0) || 1;
-  const bad = [...statusG.entries()].filter(([s]) => s !== '200').sort((a, b) => b[1] - a[1]);
-  $('table-outcomes').innerHTML = !bad.length
-    ? '<div class="empty">All requests succeeded in this window</div>'
-    : '<table><tr><th>Reason</th><th class="num">Count</th><th class="num">Share</th></tr>' +
-      bad.map(([s, n]) =>
-        `<tr><td>${reason(s)}</td><td class="num">${fmt(n)}</td><td class="num">${(n / totReq * 100).toFixed(1)}%</td></tr>`
-      ).join('') + '</table>';
+  const toolsAvg = avgByKey('nimproxy_request_tools_sum', 'nimproxy_request_tools_count');
+  const msgsAvg = avgByKey('nimproxy_request_messages_sum', 'nimproxy_request_messages_count');
+  const tempAvg = avgByKey('nimproxy_request_temperature_sum', 'nimproxy_request_temperature_count');
+  const genReq = cl => (streamT.get(cl) || 0) + (streamF.get(cl) || 0);
+  const streamPct = cl => genReq(cl) ? (streamT.get(cl) || 0) / genReq(cl) * 100 : NaN;
+  const oTools = wsum('nimproxy_request_tools_sum'), oToolsN = wsum('nimproxy_request_tools_count');
+  const oMsgs = wsum('nimproxy_request_messages_sum'), oMsgsN = wsum('nimproxy_request_messages_count');
+  const tile = (label, v, unit) => `<div class="tile"><div class="tlabel">${label}</div><div class="tval">${v}${unit ? `<span class="unit">${unit}</span>` : ''}</div></div>`;
+  $('h-kpis').innerHTML =
+    tile('Harnesses', clients.length) +
+    tile('Streaming share', totGen ? Math.round(totStreamT / totGen * 100) + '%' : '–') +
+    tile('Avg tools / request', oToolsN ? fmt(oTools / oToolsN) : '–') +
+    tile('Avg messages / request', oMsgsN ? fmt(oMsgs / oMsgsN) : '–') +
+    tile('Tool-using requests', totGen ? Math.round(totToolReq / totGen * 100) + '%' : '–');
+  barList($('h-toolint'), clients.map(cl => ({ name: cl, v: toolsAvg(cl), color: clientColor(cl) })), fmt);
+  barList($('h-depth'), clients.map(cl => ({ name: cl, v: msgsAvg(cl), color: clientColor(cl) })), fmt);
+  barList($('h-temp'), clients.map(cl => ({ name: cl, v: tempAvg(cl), color: clientColor(cl) })), v => v.toFixed(2));
+  barList($('h-streammix'), clients.map(cl => ({ name: cl, v: streamPct(cl), color: clientColor(cl) })), v => Math.round(v) + '%', 100);
+  sortTable($('table-harness'), 'harness', [
+    { label: 'Harness', align: 'l', str: true }, { label: 'Requests' }, { label: 'Tokens out' },
+    { label: 'Tools/req' }, { label: 'Msgs/req' }, { label: 'Streaming' }, { label: 'Saved' },
+  ], clients.map(cl => ({
+    vals: [cl, cReq.get(cl) || 0, cC.get(cl) || 0, toolsAvg(cl), msgsAvg(cl), streamPct(cl), clientSaved(cl)],
+    cells: [`<i class="sw" style="background:${clientColor(cl)}"></i>${esc(cl)}`,
+      fmt(cReq.get(cl) || 0), fmt(cC.get(cl) || 0),
+      isFinite(toolsAvg(cl)) ? fmt(toolsAvg(cl)) : '–', isFinite(msgsAvg(cl)) ? fmt(msgsAvg(cl)) : '–',
+      isFinite(streamPct(cl)) ? Math.round(streamPct(cl)) + '%' : '–',
+      `<span class="savec">${money(clientSaved(cl))}</span>`],
+  })), { defaultIdx: 2, maxH: 420, minW: 620 });
+}
 
-  const loadSeries = [
-    { name: 'active', color: css('--s1'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_active_requests') })) },
-    { name: 'queued', color: css('--s3'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_queue_depth') })) },
+/* ===== reliability (was Proxy) ===== */
+const SLO = 0.999;
+function renderReliability(c) {
+  const { rows, windowLabel, reqPts, wreq, wok, okRatio, clients, cReq, cP, cC, clientSaved,
+    shed, unauth, logins, bench429, benchOther, qwS, qwN, upS, upN, ttftS, ttftN, statusG,
+    totStreamT, totStreamF, totGen, totToolReq, wsum } = c;
+
+  /* hero: availability vs SLO + error budget */
+  const availTxt = wreq ? (okRatio * 100).toFixed(okRatio < 0.9995 ? 2 : 3).replace(/\.?0+$/, '') + '%' : '–';
+  const met = okRatio >= SLO;
+  const budget = wreq ? Math.min(100, (1 - okRatio) / (1 - SLO) * 100) : 0;
+  $('r-avail').innerHTML =
+    `<div class="hlabel">Availability <span class="note">${windowLabel}</span></div>
+    <div class="hbig" style="color:${met ? 'var(--green-lt)' : 'var(--red)'};margin-top:8px">${availTxt}</div>
+    <div style="font:400 11px var(--mono);color:var(--ink-3);margin-top:2px">SLO ${(SLO * 100).toFixed(1)}% · ${wreq ? (met ? 'met' : 'missed') : 'no traffic'}</div>
+    <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-25);margin:16px 0 6px">error budget<span style="font:500 11px var(--mono);color:var(--ink-2)">${budget.toFixed(0)}% used</span></div>
+    <div class="htrack"><span style="width:${budget.toFixed(0)}%;background:${budget >= 100 ? 'var(--red)' : 'var(--amber)'}"></span></div>`;
+
+  /* hero: where time goes (median-ish composition from windowed averages) */
+  const qw = qwN ? qwS / qwN : 0, ttft = ttftN ? ttftS / ttftN : NaN, up = upN ? upS / upN : NaN;
+  if (!upN) {
+    $('r-time').innerHTML = `<div class="hlabel">Where time goes <span class="note">avg request, end to end</span></div><div class="empty">No completed requests yet</div>`;
+  } else {
+    const gen = Math.max(0, up - (isFinite(ttft) ? ttft : 0));
+    const segs = [
+      { label: 'Queue wait', v: qw, color: 'var(--amber)' },
+      { label: 'First token', v: isFinite(ttft) ? ttft : 0, color: 'var(--blue)' },
+      { label: 'Generation', v: gen, color: 'var(--green)' },
+    ].filter(s => s.v > 0);
+    const tot = segs.reduce((a, s) => a + s.v, 0) || 1;
+    $('r-time').innerHTML =
+      `<div style="display:flex;align-items:baseline;gap:10px"><span class="hlabel">Where time goes</span>
+      <span class="note" style="font:400 10px var(--mono);color:var(--ink-3)">avg request, end to end</span>
+      <span style="margin-left:auto;font-size:22px;font-weight:600;letter-spacing:-0.5px">${secs(tot)}</span></div>
+      <div class="segbar" style="height:16px;margin:16px 0 12px">${segs.map(s => `<div style="width:${(s.v / tot * 100).toFixed(1)}%;background:${s.color}"></div>`).join('')}</div>
+      <div class="seglegend">${segs.map(s => `<div class="sl"><span class="sw" style="background:${s.color}"></span><div><div class="sll">${s.label}</div><div class="slv">${secs(s.v)}</div></div></div>`).join('')}</div>`;
+  }
+
+  /* hero: live load + error taxonomy */
+  const act = sum(rows, 'nimproxy_active_requests'), que = sum(rows, 'nimproxy_queue_depth');
+  const errN = Math.max(0, wreq - wok);
+  const TAX = [
+    ['Rate limited', s => s === '429', 'var(--amber)'],
+    ['Disconnect', s => s === 'disconnect', 'var(--blue)'],
+    ['Timeout / stall', s => s === '504' || s === 'stall', 'var(--red)'],
+    ['5xx', s => /^5\d\d$/.test(s) && s !== '504', '#C15F3C'],
+    ['Other', () => true, 'var(--ink-3)'],
   ];
-  lineChart($('chart-load'), loadSeries, fmt);
-  legend($('legend-load'), loadSeries);
+  const taxCounts = []; let seen = new Set(['200']);
+  for (const [label, match, color] of TAX) {
+    let n = 0;
+    for (const [s, v] of statusG) if (!seen.has(s) && match(s)) { n += v; seen.add(s); }
+    if (n > 0) taxCounts.push({ label, n, color });
+  }
+  const taxTot = taxCounts.reduce((a, x) => a + x.n, 0) || 1;
+  $('r-load').innerHTML =
+    `<div style="display:flex;gap:20px">
+      <div><div class="tlabel">Active now</div><div style="font-size:26px;font-weight:600;color:var(--green)">${fmt(act)}</div></div>
+      <div><div class="tlabel">Queued</div><div style="font-size:26px;font-weight:600;color:var(--amber)">${fmt(que)}</div></div>
+    </div>
+    <div class="segbar" style="height:8px;border-radius:99px;margin:12px 0">${act + que ? `<div style="width:${(act / (act + que) * 100)}%;background:var(--green)"></div><div style="width:${(que / (act + que) * 100)}%;background:var(--amber)"></div>` : '<div style="width:100%;background:var(--track)"></div>'}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--hairline)"><span class="tlabel">Error rate</span><span style="font:600 15px var(--mono);color:${errN ? 'var(--red)' : 'var(--ink-3)'}">${wreq ? (errN / wreq * 100).toFixed(1) + '%' : '–'}</span></div>
+    <div class="segbar" style="height:6px;border-radius:99px;margin-top:8px;gap:1px">${taxCounts.length ? taxCounts.map(x => `<div style="width:${(x.n / taxTot * 100).toFixed(1)}%;background:${x.color}" title="${esc(x.label)}: ${fmt(x.n)}"></div>`).join('') : '<div style="width:100%;background:var(--track)"></div>'}</div>`;
 
-  /* queue wait quantiles, same machinery as TTFT */
+  lineChart($('chart-reqrate'), [{ name: 'requests/min', color: MED, pts: reqPts, area: true }], fmt, { height: 150 });
+  const outcomeSeries = [
+    { name: 'ok', color: css('--green'), f: l => l.status === '200' },
+    { name: 'errors', color: css('--red'), f: l => l.status !== '200' && l.status !== 'disconnect' },
+    { name: 'disconnects', color: css('--amber'), f: l => l.status === 'disconnect' },
+  ].map(({ name, color, f }) => ({ name, color, pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', f)) }));
+  lineChart($('chart-outcomes'), outcomeSeries, fmt, { height: 150 });
+  legend($('legend-outcomes'), outcomeSeries);
+  const loadSeries = [
+    { name: 'active', color: css('--green'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_active_requests') })) },
+    { name: 'queued', color: css('--amber'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_queue_depth') })) },
+  ];
+  lineChart($('chart-load'), loadSeries, fmt, { height: 150 });
+  legend($('legend-load'), loadSeries);
   const qwSeries = quantSeries('nimproxy_queue_wait_seconds');
-  lineChart($('chart-qwait'), qwSeries, secs);
+  lineChart($('chart-qwait'), qwSeries, secs, { height: 150 });
   legend($('legend-qwait'), qwSeries);
 
   /* heatmap: requests bucketed by local weekday x hour */
@@ -1005,186 +1353,139 @@ function renderProxy(c) {
   }
   heatmap($('heatmap'), matrix, hmax);
 
-  const MEDALS = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
-  $('table-clients').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
-    `<table><tr><th>Client</th><th class="num">Requests</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Saved</th></tr>` +
-    clients.map((c, i) =>
-      `<tr><td>${MEDALS[i] ? `<span class="medal">${MEDALS[i]}</span>` : ''}${esc(c)}</td><td class="num">${fmt(cReq.get(c)||0)}</td><td class="num">${fmt(cP.get(c)||0)}</td>` +
-      `<td class="num">${fmt(cC.get(c)||0)}</td>` +
-      `<td class="num">${money((cP.get(c)||0)/1e6*cfg.price_in + (cC.get(c)||0)/1e6*cfg.price_out)}</td></tr>`
-    ).join('') + '</table>';
+  /* non-success outcomes ranked by count */
+  const REASONS = {
+    'disconnect': 'Client disconnected', 'stall': 'Stream stalled',
+    'stream_error': 'Stream error', '504': 'Upstream timeout (504)',
+    '429': 'Rate limited (429)', '400': 'Bad request (400)',
+    '401': 'Unauthorized (401)', '403': 'Forbidden (403)',
+    '404': 'Not found (404)', '502': 'Bad gateway (502)', '503': 'Unavailable (503)',
+  };
+  const reason = s => REASONS[s] || (/^\d+$/.test(s) ? `HTTP ${s}` : s);
+  const totReq = [...statusG.values()].reduce((a, b) => a + b, 0) || 1;
+  const bad = [...statusG.entries()].filter(([s]) => s !== '200');
+  sortTable($('table-outcomes'), 'outcomes',
+    [{ label: 'Reason', align: 'l', str: true }, { label: 'Count' }, { label: 'Share' }],
+    bad.map(([s, n]) => ({
+      vals: [reason(s), n, n / totReq * 100],
+      cells: [esc(reason(s)), fmt(n), (n / totReq * 100).toFixed(1) + '%'],
+    })), { defaultIdx: 1, maxH: 240, empty: 'All requests succeeded in this window' });
 
-  /* ===== proxy: reliability & request-type panels ===== */
-  $('table-reliability').innerHTML = '<table>' +
-    metricRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
-    metricRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
-    metricRow('Shed (overload 503)', fmt(shed), shed > 0) +
-    metricRow('Rate-limit benches (429)', fmt(bench429)) +
-    metricRow('Other benches (5xx)', fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')))) +
-    metricRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
-    metricRow('Failed logins', fmt(logins), logins > 0) +
-    '</table>';
+  $('table-reliability').innerHTML =
+    metricRow('Active now', fmt(act)) +
+    metricRow('Queued', fmt(que)) +
+    metricRow('Shed (overload 503)', fmt(shed), shed > 0 ? 'crit' : 'zero') +
+    metricRow('Rate-limit benches (429)', fmt(bench429), bench429 > 0 ? 'warn' : 'zero') +
+    metricRow('Other benches (5xx)', fmt(benchOther), benchOther > 0 ? 'warn' : 'zero') +
+    metricRow('Unauthorized (401)', fmt(unauth), unauth > 0 ? 'crit' : 'zero') +
+    metricRow('Failed logins', fmt(logins), logins > 0 ? 'crit' : 'zero');
   const jsonMode = windowed(s => sum(s.rows, 'nimproxy_json_mode_total'));
   const tcModes = wgroups('nimproxy_tool_choice_total', 'mode');
   const tcStr = [...tcModes.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${esc(m)} ${fmt(n)}`).join(', ') || '–';
-  $('table-reqtypes').innerHTML = '<table>' +
+  $('table-reqtypes').innerHTML =
     metricRow('Streaming', `${fmt(totStreamT)}${totGen ? ` (${Math.round(totStreamT / totGen * 100)}%)` : ''}`) +
     metricRow('Buffered', `${fmt(totStreamF)}${totGen ? ` (${Math.round(totStreamF / totGen * 100)}%)` : ''}`) +
     metricRow('Tool-offering', `${fmt(totToolReq)}${totGen ? ` (${Math.round(totToolReq / totGen * 100)}%)` : ''}`) +
     metricRow('JSON mode', fmt(jsonMode)) +
-    metricRow('Tool choice', tcStr) +
-    '</table>';
+    metricRow('Tool choice', tcStr);
+
+  sortTable($('table-clients'), 'clients', [
+    { label: 'Client', align: 'l', str: true }, { label: 'Requests' }, { label: 'Tokens in' },
+    { label: 'Tokens out' }, { label: 'Saved' },
+  ], clients.map(cl => ({
+    vals: [cl, cReq.get(cl) || 0, cP.get(cl) || 0, cC.get(cl) || 0, clientSaved(cl)],
+    cells: [`<i class="sw" style="background:${clientColor(cl)}"></i>${esc(cl)}`,
+      fmt(cReq.get(cl) || 0), fmt(cP.get(cl) || 0), fmt(cC.get(cl) || 0),
+      `<span class="savec">${money(clientSaved(cl))}</span>`],
+  })), { defaultIdx: 3, maxH: 420, minW: 560 });
 }
 
-/* ----- keys ----- */
-function renderKeys(c) {
-  const { last, rows, capacity, curRpm, avgRpm, reqPts } = c;
-  $('k-lanes').textContent = cfg.lanes;
-  $('k-cap').innerHTML = fmt(capacity) + '<span class="unit">rpm</span>';
-  $('k-429').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status === '429')));
-  $('k-5xx').textContent = fmt(windowed(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.status !== '429')));
+/* ===== capacity (was Keys) ===== */
+const LANE_COLORS = ['#76B900', '#4D6BFE', '#D9A521', '#16B8C0', '#615CED', '#EE6002'];
+function renderCapacity(c) {
+  const { last, rows, capacity, rpmNow, peakRpm, capColor, bench429, benchOther } = c;
+
+  /* hero: saturation bar with peak marker */
+  const satPct = Math.min(1, rpmNow / capacity), peakPct = Math.min(1, peakRpm / capacity);
+  const headroom = Math.max(0, capacity - rpmNow);
+  $('k-sat').innerHTML =
+    `<div style="display:flex;align-items:baseline;gap:10px"><span class="hlabel">Saturation</span>
+    <span class="note" style="font:400 10px var(--mono);color:var(--ink-3)">current load vs aggregate capacity</span>
+    <span style="margin-left:auto;font-size:30px;font-weight:600;letter-spacing:-1px;color:${capColor}">${Math.round(satPct * 100)}%</span></div>
+    <div style="position:relative;height:20px;background:var(--track);border-radius:6px;overflow:hidden;margin:16px 0 8px">
+      <div style="position:absolute;inset:0;width:${(satPct * 100).toFixed(1)}%;background:linear-gradient(90deg,var(--green-dk),var(--green));border-radius:6px"></div>
+      ${peakRpm > 0 ? `<div style="position:absolute;top:0;bottom:0;left:${(peakPct * 100).toFixed(1)}%;width:2px;background:var(--ink-1)" title="peak ${fmt(peakRpm)} rpm"></div>` : ''}
+    </div>
+    <div style="display:flex;justify-content:space-between;font:400 11px var(--mono);color:var(--ink-3)">
+      <span style="color:var(--ink-2)">${fmt(rpmNow)} / ${fmt(capacity)} rpm</span>
+      <span>▏peak ${fmt(peakRpm)}</span>
+      <span style="color:var(--green-lt)">${fmt(headroom)} rpm free</span>
+    </div>`;
+
+  /* hero: provisioning */
+  const keysNeed = peakRpm > 0 ? Math.ceil(peakRpm / cfg.rpm) : cfg.lanes;
+  const short = keysNeed - cfg.lanes;
+  $('k-prov').innerHTML =
+    `<div style="display:flex;justify-content:space-between;align-items:center"><span class="hlabel">Provisioning</span>
+    ${short > 0 ? `<span style="font:600 10px var(--mono);color:#0A0A0A;background:var(--amber);border-radius:99px;padding:2px 8px">ADD ${short} KEY${short === 1 ? '' : 'S'}</span>` : ''}</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin-top:12px">
+      <span style="font-size:34px;font-weight:600;letter-spacing:-1px">${cfg.lanes}</span>
+      <span style="font:400 12px var(--mono);color:var(--ink-3)">key${cfg.lanes === 1 ? '' : 's'} active</span></div>
+    <div style="font:400 11.5px var(--mono);color:var(--ink-25);margin-top:6px">peak demand needs <span style="color:${short > 0 ? 'var(--amber)' : 'var(--green-lt)'};font-weight:500">${keysNeed} key${keysNeed === 1 ? '' : 's'}</span></div>`;
+
+  /* hero: rate-limit pressure */
   const sticky = windowed(s => sum(s.rows, 'nimproxy_affinity_total', l => l.result === 'sticky'));
   const spill = windowed(s => sum(s.rows, 'nimproxy_affinity_total', l => l.result === 'spill'));
-  $('k-sticky').textContent = sticky + spill ? Math.round(sticky / (sticky + spill) * 100) + '%' : '–';
+  const stickyTxt = sticky + spill ? Math.round(sticky / (sticky + spill) * 100) + '%' : '–';
+  const prow = (l, v, color) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0"><span style="font-size:12.5px;color:var(--ink-2)">${l}</span><span style="font:600 15px var(--mono);color:${color || 'var(--ink-1)'}">${v}</span></div>`;
+  $('k-pressure').innerHTML =
+    `<div class="hlabel" style="margin-bottom:12px">Rate-limit pressure</div>` +
+    prow('429s this window', fmt(bench429), bench429 > 0 ? 'var(--amber)' : 'var(--ink-3)') +
+    prow('Conversation stickiness', stickyTxt) +
+    prow('Key lanes', cfg.lanes);
 
+  /* lane utilization, trailing 60s */
   const cutoff = last.t - 60000;
   const base60 = samples.find(s => s.t >= cutoff) || samples[0];
-  const laneNow = wgroups('nimproxy_lane_requests_total', 'lane');
   const laneBase = groups(base60.rows, 'nimproxy_lane_requests_total', 'lane');
-  let meters = '', laneRows = '';
-  const totalLane = [...laneNow.values()].reduce((a,b) => a+b, 0) || 1;
+  const laneCum = groups(rows, 'nimproxy_lane_requests_total', 'lane');
+  const laneNow = wgroups('nimproxy_lane_requests_total', 'lane');
   const lane429 = wgroups('nimproxy_lane_benched_total', 'lane', l => l.status === '429');
   const laneOther = wgroups('nimproxy_lane_benched_total', 'lane', l => l.status !== '429');
-  const laneCum = groups(rows, 'nimproxy_lane_requests_total', 'lane');
-  for (let i = 0; i < cfg.lanes; i++) {
-    const k = String(i), cur = laneNow.get(k) || 0;
+  const totalLane = [...laneNow.values()].reduce((a, b) => a + b, 0) || 1;
+  const laneColor = i => LANE_COLORS[i % LANE_COLORS.length];
+  const lanes = Array.from({ length: cfg.lanes }, (_, i) => {
+    const k = String(i);
     const inWindow = Math.max(0, (laneCum.get(k) || 0) - (laneBase.get(k) || 0));
-    const util = Math.min(1, inWindow / cfg.rpm);
-    meters += `<div class="meter"><span class="name">Key ${i+1}</span>` +
-      `<span class="track"><span class="fill" style="width:${(util*100).toFixed(0)}%"></span></span>` +
-      `<span class="val">${Math.round(util*100)}%</span></div>`;
-    const b429 = lane429.get(k) || 0;
-    const bOther = laneOther.get(k) || 0;
-    laneRows += `<tr><td>Key ${i+1}</td><td class="num">${fmt(cur)}</td>` +
-      `<td class="num">${(cur/totalLane*100).toFixed(0)}%</td>` +
-      `<td class="num">${fmt(inWindow)} / ${cfg.rpm}</td>` +
-      `<td class="num">${fmt(b429)}</td><td class="num">${fmt(bOther)}</td></tr>`;
-  }
-  $('meters').innerHTML = meters || '<div class="empty">No lanes configured</div>';
-  const benchSeries = Array.from({length: Math.min(cfg.lanes, 6)}, (_, i) => ({
-    name: `Key ${i+1}`, color: css(SLOTS[i]),
-    pts: rateSeries(s => sum(s.rows, 'nimproxy_lane_benched_total', l => l.lane === String(i) && l.status === '429')),
+    return { i, name: `Key ${i + 1}`, cur: laneNow.get(k) || 0, inWindow,
+      util: Math.min(1, inWindow / cfg.rpm), b429: lane429.get(k) || 0, bOther: laneOther.get(k) || 0 };
+  });
+  if (!lanes.length) $('meters').innerHTML = '<div class="empty">No lanes configured</div>';
+  else barList($('meters'), lanes.map(l => ({
+    name: l.name, v: l.util * 100, color: l.util >= 0.9 ? css('--amber') : laneColor(l.i),
+  })), v => Math.round(v) + '%', 100);
+
+  const benchSeries = lanes.slice(0, 6).map(l => ({
+    name: l.name, color: laneColor(l.i),
+    pts: rateSeries(s => sum(s.rows, 'nimproxy_lane_benched_total', ll => ll.lane === String(l.i) && ll.status === '429')),
   }));
-  lineChart($('chart-benches'), benchSeries, fmt);
+  lineChart($('chart-benches'), benchSeries, fmt, { height: 150 });
   legend($('legend-benches'), benchSeries);
-  $('table-lanes').innerHTML =
-    `<table><tr><th>Lane</th><th class="num">Requests</th><th class="num">Share</th><th class="num">Last 60s</th><th class="num">429s</th><th class="num">Other benches</th></tr>${laneRows}</table>`;
 
-  /* ===== keys: headroom & sizing ===== */
-  const rpmForCap = mode.kind === 'live' ? curRpm : avgRpm;
-  const headroom = capacity - rpmForCap;
-  $('k-headroom').innerHTML = fmt(Math.max(0, headroom)) + '<span class="unit">rpm</span>';
-  const peakRpm = reqPts.length ? Math.max(...reqPts.map(p => p.v)) : 0;
-  $('k-needed').textContent = peakRpm > 0 ? Math.max(cfg.lanes, Math.ceil(peakRpm / cfg.rpm)) : '–';
+  sortTable($('table-lanes'), 'lanes', [
+    { label: 'Lane', align: 'l', str: true }, { label: 'Requests' }, { label: 'Share' },
+    { label: 'Last 60s' }, { label: '429s' }, { label: 'Other benches' },
+  ], lanes.map(l => ({
+    vals: [l.name, l.cur, l.cur / totalLane * 100, l.inWindow, l.b429, l.bOther],
+    cells: [`<i class="sw" style="background:${laneColor(l.i)}"></i>${esc(l.name)}`,
+      fmt(l.cur), (l.cur / totalLane * 100).toFixed(0) + '%', `${fmt(l.inWindow)} / ${cfg.rpm}`,
+      `<span class="${l.b429 ? 'warnc' : 'dim'}">${fmt(l.b429)}</span>`,
+      `<span class="${l.bOther ? 'critc' : 'dim'}">${fmt(l.bOther)}</span>`],
+  })), { defaultIdx: 1, maxH: 360, minW: 560, empty: 'No lanes configured' });
 }
 
-/* ===== overview ===== */
-function renderOverview(c) {
-  const { windowLabel, saved, capRatio, capColor, okRatio, okColor, wreq, allC,
-    ttftS, ttftN, tpsS, tpsN, reqPts, savedAt, rows, shed, unauth, logins, bench429,
-    models, ctok, clients, cC } = c;
-  $('o-savedLabel').textContent = `Dollars saved${windowLabel} (vs reference pricing)`;
-  $('o-reqsLabel').textContent = `Requests${windowLabel}`;
-  $('o-saved').textContent = money(saved);
-  arcGauge($('o-cap'), capRatio, Math.round(capRatio * 100) + '%', capColor);
-  arcGauge($('o-ok'), okRatio, wreq ? Math.round(okRatio * 100) + '%' : '–', okColor);
-  $('o-reqs').textContent = fmt(wreq);
-  $('o-ctok').textContent = fmt(allC);
-  $('o-ttft').textContent = ttftN ? secs(ttftS / ttftN) : '–';
-  $('o-tps').textContent = tpsN ? fmt(tpsS / tpsN) + ' tok/s' : '–';
-  lineChart($('spark-reqs'), [{ name: 'req/min', color: css('--s1'), pts: reqPts }], fmt);
-  lineChart($('spark-tok'), [{ name: 'tok/min', color: css('--s2'), pts: rateSeries(s => sum(s.rows, 'nimproxy_completion_tokens_total')) }], fmt);
-  lineChart($('spark-saved'), [{ name: 'saved', color: css('--s2'), pts: samples.map(s => ({ t: s.t, v: savedAt(s) })) }], money);
-
-  $('o-health').innerHTML = '<table>' +
-    metricRow('Active now', fmt(sum(rows, 'nimproxy_active_requests'))) +
-    metricRow('Queued', fmt(sum(rows, 'nimproxy_queue_depth'))) +
-    metricRow('Rate-limit benches (429)', fmt(bench429)) +
-    metricRow('Shed (overload)', fmt(shed), shed > 0) +
-    metricRow('Unauthorized (401)', fmt(unauth), unauth > 0) +
-    metricRow('Failed logins', fmt(logins), logins > 0) +
-    '</table>';
-  const miniList = (el, entries, fmtV) => $(el).innerHTML = entries.length
-    ? entries.map(e => `<div class="meter"><span class="name wide" title="${esc(e.name)}">${esc(e.label ?? e.name)}</span>` +
-        `<span class="track"><span class="fill" style="width:${e.w}%;background:${e.color}"></span></span>` +
-        `<span class="val">${fmtV(e.v)}</span></div>`).join('')
-    : '<div class="empty">No traffic yet</div>';
-  const topM = models.slice(0, 3).map(m => ({ name: m, label: prettyName(m), v: ctok.get(m) || 0, color: colorFor(m) }));
-  const topMmax = Math.max(1, ...topM.map(e => e.v));
-  miniList('o-topmodels', topM.map(e => ({ ...e, w: (e.v / topMmax * 100).toFixed(0) })), fmt);
-  const topH = clients.slice(0, 3).map((c, i) => ({ name: c, v: cC.get(c) || 0, color: css(SLOTS[i % SLOTS.length]) }));
-  const topHmax = Math.max(1, ...topH.map(e => e.v));
-  miniList('o-topharness', topH.map(e => ({ ...e, w: (e.v / topHmax * 100).toFixed(0) })), fmt);
-}
-
-/* ===== harnesses: what each agent is doing ===== */
-function renderHarnesses(c) {
-  const { clients, cReq, cP, cC, wsum, streamT, streamF, totStreamT, totGen, totToolReq } = c;
-  const avgByKey = (sumN, cntN) => {
-    const s = wgroups(sumN, 'client'), n = wgroups(cntN, 'client');
-    return c => n.get(c) ? s.get(c) / n.get(c) : NaN;
-  };
-  const toolsAvg = avgByKey('nimproxy_request_tools_sum', 'nimproxy_request_tools_count');
-  const msgsAvg = avgByKey('nimproxy_request_messages_sum', 'nimproxy_request_messages_count');
-  const tempAvg = avgByKey('nimproxy_request_temperature_sum', 'nimproxy_request_temperature_count');
-  const genReq = c => (streamT.get(c) || 0) + (streamF.get(c) || 0);
-  const streamPct = c => genReq(c) ? (streamT.get(c) || 0) / genReq(c) * 100 : NaN;
-  const oTools = wsum('nimproxy_request_tools_sum'), oToolsN = wsum('nimproxy_request_tools_count');
-  const oMsgs = wsum('nimproxy_request_messages_sum'), oMsgsN = wsum('nimproxy_request_messages_count');
-  $('h-count').textContent = clients.length;
-  $('h-stream').textContent = totGen ? Math.round(totStreamT / totGen * 100) + '%' : '–';
-  $('h-tools').textContent = oToolsN ? fmt(oTools / oToolsN) : '–';
-  $('h-msgs').textContent = oMsgsN ? fmt(oMsgs / oMsgsN) : '–';
-  $('h-toolpct').textContent = totGen ? Math.round(totToolReq / totGen * 100) + '%' : '–';
-  const slotColor = i => css(SLOTS[i % SLOTS.length]);
-  barRows($('h-toolint'), clients.map((c, i) => ({ name: c, v: toolsAvg(c), color: slotColor(i) })), fmt);
-  barRows($('h-depth'), clients.map((c, i) => ({ name: c, v: msgsAvg(c), color: slotColor(i) })), fmt);
-  barRows($('h-temp'), clients.map((c, i) => ({ name: c, v: tempAvg(c), color: slotColor(i) })), v => v.toFixed(2));
-  barRows($('h-streammix'), clients.map((c, i) => ({ name: c, v: streamPct(c), color: slotColor(i) })), v => Math.round(v) + '%');
-  $('table-harness').innerHTML = !clients.length ? '<div class="empty">No traffic yet</div>' :
-    '<table><tr><th>Harness</th><th class="num">Requests</th><th class="num">Tokens out</th><th class="num">Tools/req</th><th class="num">Msgs/req</th><th class="num">Streaming</th><th class="num">Saved</th></tr>' +
-    clients.map(c =>
-      `<tr><td>${esc(c)}</td><td class="num">${fmt(cReq.get(c) || 0)}</td><td class="num">${fmt(cC.get(c) || 0)}</td>` +
-      `<td class="num">${isFinite(toolsAvg(c)) ? fmt(toolsAvg(c)) : '–'}</td>` +
-      `<td class="num">${isFinite(msgsAvg(c)) ? fmt(msgsAvg(c)) : '–'}</td>` +
-      `<td class="num">${isFinite(streamPct(c)) ? Math.round(streamPct(c)) + '%' : '–'}</td>` +
-      `<td class="num">${money((cP.get(c) || 0) / 1e6 * cfg.price_in + (cC.get(c) || 0) / 1e6 * cfg.price_out)}</td></tr>`
-    ).join('') + '</table>';
-}
-
-/* ===== compare: head-to-head scorecard ===== */
-function renderCompare(c) {
-  const { models, ttftMS, ttftMC, tpsMS, tpsMC, errByModel, okByModel, ctok, reqModels,
-    tpotAvg, truncPct, reasonPct, pct } = c;
-  const cmpModels = models.slice(0, 8);
-  const avgTtft = m => ttftMC.get(m) ? ttftMS.get(m) / ttftMC.get(m) : NaN;
-  const avgTps = m => tpsMC.get(m) ? tpsMS.get(m) / tpsMC.get(m) : NaN;
-  const errRate = m => { const e = errByModel.get(m) || 0, t = e + (okByModel.get(m) || 0); return t ? e / t * 100 : NaN; };
-  const avgReply = m => okByModel.get(m) ? (ctok.get(m) || 0) / okByModel.get(m) : NaN;
-  scorecard($('compare-scorecard'), cmpModels,
-    { head: 'Model', cell: m => `<i class="swatch" style="background:${colorFor(m)}"></i>${esc(prettyName(m))}` },
-    [
-      { label: 'Requests', get: m => reqModels.get(m) || 0, fmt: fmt, best: 'max' },
-      { label: 'TTFT', get: avgTtft, fmt: secs, best: 'min' },
-      { label: 'tok/s', get: avgTps, fmt: fmt, best: 'max' },
-      { label: 'TPOT', get: tpotAvg, fmt: secs, best: 'min' },
-      { label: 'Avg reply', get: avgReply, fmt: v => fmt(v) + ' tok', best: 'max' },
-      { label: 'Truncated', get: truncPct, fmt: pct, best: 'min' },
-      { label: 'Reasoning', get: reasonPct, fmt: pct, best: 'min' },
-      { label: 'Errors', get: errRate, fmt: pct, best: 'min' },
-    ]);
-  barRows($('compare-bars'), cmpModels.map(m => ({ name: prettyName(m), v: avgTps(m), color: colorFor(m) })), v => fmt(v) + ' tok/s');
-}
+const RENDERERS = { overview: renderOverview, models: renderModels, clients: renderClients,
+  reliability: renderReliability, capacity: renderCapacity };
 
 /* ---------- data sources ---------- */
 async function pollLive() {
@@ -1195,7 +1496,7 @@ async function pollLive() {
     if (samples.length > KEEP) samples.shift();
     render();
     $('live').className = 'live';
-    $('liveText').textContent = 'live';
+    $('liveText').textContent = 'live · 3s poll';
     $('uptime').textContent = 'up ' + ago(Date.now()/1000 - cfg.started);
   } catch {
     $('live').className = 'live down';
@@ -1213,9 +1514,8 @@ async function loadRange(from, to) {
     const data = await (await fetch(`/api/history?from=${from}&to=${to}`)).json();
     samples = data.map(p => ({ t: p.t * 1000, rows: parseProm(p.m) }));
     if (samples.length < 2) {
-      for (const el of document.querySelectorAll('main .card > div[id]'))
-        if (el.id.startsWith('chart-') || el.id === 'heatmap')
-          el.innerHTML = '<div class="empty">Not enough history in this window yet — snapshots land every 5 minutes</div>';
+      for (const el of document.querySelectorAll('main [id^="chart-"], main #heatmap, main #o-traffic'))
+        el.innerHTML = '<div class="empty">Not enough history in this window yet — snapshots land every 5 minutes</div>';
       if (samples.length) render();
       return;
     }
@@ -1229,7 +1529,6 @@ function goLive() {
   mode = { kind: 'live', paused: false };
   samples = [];
   $('rangeinfo').textContent = '';
-  $('pause').innerHTML = '&#10074;&#10074;';
   pollLive();
 }
 
@@ -1250,24 +1549,20 @@ $('applyRange').addEventListener('click', () => {
   const f = new Date($('from').value).getTime()/1000, t = new Date($('to').value).getTime()/1000;
   if (isFinite(f) && isFinite(t) && t > f) loadRange(Math.floor(f), Math.floor(t));
 });
-$('pause').addEventListener('click', () => {
+$('live').addEventListener('click', () => {
   if (mode.kind !== 'live') return;
   mode.paused = !mode.paused;
-  $('pause').innerHTML = mode.paused ? '&#9654;' : '&#10074;&#10074;';
-  $('liveText').textContent = mode.paused ? 'paused' : 'live';
+  $('liveText').textContent = mode.paused ? 'paused' : 'live · 3s poll';
   $('live').className = mode.paused ? 'live idle' : 'live';
   if (!mode.paused) pollLive();
 });
-$('heatToggle').addEventListener('click', () => {
-  heatAsTable = !heatAsTable;
-  $('heatToggle').textContent = heatAsTable ? 'chart' : 'table';
-  render();
-});
-for (const b of document.querySelectorAll('nav button')) {
+for (const b of document.querySelectorAll('#side nav button')) {
   b.addEventListener('click', () => {
-    for (const o of document.querySelectorAll('nav button')) o.setAttribute('aria-selected', o === b);
+    for (const o of document.querySelectorAll('#side nav button')) o.setAttribute('aria-selected', o === b);
     for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'tab-' + b.dataset.tab;
-    location.hash = b.dataset.tab;
+    activeTab = b.dataset.tab;
+    $('pagetitle').textContent = TITLES[activeTab];
+    location.hash = activeTab;
     render();
   });
   if (location.hash === '#' + b.dataset.tab) b.click();

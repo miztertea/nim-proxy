@@ -44,10 +44,11 @@ Option 3. New metrics, split by the label that makes them useful:
 - **Per client (harness behavior)** — `nimproxy_request_messages`,
   `nimproxy_request_tools`, `nimproxy_request_max_tokens`,
   `nimproxy_request_temperature` (histograms); `nimproxy_stream_requests_total`
-  `{stream}` and `nimproxy_json_mode_total`. Powers the Harnesses view.
+  `{stream}` and `nimproxy_json_mode_total`. Powers the Clients view.
 - **Per model (quality)** — `nimproxy_finish_reason_total` `{reason}` (→
   truncation rate), `nimproxy_tool_calls_total`, `nimproxy_reasoning_tokens_total`,
-  `nimproxy_tpot_seconds` (mean inter-token latency). Powers Models & Compare.
+  `nimproxy_tpot_seconds` (mean inter-token latency). Powers the Models view,
+  including its head-to-head scorecard section.
 - **Global enum** — `nimproxy_tool_choice_total` `{mode}`.
 
 Request shape is read from the already-parsed body at `Ctx` construction, so no
@@ -57,10 +58,11 @@ still skipped). `finish_reason` and `tool_choice` are clamped to known enums.
 
 ## Consequences
 
-- The dashboard becomes a benchmarking / agent-observability tool: six
-  persona-aligned views (see [dashboard](../architecture/dashboard.md)),
-  including a head-to-head model Compare scorecard and a Harnesses view that
-  fingerprints each agent's tool intensity, conversation depth, and sampling.
+- The dashboard becomes a benchmarking / agent-observability tool: five
+  persona-aligned tabs (see [dashboard](../architecture/dashboard.md)),
+  including a head-to-head model scorecard (a section of Models) and a
+  Clients view that fingerprints each agent's tool intensity, conversation
+  depth, and sampling.
 - Cardinality stays bounded by construction: no client-controlled free-text
   reaches a label; params live in histogram buckets; enums are clamped. Verified
   by unit tests (`finish_label`, `tool_choice_mode`, `SseScan`) and an e2e that

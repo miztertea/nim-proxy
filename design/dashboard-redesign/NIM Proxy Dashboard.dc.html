@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0B0D09; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2A2F22; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+
+<div data-screen-label="NIM Proxy Dashboard" style="min-height:100vh; display:flex; font-family:'Space Grotesk', sans-serif; color:#F0F2EC; background:#0B0D09">
+
+  <!-- ===== sidebar ===== -->
+  <div style="width:216px; flex:none; background:#0E110B; border-right:1px solid #1F2318; display:flex; flex-direction:column; padding:20px 12px; position:sticky; top:0; height:100vh">
+    <div style="display:flex; align-items:center; gap:11px; padding:2px 8px 22px">
+      <img src="assets/nim-logo-mark.png" alt="NIM Proxy" width="34" height="34" style="flex:none; display:block; border-radius:9px"></img>
+      <div style="font-family:'Space Grotesk', sans-serif; font-size:17px; font-weight:700; letter-spacing:-0.2px; line-height:1"><span style="color:#76B900">NIM</span> Proxy</div>
+    </div>
+    <sc-for list="{{ nav }}" as="n" hint-placeholder-count="5">
+      <div onClick="{{ n.onClick }}" style="display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:9px; font-size:13.5px; cursor:pointer; color:{{ n.fg }}; background:{{ n.bg }}">
+        <span style="width:3px; height:16px; border-radius:2px; background:{{ n.bar }}"></span>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="{{ n.icColor }}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">{{ n.icon }}</svg>
+        <span>{{ n.name }}</span>
+      </div>
+    </sc-for>
+    <div style="margin-top:auto; padding:14px 10px 2px; border-top:1px solid #1F2318; font:400 11px 'Spline Sans Mono', monospace; color:#6F7767; display:flex; flex-direction:column; gap:6px">
+      <span style="display:inline-flex; align-items:center; gap:7px; color:#A7D65A"><span style="width:7px; height:7px; border-radius:50%; background:#76B900; box-shadow:0 0 8px rgba(118,185,0,0.7)"></span>live · 3s poll</span>
+      <span>up 3d 14h</span>
+      <span>v0.4.2 · 4 lanes · auth on</span>
+    </div>
+  </div>
+
+  <!-- ===== main ===== -->
+  <div style="flex:1; min-width:0; overflow-x:hidden; background:radial-gradient(1100px 400px at 82% -14%, rgba(118,185,0,0.07), transparent 66%); padding:22px 26px 40px">
+
+    <!-- topbar -->
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:20px">
+      <span style="font-size:19px; font-weight:600">{{ title }}</span>
+      <div style="margin-left:auto; display:flex; align-items:center; gap:10px">
+        <div style="display:flex; gap:2px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:99px; padding:3px">
+          <sc-for list="{{ ranges }}" as="r" hint-placeholder-count="6">
+            <span style="font:500 11.5px 'Spline Sans Mono', monospace; padding:4px 11px; border-radius:99px; cursor:pointer; color:{{ r.fg }}; background:{{ r.bg }}">{{ r.name }}</span>
+          </sc-for>
+        </div>
+        <div style="display:inline-flex; align-items:center; gap:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:99px; padding:5px 13px; font:500 11.5px 'Spline Sans Mono', monospace; color:#B7BFAC; cursor:pointer">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#8E967F" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="2"></rect><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke-linecap="round"></path></svg>
+          Jun 3 – Jul 3
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="#6F7767" stroke-width="1.5"><path d="M3 4.5L6 7.5L9 4.5" stroke-linecap="round"></path></svg>
+        </div>
+      </div>
+    </div>
+
+    <svg width="0" height="0" style="position:absolute"><defs>
+      <linearGradient id="gGreen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#76B900" stop-opacity="0.35"></stop><stop offset="1" stop-color="#76B900" stop-opacity="0"></stop></linearGradient>
+      <linearGradient id="gMuted" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8E967F" stop-opacity="0.20"></stop><stop offset="1" stop-color="#8E967F" stop-opacity="0"></stop></linearGradient>
+    </defs></svg>
+
+    <!-- =================== OVERVIEW =================== -->
+    <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px; margin-bottom:14px">
+        <sc-for list="{{ ov.metrics }}" as="m" hint-placeholder-count="4">
+          <div style="position:relative; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:15px 17px 0; overflow:hidden; height:132px">
+            <div style="display:flex; align-items:center; justify-content:space-between">
+              <span style="display:inline-flex; align-items:center; gap:7px; font-size:12px; color:#9BA391">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">{{ m.icon }}</svg>
+                {{ m.label }}
+              </span>
+              <span style="font:600 11px 'Spline Sans Mono', monospace; color:#A7D65A; background:rgba(118,185,0,0.14); border-radius:99px; padding:2px 8px">{{ m.delta }}</span>
+            </div>
+            <div style="font-size:32px; font-weight:600; letter-spacing:-1px; margin-top:12px; color:{{ m.valColor }}">{{ m.value }}</div>
+            <div style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767; margin-top:2px">{{ m.sub }}</div>
+            <svg viewBox="0 0 300 58" width="100%" height="46" preserveAspectRatio="none" style="display:block; position:absolute; left:0; right:0; bottom:0">
+              <path d="{{ m.area }}" fill="{{ m.fill }}"></path>
+              <path d="{{ m.spark }}" fill="none" stroke="{{ m.stroke }}" stroke-width="1.5"></path>
+            </svg>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px">
+        <div style="flex:3 1 380px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:4px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8h3l2-5 3 11 2-6h4"></path></svg>
+            <span style="font-size:14px; font-weight:500">Traffic</span>
+            <span style="font:400 11.5px 'Spline Sans Mono', monospace; color:#6F7767">requests / min</span>
+            <span style="margin-left:auto; font:500 12px 'Spline Sans Mono', monospace; color:#A7D65A">{{ ov.reqNow }} now</span>
+          </div>
+          <dc-import name="LineChart" series="{{ ov.trafficSeries }}" fmt="{{ fmtNum }}" height="220" hint-size="100%,220px"></dc-import>
+        </div>
+        <div style="flex:1 1 300px; min-width:300px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px; display:flex; flex-direction:column">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5A6.5 6.5 0 108 14.5"></path><path d="M8 8l3.5-2.5"></path></svg>
+            <span style="font-size:14px; font-weight:500">Capacity &amp; reliability</span>
+          </div>
+          <div style="display:flex; gap:8px">
+            <sc-for list="{{ ov.rings }}" as="g" hint-placeholder-count="2">
+              <div style="flex:1; display:flex; flex-direction:column; align-items:center; text-align:center">
+                <div style="position:relative; width:76px; height:76px">
+                  <svg width="76" height="76" viewBox="0 0 84 84" style="display:block">
+                    <circle cx="42" cy="42" r="34" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"></circle>
+                    <circle cx="42" cy="42" r="34" fill="none" stroke="{{ g.color }}" stroke-width="7" stroke-linecap="round" stroke-dasharray="{{ g.dash }}" transform="rotate(-90 42 42)"></circle>
+                  </svg>
+                  <span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#F0F2EC; font:600 15px 'Space Grotesk', sans-serif">{{ g.pct }}</span>
+                </div>
+                <div style="font-size:12px; font-weight:500; margin-top:8px">{{ g.label }}</div>
+                <div style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767; margin-top:3px; line-height:1.3">{{ g.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:1px">
+            <sc-for list="{{ ov.health }}" as="h" hint-placeholder-count="4">
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; font-size:12.5px">
+                <span style="color:#9BA391">{{ h.label }}</span>
+                <span style="font:500 11.5px 'Spline Sans Mono', monospace; color:{{ h.color }}">{{ h.val }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px; margin-bottom:14px">
+        <div style="display:flex; align-items:center; gap:9px; margin-bottom:6px">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.5L3 9h4l-1 5.5L13 7H9z"></path></svg>
+          <span style="font-size:14px; font-weight:500">Performance</span>
+          <span style="font:400 11.5px 'Spline Sans Mono', monospace; color:#6F7767">median &amp; p95 across the window</span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:22px; margin-top:10px">
+          <sc-for list="{{ ov.perf }}" as="p" hint-placeholder-count="3">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px">
+                <span style="font-size:12.5px; color:#C6CDBB">{{ p.label }}</span>
+                <span style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">{{ p.note }}</span>
+              </div>
+              <div style="position:relative; height:6px; background:rgba(255,255,255,0.06); border-radius:99px; margin-bottom:22px">
+                <div style="position:absolute; top:50%; left:{{ p.p50pos }}; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%; background:#A7D65A; box-shadow:0 0 0 3px rgba(118,185,0,0.18)"></div>
+                <div style="position:absolute; top:50%; left:{{ p.p95pos }}; width:9px; height:9px; margin:-4.5px 0 0 -4.5px; border-radius:50%; background:#0B0D09; border:2px solid #6F7767"></div>
+              </div>
+              <div style="display:flex; justify-content:space-between">
+                <div><div style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">p50</div><div style="font-size:18px; font-weight:600; color:#A7D65A">{{ p.p50 }}</div></div>
+                <div style="text-align:right"><div style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">p95</div><div style="font-size:18px; font-weight:600; color:#C6CDBB">{{ p.p95 }}</div></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13V7M8 13V3M12 13V9"></path></svg>
+            <span style="font-size:14px; font-weight:500">Top models</span>
+            <span style="font:400 11.5px 'Spline Sans Mono', monospace; color:#6F7767">tokens out</span>
+          </div>
+          <sc-for list="{{ ov.models }}" as="m" hint-placeholder-count="3">
+            <div style="display:flex; align-items:center; gap:12px; padding:8px 0">
+              <span style="width:30px; height:30px; flex:none; border-radius:8px; background:{{ m.chip }}; display:flex; align-items:center; justify-content:center; font:600 12px 'Space Grotesk', sans-serif; color:#fff">{{ m.mono }}</span>
+              <div style="flex:1; min-width:0">
+                <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px">
+                  <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ m.name }}</span>
+                  <span style="font:500 12px 'Spline Sans Mono', monospace; color:#9BA391; padding-left:8px">{{ m.val }}</span>
+                </div>
+                <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden"><div style="height:100%; width:{{ m.w }}; background:{{ m.chip }}; border-radius:99px"></div></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"></path></svg>
+            <span style="font-size:14px; font-weight:500">Top harnesses</span>
+            <span style="font:400 11.5px 'Spline Sans Mono', monospace; color:#6F7767">tokens out</span>
+          </div>
+          <sc-for list="{{ ov.harness }}" as="m" hint-placeholder-count="3">
+            <div style="display:flex; align-items:center; gap:12px; padding:8px 0">
+              <span style="width:30px; height:30px; flex:none; border-radius:8px; background:{{ m.chip }}; display:flex; align-items:center; justify-content:center; font:600 12px 'Spline Sans Mono', monospace; color:#fff">{{ m.mono }}</span>
+              <div style="flex:1; min-width:0">
+                <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px">
+                  <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ m.name }}</span>
+                  <span style="font:500 12px 'Spline Sans Mono', monospace; color:#9BA391; padding-left:8px">{{ m.val }}</span>
+                </div>
+                <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden"><div style="height:100%; width:{{ m.w }}; background:{{ m.chip }}; border-radius:99px"></div></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- =================== MODELS =================== -->
+    <sc-if value="{{ isModels }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:14px">
+        <sc-for list="{{ md.kpis }}" as="m" hint-placeholder-count="5">
+          <div style="position:relative; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:14px 16px 0; overflow:hidden; height:126px">
+            <div style="display:inline-flex; align-items:center; gap:7px; font-size:12px; color:#9BA391">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">{{ m.icon }}</svg>
+              {{ m.label }}
+            </div>
+            <div style="font-size:23px; font-weight:600; letter-spacing:-0.5px; margin-top:11px; white-space:nowrap; color:{{ m.valColor }}">{{ m.value }}</div>
+            <div style="font:400 10.5px 'Spline Sans Mono', monospace; color:#6F7767; margin-top:3px">{{ m.sub }}</div>
+            <svg viewBox="0 0 260 40" width="100%" height="32" preserveAspectRatio="none" style="display:block; position:absolute; left:0; right:0; bottom:0">
+              <path d="{{ m.area }}" fill="{{ m.fill }}"></path>
+              <path d="{{ m.spark }}" fill="none" stroke="{{ m.stroke }}" stroke-width="1.4"></path>
+            </svg>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- throughput hero (full width) -->
+      <div style="margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:6px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8h3l2-5 3 11 2-6h4"></path></svg>
+            <span style="font-size:14px; font-weight:500">Completion tokens per minute</span>
+            <span style="font:400 11.5px 'Spline Sans Mono', monospace; color:#6F7767">by model</span>
+          </div>
+          <dc-import name="LineChart" series="{{ md.tputSeries }}" fmt="{{ fmtNum }}" height="220" hint-size="100%,220px"></dc-import>
+          <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:8px">
+            <sc-for list="{{ md.tput }}" as="s" hint-placeholder-count="5">
+              <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:#9BA391"><span style="width:9px; height:9px; border-radius:3px; background:{{ s.color }}"></span>{{ s.name }}</span>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <!-- quantile trio -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-bottom:14px">
+        <sc-for list="{{ md.quant }}" as="q" hint-placeholder-count="4">
+          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:14px 16px">
+            <div style="font-size:13px; font-weight:500; margin-bottom:2px">{{ q.title }}</div>
+            <div style="font:400 10.5px 'Spline Sans Mono', monospace; color:#6F7767; margin-bottom:8px">{{ q.note }}</div>
+            <dc-import name="LineChart" series="{{ q.lineSeries }}" fmt="{{ q.fmtFn }}" height="120" hint-size="100%,120px"></dc-import>
+            <div style="display:flex; gap:14px; margin-top:6px">
+              <span style="display:inline-flex; align-items:center; gap:6px; font-size:11px; color:#9BA391"><span style="width:9px; height:2px; background:#A7D65A"></span>median {{ q.p50 }}</span>
+              <span style="display:inline-flex; align-items:center; gap:6px; font-size:11px; color:#9BA391"><span style="width:9px; height:2px; background:#6F7767"></span>p95 {{ q.p95 }}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- how responses end (growable) + reasoning -->
+      <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:14px; margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px; display:flex; flex-direction:column; min-height:0">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h5M2 4h9M2 12h7"></path></svg>
+            <span style="font-size:14px; font-weight:500">How responses end</span>
+            <span style="margin-left:auto; font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">{{ md.finCount }} models</span>
+          </div>
+          <dc-import name="SortTable" columns="{{ md.finColsFor }}" rows="{{ md.finRows }}" default-idx="1" max-height="300" min-width="420" hint-size="100%,300px"></dc-import>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a4 4 0 00-2.5 7.1V11h5V8.6A4 4 0 008 1.5zM6 13h4M6.5 15h3"></path></svg>
+            <span style="font-size:14px; font-weight:500">Reasoning vs output</span>
+          </div>
+          <sc-for list="{{ md.reasoning }}" as="m" hint-placeholder-count="5">
+            <div style="display:flex; align-items:center; gap:11px; padding:7px 0; font-size:12.5px">
+              <span style="width:120px; flex:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ m.name }}</span>
+              <span style="flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden; display:block"><span style="display:block; height:100%; width:{{ m.w }}; background:{{ m.chip }}; border-radius:99px"></span></span>
+              <span style="width:40px; text-align:right; font:500 11.5px 'Spline Sans Mono', monospace; color:#9BA391">{{ m.val }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- leading model cards (above the per-model table) -->
+      <div style="display:flex; align-items:center; gap:9px; margin-bottom:10px">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13V7M8 13V3M12 13V9"></path></svg>
+        <span style="font-size:14px; font-weight:500">Leading models</span>
+        <span style="font:400 11.5px 'Spline Sans Mono', monospace; color:#6F7767">{{ md.cardNote }}</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; margin-bottom:14px">
+        <sc-for list="{{ md.cards }}" as="m" hint-placeholder-count="4">
+          <div style="position:relative; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:14px 16px 12px">
+            <span style="position:absolute; top:13px; right:15px; font:600 12px 'Spline Sans Mono', monospace; color:#5A6150">#{{ m.rank }}</span>
+            <div style="display:flex; align-items:center; gap:11px; min-width:0">
+              <span style="width:34px; height:34px; flex:none; border-radius:9px; background:{{ m.chip }}; display:flex; align-items:center; justify-content:center; font:600 13px 'Space Grotesk', sans-serif; color:#fff">{{ m.mono }}</span>
+              <div style="min-width:0; padding-right:20px">
+                <div style="font-size:13.5px; font-weight:600; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ m.name }}</div>
+                <div style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767; margin-top:2px">{{ m.pub }}</div>
+              </div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px 8px; margin-top:14px">
+              <sc-for list="{{ m.stats }}" as="s" hint-placeholder-count="6">
+                <div>
+                  <div style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">{{ s.l }}</div>
+                  <div style="font-size:14px; font-weight:600; color:{{ s.c }}; margin-top:2px; font-variant-numeric:tabular-nums">{{ s.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- per-model growable table (SortTable) -->
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+        <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"></rect><path d="M1.5 6h13M6 6v7.5"></path></svg>
+          <span style="font-size:14px; font-weight:500">Per model</span>
+          <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">{{ md.tableCount }} models · click a column to sort</span>
+        </div>
+        <dc-import name="SortTable" columns="{{ md.perCols }}" rows="{{ md.perRows }}" default-idx="2" max-height="440" min-width="900" hint-size="100%,440px"></dc-import>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- =================== CLIENTS =================== -->
+    <sc-if value="{{ isClients }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:14px">
+        <sc-for list="{{ cl.kpis }}" as="k" hint-placeholder-count="5">
+          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:14px; padding:14px 16px">
+            <div style="font-size:11.5px; color:#9BA391">{{ k.label }}</div>
+            <div style="font-size:24px; font-weight:600; letter-spacing:-0.5px; margin-top:8px">{{ k.value }}<span style="font:400 12px 'Spline Sans Mono', monospace; color:#6F7767"> {{ k.unit }}</span></div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:14px; margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:8px">Tool intensity <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">avg tools / request</span></div>
+          <sc-for list="{{ cl.toolInt }}" as="b" hint-placeholder-count="6"><div style="display:flex; align-items:center; gap:11px; padding:5px 0; font-size:12.5px"><span style="width:110px; flex:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ b.name }}</span><span style="flex:1; height:9px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden; display:block"><span style="display:block; height:100%; width:{{ b.w }}; background:{{ b.chip }}; border-radius:99px"></span></span><span style="width:48px; text-align:right; font:500 11.5px 'Spline Sans Mono', monospace; color:#9BA391">{{ b.val }}</span></div></sc-for>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:8px">Conversation depth <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">avg messages / request</span></div>
+          <sc-for list="{{ cl.depth }}" as="b" hint-placeholder-count="6"><div style="display:flex; align-items:center; gap:11px; padding:5px 0; font-size:12.5px"><span style="width:110px; flex:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ b.name }}</span><span style="flex:1; height:9px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden; display:block"><span style="display:block; height:100%; width:{{ b.w }}; background:{{ b.chip }}; border-radius:99px"></span></span><span style="width:48px; text-align:right; font:500 11.5px 'Spline Sans Mono', monospace; color:#9BA391">{{ b.val }}</span></div></sc-for>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:8px">Sampling fingerprint <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">avg temperature</span></div>
+          <sc-for list="{{ cl.temp }}" as="b" hint-placeholder-count="6"><div style="display:flex; align-items:center; gap:11px; padding:5px 0; font-size:12.5px"><span style="width:110px; flex:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ b.name }}</span><span style="flex:1; height:9px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden; display:block"><span style="display:block; height:100%; width:{{ b.w }}; background:{{ b.chip }}; border-radius:99px"></span></span><span style="width:48px; text-align:right; font:500 11.5px 'Spline Sans Mono', monospace; color:#9BA391">{{ b.val }}</span></div></sc-for>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:8px">Streaming share <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">% streamed</span></div>
+          <sc-for list="{{ cl.stream }}" as="b" hint-placeholder-count="6"><div style="display:flex; align-items:center; gap:11px; padding:5px 0; font-size:12.5px"><span style="width:110px; flex:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ b.name }}</span><span style="flex:1; height:9px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden; display:block"><span style="display:block; height:100%; width:{{ b.w }}; background:{{ b.chip }}; border-radius:99px"></span></span><span style="width:48px; text-align:right; font:500 11.5px 'Spline Sans Mono', monospace; color:#9BA391">{{ b.val }}</span></div></sc-for>
+        </div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+        <div style="display:flex; align-items:center; gap:9px; margin-bottom:12px">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#76B900" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"></path></svg>
+          <span style="font-size:14px; font-weight:500">Per harness</span>
+          <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">click a column to sort</span>
+        </div>
+        <dc-import name="SortTable" columns="{{ cl.cols }}" rows="{{ cl.rows }}" default-idx="2" max-height="420" min-width="620" hint-size="100%,300px"></dc-import>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- =================== RELIABILITY =================== -->
+    <sc-if value="{{ isReliability }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px">
+        <div style="flex:1 1 240px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:12px; color:#9BA391">Availability <span style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">rolling 30d</span></div>
+          <div style="font-size:34px; font-weight:600; letter-spacing:-1px; color:#A7D65A; margin-top:8px">{{ rl.avail }}</div>
+          <div style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767; margin-top:2px">{{ rl.slo }}</div>
+          <div style="display:flex; justify-content:space-between; font-size:11.5px; color:#9BA391; margin:16px 0 6px">error budget<span style="font:500 11px 'Spline Sans Mono', monospace; color:#C6CDBB">{{ rl.budgetUsed }} used</span></div>
+          <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden"><div style="height:100%; width:{{ rl.budgetUsed }}; background:#D9A521; border-radius:99px"></div></div>
+        </div>
+        <div style="flex:2 1 380px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:baseline; gap:10px">
+            <span style="font-size:12px; color:#9BA391">Where time goes</span>
+            <span style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">median request, end to end</span>
+            <span style="margin-left:auto; font-size:22px; font-weight:600; letter-spacing:-0.5px">{{ rl.latTotal }}</span>
+          </div>
+          <div style="display:flex; height:16px; border-radius:6px; overflow:hidden; margin:16px 0 12px; gap:2px">
+            <sc-for list="{{ rl.latSegs }}" as="s" hint-placeholder-count="3"><div style="width:{{ s.w }}; background:{{ s.color }}"></div></sc-for>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:16px">
+            <sc-for list="{{ rl.latSegs }}" as="s" hint-placeholder-count="3">
+              <div style="display:flex; align-items:center; gap:8px">
+                <span style="width:10px; height:10px; border-radius:3px; background:{{ s.color }}"></span>
+                <div><div style="font-size:12px; color:#C6CDBB">{{ s.label }}</div><div style="font:500 13px 'Spline Sans Mono', monospace; color:#F0F2EC">{{ s.val }}</div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="flex:1 1 240px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; gap:20px">
+            <div><div style="font-size:11.5px; color:#9BA391">Active now</div><div style="font-size:26px; font-weight:600; color:#76B900">{{ rl.activeNow }}</div></div>
+            <div><div style="font-size:11.5px; color:#9BA391">Queued</div><div style="font-size:26px; font-weight:600; color:#D9A521">{{ rl.queuedNow }}</div></div>
+          </div>
+          <div style="display:flex; height:8px; border-radius:99px; overflow:hidden; margin:12px 0; gap:2px">
+            <div style="width:{{ rl.actW }}; background:#76B900"></div><div style="width:{{ rl.queW }}; background:#D9A521"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.06)"><span style="font-size:11.5px; color:#9BA391">Error rate</span><span style="font:600 15px 'Spline Sans Mono', monospace; color:#E36868">{{ rl.errRate }}</span></div>
+          <div style="display:flex; height:6px; border-radius:99px; overflow:hidden; margin-top:8px; gap:1px">
+            <sc-for list="{{ rl.errSegs }}" as="s" hint-placeholder-count="4"><div style="width:{{ s.w }}; background:{{ s.color }}" title="{{ s.label }}"></div></sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:6px">Requests per minute</div>
+          <dc-import name="LineChart" series="{{ rl.reqSeries }}" fmt="{{ fmtNum }}" height="150" hint-size="100%,150px"></dc-import>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:6px">Outcomes per minute</div>
+          <dc-import name="LineChart" series="{{ rl.outSeries3 }}" fmt="{{ fmtNum }}" height="150" hint-size="100%,150px"></dc-import>
+          <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:8px"><sc-for list="{{ rl.outLegend }}" as="s" hint-placeholder-count="3"><span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:#9BA391"><span style="width:9px; height:9px; border-radius:3px; background:{{ s.color }}"></span>{{ s.name }}</span></sc-for></div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:6px">In flight &amp; queued</div>
+          <dc-import name="LineChart" series="{{ rl.loadSeries3 }}" fmt="{{ fmtNum }}" height="150" hint-size="100%,150px"></dc-import>
+          <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:8px"><sc-for list="{{ rl.loadLegend }}" as="s" hint-placeholder-count="2"><span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:#9BA391"><span style="width:9px; height:9px; border-radius:3px; background:{{ s.color }}"></span>{{ s.name }}</span></sc-for></div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1.4fr; gap:14px; margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:6px">Queue wait</div>
+          <dc-import name="LineChart" series="{{ rl.qwSeries3 }}" fmt="{{ fmtSecs }}" height="150" hint-size="100%,150px"></dc-import>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:10px">Activity by hour</div>
+          <svg viewBox="0 0 {{ rl.heatW }} {{ rl.heatH }}" width="100%" style="display:block; max-width:{{ rl.heatW }}px">
+            {{ rl.heatLabels }}
+            <sc-for list="{{ rl.heatCells }}" as="c" hint-placeholder-count="24"><rect x="{{ c.x }}" y="{{ c.y }}" width="{{ rl.cw }}" height="{{ rl.ch }}" rx="3" fill="{{ c.fill }}"></rect></sc-for>
+          </svg>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px; margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:12px">Non-success outcomes</div>
+          <dc-import name="SortTable" columns="{{ rl.outcomeCols }}" rows="{{ rl.outcomeRows }}" default-idx="1" max-height="240" min-width="320" hint-size="100%,240px"></dc-import>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:8px">Reliability &amp; security</div>
+          <sc-for list="{{ rl.reliability }}" as="h" hint-placeholder-count="7"><div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12.5px"><span style="color:#9BA391">{{ h.label }}</span><span style="font:500 11.5px 'Spline Sans Mono', monospace; color:{{ h.color }}">{{ h.val }}</span></div></sc-for>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:8px">Request types</div>
+          <sc-for list="{{ rl.reqtypes }}" as="h" hint-placeholder-count="5"><div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12.5px"><span style="color:#9BA391">{{ h.label }}</span><span style="font:500 11.5px 'Spline Sans Mono', monospace; color:{{ h.color }}">{{ h.val }}</span></div></sc-for>
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+        <div style="font-size:14px; font-weight:500; margin-bottom:12px">Per client <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">click a column to sort</span></div>
+        <dc-import name="SortTable" columns="{{ rl.clientCols }}" rows="{{ rl.clientRows }}" default-idx="3" max-height="420" min-width="560" hint-size="100%,300px"></dc-import>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- =================== CAPACITY =================== -->
+    <sc-if value="{{ isCapacity }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px">
+        <div style="flex:2 1 380px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; align-items:baseline; gap:10px">
+            <span style="font-size:12px; color:#9BA391">Saturation</span>
+            <span style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767">current load vs aggregate capacity</span>
+            <span style="margin-left:auto; font-size:30px; font-weight:600; letter-spacing:-1px; color:#A7D65A">{{ cap.satPct }}</span>
+          </div>
+          <div style="position:relative; height:20px; background:rgba(255,255,255,0.06); border-radius:6px; overflow:hidden; margin:16px 0 8px">
+            <div style="position:absolute; inset:0; width:{{ cap.curW }}; background:linear-gradient(90deg, #4E7A0F, #76B900); border-radius:6px"></div>
+            <div style="position:absolute; top:-3px; bottom:-3px; left:{{ cap.peakW }}; width:2px; background:#F0F2EC"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">
+            <span style="color:#C6CDBB">{{ cap.curLabel }}</span>
+            <span>▏{{ cap.peakLabel }}</span>
+            <span style="color:#A7D65A">{{ cap.headroom }}</span>
+          </div>
+        </div>
+        <div style="flex:1 1 220px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="display:flex; justify-content:space-between; align-items:center"><span style="font-size:12px; color:#9BA391">Provisioning</span><span style="font:600 10px 'Spline Sans Mono', monospace; color:#0A0A0A; background:#D9A521; border-radius:99px; padding:2px 8px">ADD 1 KEY</span></div>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:12px">
+            <span style="font-size:34px; font-weight:600; letter-spacing:-1px">{{ cap.keysHave }}</span>
+            <span style="font:400 12px 'Spline Sans Mono', monospace; color:#6F7767">keys active</span>
+          </div>
+          <div style="font:400 11.5px 'Spline Sans Mono', monospace; color:#9BA391; margin-top:6px">peak demand needs <span style="color:#D9A521; font-weight:500">{{ cap.keysNeed }} keys</span></div>
+        </div>
+        <div style="flex:1 1 220px; min-width:0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:12px; color:#9BA391; margin-bottom:12px">Rate-limit pressure</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0"><span style="font-size:12.5px; color:#C6CDBB">429s this window</span><span style="font:600 15px 'Spline Sans Mono', monospace; color:#D9A521">{{ cap.pressure429 }}</span></div>
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0"><span style="font-size:12.5px; color:#C6CDBB">Conversation stickiness</span><span style="font:600 15px 'Spline Sans Mono', monospace; color:#F0F2EC">{{ cap.stickiness }}</span></div>
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0"><span style="font-size:12.5px; color:#C6CDBB">Key lanes</span><span style="font:600 15px 'Spline Sans Mono', monospace; color:#F0F2EC">{{ cap.laneCount }}</span></div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:10px">Lane utilization <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">trailing 60s</span></div>
+          <sc-for list="{{ cap.meters }}" as="b" hint-placeholder-count="4"><div style="display:flex; align-items:center; gap:11px; padding:7px 0; font-size:12.5px"><span style="width:70px; flex:none">{{ b.name }}</span><span style="flex:1; height:12px; background:rgba(255,255,255,0.06); border-radius:99px; overflow:hidden; display:block"><span style="display:block; height:100%; width:{{ b.w }}; background:{{ b.chip }}; border-radius:99px"></span></span><span style="width:44px; text-align:right; font:500 11.5px 'Spline Sans Mono', monospace; color:#9BA391">{{ b.val }}</span></div></sc-for>
+        </div>
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+          <div style="font-size:14px; font-weight:500; margin-bottom:6px">Rate-limit hits per minute</div>
+          <dc-import name="LineChart" series="{{ cap.benchSeries3 }}" fmt="{{ fmtNum }}" height="150" hint-size="100%,150px"></dc-import>
+          <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:8px"><sc-for list="{{ cap.benchLegend }}" as="s" hint-placeholder-count="4"><span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:#9BA391"><span style="width:9px; height:9px; border-radius:3px; background:{{ s.color }}"></span>{{ s.name }}</span></sc-for></div>
+        </div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:16px 20px">
+        <div style="font-size:14px; font-weight:500; margin-bottom:12px">Per lane <span style="font:400 11px 'Spline Sans Mono', monospace; color:#6F7767">click a column to sort</span></div>
+        <dc-import name="SortTable" columns="{{ cap.cols }}" rows="{{ cap.rows }}" default-idx="1" max-height="360" min-width="560" hint-size="100%,240px"></dc-import>
+      </div>
+    </div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 'overview' };
+
+  renderVals() {
+    const tab = this.state.tab;
+    const setTab = t => () => this.setState({ tab: t });
+
+    /* ---------- shared helpers ---------- */
+    const seeded = (seed) => { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); };
+    const mkSeries = (seed, base, amp, n) => {
+      const r = seeded(seed); const pts = []; let v = base;
+      for (let i = 0; i < n; i++) { v = Math.max(0, v + (r() - 0.5) * amp + Math.sin(i / 7) * amp * 0.18); pts.push(v); }
+      return pts;
+    };
+    const fmt = n => !isFinite(n) ? '–'
+      : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
+      : Math.abs(n) >= 1e4 ? (n / 1e3).toFixed(1) + 'K'
+      : Math.abs(n) >= 100 ? Math.round(n).toLocaleString()
+      : Math.abs(n) >= 10 ? n.toFixed(1).replace(/\.0$/, '') : n.toFixed(0);
+    const money = n => '$' + (n >= 1000 ? fmt(n) : n.toFixed(2));
+    const secs = s => !isFinite(s) ? '–' : s < 1 ? Math.round(s * 1000) + ' ms' : s.toFixed(1) + ' s';
+
+    const line = (pts, W, H, padT, padB, padR, vmaxIn) => {
+      const PR = padR || 0;
+      let vmax = vmaxIn || Math.max(1e-6, ...pts);
+      if (!vmaxIn && vmax >= 0.5) { const step = Math.pow(10, Math.floor(Math.log10(vmax))); vmax = Math.ceil(vmax / (step / 2)) * (step / 2); }
+      const X = i => (W - PR) * i / (pts.length - 1);
+      const Y = v => padT + (H - padT - padB) * (1 - v / vmax);
+      const d = pts.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(Math.min(v, vmax)).toFixed(1)).join('');
+      const area = d + 'L' + X(pts.length - 1).toFixed(1) + ',' + (H - padB).toFixed(1) + 'L0,' + (H - padB).toFixed(1) + 'Z';
+      return { d, area, X, Y, vmax, ex: +X(pts.length - 1).toFixed(1), ey: +Y(Math.min(pts[pts.length - 1], vmax)).toFixed(1) };
+    };
+    const spark = (pts, W, H) => line(pts, W, H, 3, 3, 0).d;
+    const iPath = d => React.createElement('path', { d });
+    const mkLabels = (grid, x, fill, anchor) => grid.map((g, i) =>
+      React.createElement('text', { key: i, x, y: g.ty, textAnchor: anchor || 'start', style: { fill, font: "400 10px 'Spline Sans Mono', monospace" } }, g.label));
+
+    /* build a small multi-series chart object for template */
+    const chart = (defs, W, H, unitFmt, padR) => {
+      const all = defs.flatMap(s => s.pts);
+      let vmax = Math.max(1e-6, ...all);
+      const step = Math.pow(10, Math.floor(Math.log10(vmax || 1))); vmax = Math.ceil((vmax || 1) / (step / 2)) * (step / 2);
+      const series = defs.map(s => { const l = line(s.pts, W, H, 8, 8, 0, vmax); return { name: s.name, color: s.color, d: l.d, ex: l.ex, ey: l.ey }; });
+      const gy = v => 8 + (H - 16) * (1 - v / vmax);
+      const grid = [0, 1, 2, 3].map(i => { const y = +gy(vmax * i / 3).toFixed(1); return { y, ty: +(y - 3).toFixed(1), label: unitFmt(vmax * i / 3) }; });
+      return { grid, labels: mkLabels(grid, W - 3, '#6F7767', 'end'), series };
+    };
+
+    const ICONS = {
+      pulse: iPath('M1 8h3l2-5 3 11 2-6h4'), stack: iPath('M8 1.5l6 3-6 3-6-3zM2 8l6 3 6-3M2 11.5l6 3 6-3'),
+      coin: iPath('M8 1.5A6.5 6.5 0 108 14.5 6.5 6.5 0 008 1.5zM8 4.5v7M9.8 6a2 2 0 00-3.6 1.2c0 2 3.6 1 3.6 2.8A2 2 0 016.2 10.5'),
+      check: iPath('M2.5 8.5l3.5 3.5 7.5-8'), clock: iPath('M8 4v4l2.5 1.5M8 1.5A6.5 6.5 0 108 14.5 6.5 6.5 0 008 1.5z'),
+      bolt: iPath('M9 1.5L3 9h4l-1 5.5L13 7H9z'), grid: iPath('M2 8h5M2 4h9M2 12h7'),
+    };
+    const dGreen = { deltaColor: '#A7D65A' };
+
+    /* ---------- base mock series ---------- */
+    const N = 60;
+    const reqs = mkSeries(7, 26, 9, N);
+    const toks = mkSeries(13, 68000, 26000, N);
+    let acc = 0; const savedPts = mkSeries(21, 12, 6, N).map(v => (acc += v * 1.2, acc)).map(v => v * 861.42 / acc);
+    const successPts = mkSeries(61, 99.1, 0.5, N);
+    const ttftPts = mkSeries(31, 0.64, 0.2, N), tpsPts = mkSeries(41, 78, 14, N), ptokPts = mkSeries(71, 3000, 1200, N);
+
+    const now = new Date();
+    const chipPct = f => Math.round(f * 100) + '%';
+    const ring = r => (2 * Math.PI * 34 * r).toFixed(1) + ' ' + (2 * Math.PI * 34).toFixed(1);
+
+    /* ---------- nav ---------- */
+    const NAVDEF = [
+      ['overview', 'Overview', iPath('M2 8.5L8 3l6 5.5M3.5 7.5V13h9V7.5')],
+      ['models', 'Models', iPath('M4 13V7M8 13V3M12 13V9')],
+      ['clients', 'Clients', iPath('M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10')],
+      ['reliability', 'Reliability', iPath('M8 1.5l5 2v4c0 3.5-2.4 6-5 7-2.6-1-5-3.5-5-7v-4z')],
+      ['capacity', 'Capacity', iPath('M2 11a6 6 0 0112 0M8 11l3-3.5')],
+    ];
+    const nav = NAVDEF.map(([id, name, icon]) => {
+      const on = tab === id;
+      return { name, icon, onClick: setTab(id),
+        fg: on ? '#F0F2EC' : '#8E967F', bg: on ? 'rgba(118,185,0,0.12)' : 'transparent',
+        bar: on ? '#76B900' : 'transparent', icColor: on ? '#76B900' : '#6F7767' };
+    });
+    const ranges = ['Live', '1h', '6h', '24h', '7d', '30d'].map((name, i) => ({
+      name, fg: i === 0 ? '#A7D65A' : '#6F7767', bg: i === 0 ? 'rgba(118,185,0,0.14)' : 'transparent' }));
+    const titles = { overview: 'Overview', models: 'Models', clients: 'Clients', reliability: 'Reliability', capacity: 'Capacity' };
+
+    /* ---------- OVERVIEW ---------- */
+    const card = (pts) => { const l = line(pts, 300, 58, 8, 2, 0); return { spark: l.d, area: l.area }; };
+    const eReq = line(reqs, 940, 220, 10, 8, 0);
+    const ovReqGrid = [0, 1, 2, 3].map(i => { const y = +eReq.Y(eReq.vmax * i / 3).toFixed(1); return { y, ty: +(y - 3).toFixed(1), label: fmt(eReq.vmax * i / 3) }; });
+    const ov = {
+      metrics: [
+        { label: 'Requests', icon: ICONS.pulse, value: '18.4K', sub: 'this window', delta: '+8.2%', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...card(reqs) },
+        { label: 'Tokens out', icon: ICONS.stack, value: '42.1M', sub: '6.1M in', delta: '+12.4%', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...card(toks) },
+        { label: 'Success rate', icon: ICONS.check, value: '99.2%', sub: '18.3K of 18.4K', delta: '+0.3%', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...card(successPts) },
+        { label: 'Dollars saved', icon: ICONS.coin, value: '$861', sub: 'vs reference pricing', delta: '+6.1%', valColor: '#A7D65A', fill: 'url(#gGreen)', stroke: '#A7D65A', ...card(savedPts) },
+      ],
+      reqD: eReq.d, reqArea: eReq.area, reqGrid: ovReqGrid, reqEx: eReq.ex, reqEy: eReq.ey,
+      reqLabels: mkLabels(ovReqGrid, 937, '#6F7767', 'end'), reqNow: Math.round(reqs[N - 1]),
+      rings: [
+        { label: 'Capacity used', sub: '67 / 160 rpm · 4 keys', pct: '42%', color: '#A7D65A', dash: ring(0.42) },
+        { label: 'Success rate', sub: 'errors 0.8% · 6 benched', pct: '99%', color: '#76B900', dash: ring(0.992) },
+      ],
+      health: [
+        { label: 'Active now', val: '12', color: '#F0F2EC' }, { label: 'Queued', val: '3', color: '#F0F2EC' },
+        { label: 'Rate-limit benches', val: '6', color: '#D9C25A' }, { label: 'Shed · 401 · logins', val: '0', color: '#6F7767' },
+      ],
+      perf: [
+        { label: 'Time to first token', note: 'lower is better', p50: '480 ms', p95: '1.2 s', p50pos: chipPct(0.24), p95pos: chipPct(0.60) },
+        { label: 'Generation speed', note: 'higher is better', p50: '82 tok/s', p95: '54 tok/s', p50pos: chipPct(0.68), p95pos: chipPct(0.45) },
+        { label: 'Inter-token latency', note: 'lower is better', p50: '22 ms', p95: '41 ms', p50pos: chipPct(0.37), p95pos: chipPct(0.68) },
+      ],
+      models: [
+        { name: 'DeepSeek V4 Pro', mono: 'DS', chip: '#4D6BFE', val: '21.4M', w: '100%' },
+        { name: 'Llama 3.3 70B Instruct', mono: 'M', chip: '#0668E1', val: '12.8M', w: '60%' },
+        { name: 'Qwen3.5 397B A17B', mono: 'QW', chip: '#615CED', val: '7.9M', w: '37%' },
+      ],
+      harness: [
+        { name: 'claude-code', mono: 'CC', chip: '#C15F3C', val: '24.1M', w: '100%' },
+        { name: 'aider', mono: 'AD', chip: '#2E7D5B', val: '11.2M', w: '46%' },
+        { name: 'opencode', mono: 'OC', chip: '#5A6150', val: '6.8M', w: '28%' },
+      ],
+    };
+
+    /* ---------- MODELS ---------- */
+    const PUBS = {
+      nvidia: ['NVIDIA', '#76B900'], deepseek: ['DeepSeek', '#4D6BFE'], meta: ['Meta', '#0668E1'],
+      qwen: ['Qwen', '#615CED'], mistral: ['Mistral AI', '#FA520F'], moonshot: ['Moonshot AI', '#16B8C0'],
+      google: ['Google', '#2E96FF'], stepfun: ['StepFun', '#EE6002'], minimax: ['MiniMax', '#F23F5D'],
+      microsoft: ['Microsoft', '#00A4EF'], openai: ['OpenAI', '#10A37F'], upstage: ['Upstage', '#805CFB'],
+    };
+    const MDEF = [
+      ['Step 3.7 Flash', 'stepfun'], ['Nemotron 3 Super 120B A12B', 'nvidia'], ['DeepSeek V4 Pro', 'deepseek'],
+      ['Mistral Large 3 675B Instruct 2512', 'mistral'], ['Qwen3.5 397B A17B', 'qwen'], ['MiniMax M3', 'minimax'],
+      ['Kimi K2.6', 'moonshot'], ['DeepSeek V4 Flash', 'deepseek'], ['Sarvam M', 'nvidia'],
+      ['Llama 3.3 Nemotron Super 49B V1.5', 'meta'], ['Nemotron Nano 4B V2', 'nvidia'], ['GPT OSS 20B', 'openai'],
+      ['Step 3.5 Flash', 'stepfun'], ['Nemotron 3 Nano Omni 30B A3B', 'nvidia'], ['Qwen3.5 122B A10B', 'qwen'],
+      ['Mistral 8x7B Instruct V0.3', 'mistral'], ['Minstral 14B Instruct 2512', 'mistral'], ['Nemotron Mini 4B Instruct', 'nvidia'],
+      ['Llama 3.3 Nemotron Super 49B V1', 'meta'], ['Dracarys Llama 3.1 70B', 'meta'], ['Qwen3 Next 80B A3B Instruct', 'qwen'],
+      ['GLM 3.2', 'google'], ['Llama 3.1 Nemotron Nano 8B', 'meta'], ['Llama 3.2 90B Vision Instruct', 'meta'],
+      ['Llama 3.3 70B Instruct', 'meta'], ['Stockmark 2 100B Instruct', 'nvidia'], ['Mistral Small 3 11B 2503', 'mistral'],
+      ['Llama 3.1 8B Instruct', 'meta'], ['Solar 10.7B Instruct', 'upstage'], ['Llama 3.2 11B Vision Instruct', 'meta'],
+      ['Phi 4 Mini Instruct', 'microsoft'], ['Gemma 3n E2B IT', 'google'], ['Mistral Nemotron', 'nvidia'],
+      ['Riva Translate 4B Instruct', 'nvidia'], ['Qwen2.5 Coder 32B', 'qwen'], ['DeepSeek R2 Distill 14B', 'deepseek'],
+    ];
+    const initials = name => { const w = name.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean); return ((w[0]?.[0] || '') + (w[1]?.[0] || '')).toUpperCase() || '?'; };
+    const models = MDEF.map(([name, pub], i) => {
+      const r = seeded(2000 + i * 13);
+      const req = Math.max(2, Math.round(13 - i * 0.3 + r() * 4));
+      const tok = Math.max(60, Math.round((3900 - i * 95) + r() * 300));
+      const ttft = 0.09 + r() * 2.8, tps = 12 + r() * 90, tpot = 0.008 + r() * 0.13;
+      const reply = Math.round(180 + r() * 340), trunc = i % 5 === 0 ? r() * 30 : r() * 8;
+      const reason = i % 3 === 0 ? r() * 90 : r() * 6, err = i % 7 === 0 ? r() * 4 : 0;
+      const saved = tok / 1e6 * 2 + req * 0.4 * 0.5;
+      const [pubName, chip] = PUBS[pub];
+      return { name, pub: pubName, chip, mono: initials(pubName), req, tok, ttft, tps, tpot, reply, trunc, reason, err, saved };
+    }).sort((a, b) => b.tok - a.tok);
+
+    const mColor = v => v ? '#C6CDBB' : '#5A6150';
+    const md = {
+      kpis: [
+        { label: 'Requests', icon: ICONS.pulse, value: '18.4K', sub: '36 models', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...(l => ({ spark: l.d, area: l.area }))(line(reqs, 260, 44, 6, 2, 0)) },
+        { label: 'Completion tokens', icon: ICONS.stack, value: '42.1M', sub: 'this window', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...(l => ({ spark: l.d, area: l.area }))(line(toks, 260, 44, 6, 2, 0)) },
+        { label: 'Prompt tokens', icon: ICONS.grid, value: '184.7K', sub: 'across window', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...(l => ({ spark: l.d, area: l.area }))(line(ptokPts, 260, 44, 6, 2, 0)) },
+        { label: 'Avg TTFT', icon: ICONS.clock, value: '640 ms', sub: 'median 480 ms', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...(l => ({ spark: l.d, area: l.area }))(line(ttftPts, 260, 44, 6, 2, 0)) },
+        { label: 'Avg speed', icon: ICONS.bolt, value: '78 tok/s', sub: 'median 82 tok/s', valColor: '#F0F2EC', fill: 'url(#gMuted)', stroke: '#8E967F', ...(l => ({ spark: l.d, area: l.area }))(line(tpsPts, 260, 44, 6, 2, 0)) },
+      ],
+      cardNote: 'Top 4 by tokens out · full list in the table below',
+      cards: models.slice(0, 4).map((m, i) => ({
+        name: m.name, pub: m.pub, chip: m.chip, mono: m.mono, rank: i + 1,
+        stats: [
+          { l: 'requests', v: fmt(m.req), c: '#C6CDBB' }, { l: 'tokens out', v: fmt(m.tok), c: '#C6CDBB' }, { l: 'saved', v: money(m.saved), c: '#A7D65A' },
+          { l: 'TTFT', v: secs(m.ttft), c: '#C6CDBB' }, { l: 'tok/s', v: fmt(m.tps), c: '#C6CDBB' }, { l: 'errors', v: m.err ? m.err.toFixed(1) + '%' : '0%', c: m.err ? '#D98A5A' : '#5A6150' },
+        ],
+      })),
+      finCount: models.length, tableCount: models.length,
+      finCols: ['Completed', 'Truncated', 'Tool call', 'Filtered', 'Other'],
+    };
+
+    /* per-model table (SortTable) */
+    md.perCols = [
+      { label: 'Model', align: 'left', kind: 'str' }, { label: 'Requests' }, { label: 'Tokens out' },
+      { label: 'Avg TTFT' }, { label: 'Avg tok/s' }, { label: 'TPOT' }, { label: 'Avg reply' },
+      { label: 'Truncated' }, { label: 'Reasoning' }, { label: 'Errors' }, { label: 'Saved' },
+    ];
+    md.perRows = models.map(m => ({
+      vals: [m.name, m.req, m.tok, m.ttft, m.tps, m.tpot, m.reply, m.trunc, m.reason, m.err, m.saved],
+      cells: [
+        { t: m.name, c: '#F0F2EC', align: 'left', chip: true, chipColor: m.chip },
+        { t: fmt(m.req), c: '#C6CDBB' }, { t: fmt(m.tok), c: '#C6CDBB' }, { t: secs(m.ttft), c: '#C6CDBB' },
+        { t: fmt(m.tps), c: '#C6CDBB' }, { t: Math.round(m.tpot * 1000) + ' ms', c: '#C6CDBB' }, { t: fmt(m.reply) + ' tok', c: '#9BA391' },
+        { t: m.trunc >= 1 ? Math.round(m.trunc) + '%' : '0%', c: mColor(m.trunc >= 1) }, { t: m.reason >= 1 ? Math.round(m.reason) + '%' : '0%', c: mColor(m.reason >= 1) },
+        { t: m.err ? m.err.toFixed(1) + '%' : '0%', c: m.err ? '#D98A5A' : '#5A6150' }, { t: money(m.saved), c: '#A7D65A' },
+      ],
+    }));
+
+    /* throughput multi-series (top 5) */
+    md.tput = models.slice(0, 5).map((m, i) => ({ name: m.name.split(' ').slice(0, 2).join(' '), color: m.chip, pts: mkSeries(3000 + i * 17, m.tok / 4, m.tok / 3, N) }));
+    { const c = chart(md.tput, 900, 220, fmt, 42); md.tputGrid = c.grid; md.tputLabels = c.labels; md.tput = md.tput.map((s, i) => ({ ...s, d: c.series[i].d, ex: c.series[i].ex, ey: c.series[i].ey })); }
+
+    { const s = line(savedPts, 300, 150, 8, 8, 30); const gy = v => 8 + (150 - 16) * (1 - v / s.vmax);
+      md.savedGrid = [0, 1, 2].map(i => { const y = +gy(s.vmax * i / 2).toFixed(1); return { y, ty: +(y + 3.5).toFixed(1), label: money(s.vmax * i / 2) }; });
+      md.savedLabels = mkLabels(md.savedGrid, 276, '#6F7767'); md.savedD = s.d; md.savedArea = s.area; }
+
+    md.quant = [
+      { title: 'Time to first token', note: 'p50 / p95', p50: '480 ms', p95: '1.2 s', kind: 'secs', defs: [mkSeries(81, 0.48, 0.15, N), mkSeries(82, 1.2, 0.3, N)] },
+      { title: 'Generation speed', note: 'tok/s', p50: '82', p95: '54', kind: 'tps', defs: [mkSeries(83, 82, 12, N), mkSeries(84, 54, 10, N)] },
+      { title: 'Inter-token latency', note: 'TPOT', p50: '22 ms', p95: '41 ms', kind: 'ms', defs: [mkSeries(85, 0.022, 0.006, N), mkSeries(86, 0.041, 0.01, N)] },
+      { title: 'Upstream latency', note: 'p50 / p95', p50: '210 ms', p95: '780 ms', kind: 'secs', defs: [mkSeries(87, 0.21, 0.06, N), mkSeries(88, 0.78, 0.2, N)] },
+    ].map(q => {
+      const fmtFn = q.kind === 'tps' ? (v => fmt(v) + ' tok/s') : q.kind === 'ms' ? (v => Math.round(v * 1000) + ' ms') : secs;
+      return { title: q.title, note: q.note, p50: q.p50, p95: q.p95, fmtFn,
+        lineSeries: [{ name: 'median', color: '#A7D65A', pts: q.defs[0] }, { name: 'p95', color: '#6F7767', pts: q.defs[1] }] };
+    });
+
+    /* how responses end (growable, sortable) */
+    const FINCOLORS = ['#76B900', '#E36868', '#4D6BFE', '#D9A521', '#6F7767'];
+    md.finColsFor = [
+      { label: 'Model', align: 'left', kind: 'str' }, { label: 'Completed' }, { label: 'Truncated' },
+      { label: 'Tool call' }, { label: 'Filtered' }, { label: 'Other' },
+    ];
+    md.finRows = models.map((m, i) => {
+      const r = seeded(4000 + i * 11);
+      const comp = Math.round(60 + r() * 40), trunc = m.trunc > 15 ? Math.round(m.trunc) : Math.round(r() * 12);
+      const tool = i % 4 === 0 ? Math.round(r() * 30) : 0, filt = 0;
+      const other = Math.max(0, 100 - comp - trunc - tool - filt);
+      const nums = [comp, trunc, tool, filt, other];
+      return {
+        vals: [m.name, comp, trunc, tool, filt, other],
+        cells: [{ t: m.name, c: '#F0F2EC', align: 'left', chip: true, chipColor: m.chip }]
+          .concat(nums.map((v, j) => ({ t: v + '%', c: v ? (j === 0 ? '#C6CDBB' : FINCOLORS[j]) : '#3E463A' }))),
+      };
+    });
+
+    md.reasoning = models.filter(m => m.reason > 5).slice(0, 6).map(m => ({ name: m.name.split(' ').slice(0, 3).join(' '), chip: m.chip, val: Math.round(m.reason) + '%', w: Math.min(100, m.reason) + '%' }));
+
+    const SLOTS_COLORS = ['#76B900', '#4D6BFE', '#D9A521', '#16B8C0', '#615CED', '#EE6002'];
+    const barsFor = (items, key, fmtV) => {
+      const max = Math.max(1e-9, ...items.map(i => i[key]));
+      return items.map(i => ({ name: i.name, chip: i.chip, w: Math.round(i[key] / max * 100) + '%', val: fmtV(i[key]) }));
+    };
+
+    /* ---------- CLIENTS ---------- */
+    const CLIENTS = [
+      ['claude-code', '#C15F3C'], ['aider', '#2E7D5B'], ['opencode', '#5A6150'], ['cline', '#4D6BFE'],
+      ['continue', '#615CED'], ['cursor', '#2E96FF'], ['roo-code', '#EE6002'], ['zed', '#16B8C0'],
+    ];
+    const clientsArr = CLIENTS.map(([name, chip], i) => {
+      const r = seeded(6000 + i * 13);
+      const req = Math.round(320 - i * 32 + r() * 40), tok = Math.round((26000 - i * 2600) + r() * 2000);
+      const tools = +(1 + r() * 11).toFixed(2), msgs = +(1.2 + r() * 3).toFixed(1);
+      const temp = +(0.05 + r() * 0.9).toFixed(2), stream = Math.round(35 + r() * 65), saved = tok / 1e6 * 2;
+      return { name, chip, req, tok, tools, msgs, temp, stream, saved };
+    });
+    const avg = (arr, k) => arr.reduce((a, x) => a + x[k], 0) / arr.length;
+    const cl = {
+      kpis: [
+        { label: 'Harnesses', value: String(clientsArr.length), unit: '' },
+        { label: 'Streaming share', value: Math.round(avg(clientsArr, 'stream')) + '%', unit: '' },
+        { label: 'Avg tools / req', value: avg(clientsArr, 'tools').toFixed(1), unit: '' },
+        { label: 'Avg messages / req', value: avg(clientsArr, 'msgs').toFixed(1), unit: '' },
+        { label: 'Tool-using requests', value: '64%', unit: '' },
+      ],
+      toolInt: barsFor(clientsArr, 'tools', v => v.toFixed(1)),
+      depth: barsFor(clientsArr, 'msgs', v => v.toFixed(1)),
+      temp: barsFor(clientsArr, 'temp', v => v.toFixed(2)),
+      stream: barsFor(clientsArr, 'stream', v => Math.round(v) + '%'),
+      cols: [
+        { label: 'Harness', align: 'left', kind: 'str' }, { label: 'Requests' }, { label: 'Tokens out' },
+        { label: 'Tools/req' }, { label: 'Msgs/req' }, { label: 'Streaming' }, { label: 'Saved' },
+      ],
+      rows: clientsArr.map(c => ({
+        vals: [c.name, c.req, c.tok, c.tools, c.msgs, c.stream, c.saved],
+        cells: [
+          { t: c.name, c: '#F0F2EC', align: 'left', chip: true, chipColor: c.chip },
+          { t: fmt(c.req), c: '#C6CDBB' }, { t: fmt(c.tok), c: '#C6CDBB' }, { t: c.tools.toFixed(1), c: '#C6CDBB' },
+          { t: c.msgs.toFixed(1), c: '#C6CDBB' }, { t: Math.round(c.stream) + '%', c: '#C6CDBB' }, { t: money(c.saved), c: '#A7D65A' },
+        ],
+      })),
+    };
+
+    /* ---------- RELIABILITY ---------- */
+    const relReq = line(reqs, 520, 150, 10, 8, 0);
+    const relReqGrid = [0, 1, 2, 3].map(i => { const y = +relReq.Y(relReq.vmax * i / 3).toFixed(1); return { y, ty: +(y - 3).toFixed(1), label: fmt(relReq.vmax * i / 3) }; });
+    const outcomeDefs = [
+      { name: 'ok', color: '#76B900', pts: reqs.map(v => v * 0.98) },
+      { name: 'errors', color: '#E36868', pts: mkSeries(91, 0.6, 0.5, N) },
+      { name: 'disconnects', color: '#D9A521', pts: mkSeries(92, 0.4, 0.4, N) },
+    ];
+    const loadDefs = [
+      { name: 'active', color: '#76B900', pts: mkSeries(93, 9, 5, N) },
+      { name: 'queued', color: '#D9A521', pts: mkSeries(94, 2, 2.5, N) },
+    ];
+    const qwDefs = [{ name: 'median', color: '#A7D65A', pts: mkSeries(95, 0.3, 0.15, N) }, { name: 'p95', color: '#6F7767', pts: mkSeries(96, 0.9, 0.3, N) }];
+    const outChart = chart(outcomeDefs, 520, 150, fmt, 40);
+    const loadChart = chart(loadDefs, 520, 150, fmt, 40);
+    const qwChart = chart(qwDefs, 520, 150, v => v < 1 ? Math.round(v * 1000) + '' : v.toFixed(1), 40);
+    /* heatmap */
+    const RAMP = ['#141A0E', '#233312', '#33501A', '#4E7A0F', '#76B900', '#A7D65A'];
+    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const hm = DAYS.map((_, d) => Array.from({ length: 24 }, (_, h) => { const r = seeded(7000 + d * 31 + h); const base = (h > 7 && h < 21 ? 1 : 0.25); return Math.round(r() * base * 100); }));
+    const hmax = Math.max(1, ...hm.flat());
+    const CW = 26, CH = 18, GAP = 3, PL = 36, PT = 18;
+    const heatCells = [];
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) {
+      const v = hm[d][h]; const fill = v ? RAMP[Math.min(RAMP.length - 1, Math.floor(v / hmax * (RAMP.length - 0.001)))] : '#12150E';
+      heatCells.push({ x: PL + h * (CW + GAP), y: PT + d * (CH + GAP), fill });
+    }
+    const heatW = PL + 24 * (CW + GAP), heatH = PT + 7 * (CH + GAP);
+    const heatLabels = DAYS.map((name, d) => React.createElement('text', { key: 'd' + d, x: PL - 8, y: PT + d * (CH + GAP) + CH - 4, textAnchor: 'end', style: { fill: '#6F7767', font: "400 10px 'Spline Sans Mono', monospace" } }, name))
+      .concat([0, 6, 12, 18].map(h => React.createElement('text', { key: 'h' + h, x: PL + h * (CW + GAP), y: PT - 6, style: { fill: '#6F7767', font: "400 10px 'Spline Sans Mono', monospace" } }, h + ':00')));
+    const rl = {
+      rings: [
+        { label: 'Capacity used', sub: '67 / 160 rpm', pct: '42%', color: '#A7D65A', dash: ring(0.42) },
+        { label: 'Success rate', sub: '99.2% ok', pct: '99%', color: '#76B900', dash: ring(0.992) },
+      ],
+      kpis: [
+        { label: 'Requests', value: '18.4K', unit: '' }, { label: 'Requests/min', value: '40', unit: '' },
+        { label: 'Active now', value: '12', unit: '' }, { label: 'Queued', value: '3', unit: '' },
+        { label: 'Avg queue wait', value: '310', unit: 'ms' }, { label: 'Avg upstream', value: '780', unit: 'ms' },
+      ],
+      reqD: relReq.d, reqArea: relReq.area, reqGrid: relReqGrid, reqEx: relReq.ex, reqEy: relReq.ey, reqLabels: mkLabels(relReqGrid, 517, '#6F7767', 'end'),
+      outGrid: outChart.grid, outLabels: outChart.labels, outSeries: outChart.series, outLegend: outcomeDefs,
+      loadGrid: loadChart.grid, loadLabels: loadChart.labels, loadSeries: loadChart.series, loadLegend: loadDefs,
+      qwGrid: qwChart.grid, qwLabels: qwChart.labels, qwSeries: qwChart.series,
+      heatCells, heatW, heatH, heatLabels, cw: CW, ch: CH,
+      outcomeCols: [{ label: 'Reason', align: 'left', kind: 'str' }, { label: 'Count' }, { label: 'Share' }],
+      outcomeRows: [
+        ['Client disconnected', 4, 2.0], ['HTTP 422', 4, 2.0], ['Bad request (400)', 2, 1.0], ['Stream stalled', 1, 0.5],
+        ['Rate limited (429)', 1, 0.5],
+      ].map(([r, n, s]) => ({ vals: [r, n, s], cells: [{ t: r, c: '#C6CDBB', align: 'left' }, { t: String(n), c: '#C6CDBB' }, { t: s.toFixed(1) + '%', c: '#9BA391' }] })),
+      reliability: [
+        { label: 'Active now', val: '12', color: '#F0F2EC' }, { label: 'Queued', val: '3', color: '#F0F2EC' },
+        { label: 'Shed (overload 503)', val: '0', color: '#6F7767' }, { label: 'Rate-limit benches (429)', val: '6', color: '#D9C25A' },
+        { label: 'Other benches (5xx)', val: '0', color: '#6F7767' }, { label: 'Unauthorized (401)', val: '0', color: '#6F7767' }, { label: 'Failed logins', val: '0', color: '#6F7767' },
+      ],
+      reqtypes: [
+        { label: 'Streaming', val: '18.2K (99%)', color: '#F0F2EC' }, { label: 'Buffered', val: '0.2K (1%)', color: '#F0F2EC' },
+        { label: 'Tool-offering', val: '1.3K (7%)', color: '#F0F2EC' }, { label: 'JSON mode', val: '204', color: '#F0F2EC' }, { label: 'Tool choice', val: 'auto 1.3K', color: '#9BA391' },
+      ],
+      clientCols: [{ label: 'Client', align: 'left', kind: 'str' }, { label: 'Requests' }, { label: 'Tokens in' }, { label: 'Tokens out' }, { label: 'Saved' }],
+      clientRows: clientsArr.map(c => ({
+        vals: [c.name, c.req, Math.round(c.tok * 0.15), c.tok, c.saved],
+        cells: [{ t: c.name, c: '#F0F2EC', align: 'left', chip: true, chipColor: c.chip }, { t: fmt(c.req), c: '#C6CDBB' }, { t: fmt(Math.round(c.tok * 0.15)), c: '#C6CDBB' }, { t: fmt(c.tok), c: '#C6CDBB' }, { t: money(c.saved), c: '#A7D65A' }],
+      })),
+    };
+
+    /* reliability hero: availability, latency composition, load, error taxonomy */
+    rl.avail = '99.94%'; rl.slo = 'SLO 99.9% · met'; rl.budgetUsed = '38%';
+    rl.errRate = '0.8%';
+    { const segs = [{ label: 'Queue wait', ms: 310, color: '#D9A521' }, { label: 'Upstream', ms: 780, color: '#4D6BFE' }, { label: 'Generation', ms: 1610, color: '#76B900' }];
+      const tot = segs.reduce((a, s) => a + s.ms, 0);
+      rl.latTotal = (tot / 1000).toFixed(1) + ' s';
+      rl.latSegs = segs.map(s => ({ label: s.label, color: s.color, w: (s.ms / tot * 100).toFixed(1) + '%', val: s.ms >= 1000 ? (s.ms / 1000).toFixed(1) + ' s' : s.ms + ' ms' })); }
+    { const e = [{ label: 'Rate-limit', v: 6, color: '#D9A521' }, { label: 'Disconnect', v: 4, color: '#4D6BFE' }, { label: 'Timeout', v: 4, color: '#E36868' }, { label: '5xx', v: 1, color: '#C15F3C' }];
+      const t = e.reduce((a, x) => a + x.v, 0) || 1; rl.errSegs = e.map(x => ({ label: x.label, color: x.color, w: (x.v / t * 100) + '%', v: x.v })); }
+    rl.activeNow = '12'; rl.queuedNow = '3';
+    { const a = 12, q = 3; rl.actW = (a / (a + q) * 100) + '%'; rl.queW = (q / (a + q) * 100) + '%'; }
+
+    /* ---------- CAPACITY ---------- */
+    const LANEN = 4, laneCap = 40;
+    const lanesArr = Array.from({ length: LANEN }, (_, i) => {
+      const r = seeded(8000 + i * 17);
+      const req = Math.round(90 + r() * 30), last60 = Math.round(r() * 34), b429 = Math.round(18 + r() * 14), bOther = i === 2 ? 1 : 0;
+      const util = Math.min(1, last60 / laneCap);
+      return { name: 'Key ' + (i + 1), chip: SLOTS_COLORS[i % 6] || '#76B900', req, last60, b429, bOther, util };
+    });
+    const laneTotal = lanesArr.reduce((a, l) => a + l.req, 0) || 1;
+    const benchDefs = lanesArr.map((l, i) => ({ name: l.name, color: l.chip, pts: mkSeries(8100 + i * 7, 1.2, 1.2, N) }));
+    const benchChart = chart(benchDefs, 520, 150, fmt, 40);
+    const cap = {
+      kpis: [
+        { label: 'Key lanes', value: String(LANEN), unit: '' }, { label: 'Aggregate capacity', value: fmt(LANEN * laneCap), unit: 'rpm' },
+        { label: 'Rate-limit hits (429)', value: fmt(lanesArr.reduce((a, l) => a + l.b429, 0)), unit: '' }, { label: 'Other benches', value: '1', unit: '' },
+        { label: 'Conversation stickiness', value: '81%', unit: '' }, { label: 'Headroom now', value: '93', unit: 'rpm' }, { label: 'Keys for peak', value: '5', unit: '' },
+      ],
+      meters: lanesArr.map(l => ({ name: l.name, chip: l.chip, w: Math.round(l.util * 100) + '%', val: Math.round(l.util * 100) + '%' })),
+      benchGrid: benchChart.grid, benchLabels: benchChart.labels, benchSeries: benchChart.series, benchLegend: benchDefs,
+      cols: [{ label: 'Lane', align: 'left', kind: 'str' }, { label: 'Requests' }, { label: 'Share' }, { label: 'Last 60s' }, { label: '429s' }, { label: 'Other benches' }],
+      rows: lanesArr.map(l => ({
+        vals: [l.name, l.req, l.req / laneTotal, l.last60, l.b429, l.bOther],
+        cells: [
+          { t: l.name, c: '#F0F2EC', align: 'left', chip: true, chipColor: l.chip }, { t: fmt(l.req), c: '#C6CDBB' },
+          { t: Math.round(l.req / laneTotal * 100) + '%', c: '#C6CDBB' }, { t: l.last60 + ' / ' + laneCap, c: '#C6CDBB' },
+          { t: fmt(l.b429), c: '#D9C25A' }, { t: fmt(l.bOther), c: l.bOther ? '#D98A5A' : '#5A6150' },
+        ],
+      })),
+    };
+
+    /* capacity hero: saturation, provisioning, rate-limit pressure */
+    { const cur = 67, peak = 118, capR = 160; cap.satPct = Math.round(cur / capR * 100) + '%'; cap.curLabel = cur + ' / ' + capR + ' rpm';
+      cap.headroom = (capR - cur) + ' rpm free'; cap.curW = (cur / capR * 100) + '%'; cap.peakW = (peak / capR * 100) + '%'; cap.peakLabel = 'peak ' + peak; }
+    cap.keysHave = '4'; cap.keysNeed = '5'; cap.provUnder = true; cap.pressure429 = '98'; cap.stickiness = '81%'; cap.laneCount = '4';
+
+    const fmtTps = v => fmt(v) + ' tok/s';
+    ov.trafficSeries = [{ name: 'req/min', color: '#A7D65A', pts: reqs, area: true }];
+    rl.reqSeries = [{ name: 'requests', color: '#A7D65A', pts: reqs, area: true }];
+    rl.outSeries3 = outcomeDefs; rl.loadSeries3 = loadDefs; rl.qwSeries3 = qwDefs;
+    cap.benchSeries3 = benchDefs; md.tputSeries = md.tput;
+
+    return {
+      tab, setTab, nav, ranges, title: titles[tab],
+      isOverview: tab === 'overview', isModels: tab === 'models',
+      isClients: tab === 'clients', isReliability: tab === 'reliability', isCapacity: tab === 'capacity',
+      fmtNum: fmt, fmtSecs: secs, fmtTps,
+      ov, md, cl, rl, cap,
+    };
+  }
+}
+</script>
+</body>
+</html>

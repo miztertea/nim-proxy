@@ -7,12 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Redesigned dashboard**: a dark, NVIDIA-green "operator console" — left
+  sidebar nav (collapses to an icon rail below 860px), top bar with range
+  pills, Space Grotesk + Spline Sans Mono webfonts. Five persona-aligned tabs
+  (`Overview · Models · Clients · Reliability · Capacity`), richer KPI cards
+  with trend delta chips and sparklines, ring gauges, and a Reliability hero
+  (availability vs a 99.9% SLO, a "where time goes" latency breakdown) and a
+  Capacity hero (saturation bar, keys-for-peak provisioning chip). Every line
+  chart now has a hover crosshair with a per-series tooltip, and every table
+  is click-to-sort with a sticky header and internal scroll — sort order and
+  scroll position both survive the 3s live refresh. See
+  `knowledge/decisions/dashboard-operator-console-redesign.md`.
+
 ### Changed
 
 - `docker compose up` now runs the published `ghcr.io/miztertea/nim-proxy:latest`
   image instead of building from source; source builds move to an explicit dev
   override (`docker-compose.dev.yml`, tagged `nim-proxy:dev`). README,
   CONTRIBUTING, and the deploy runbook updated to match.
+- **CSP** now allows the dashboard's webfonts: `style-src` gained
+  `https://fonts.googleapis.com`, and a new `font-src` allows
+  `https://fonts.gstatic.com`. Falls back to system fonts if the CDN is
+  unreachable.
+
+### Removed
+
+- **Light mode.** The dashboard is dark-only now; the light palette and
+  `prefers-color-scheme` handling were deleted as a committed design choice.
+- **The Compare tab** — its head-to-head scorecard and generation-speed bar
+  race are now a section of the Models tab.
+- **The heatmap's table-view toggle** — not part of the redesign; the heatmap
+  keeps its per-cell hover tooltips.
 
 ## [0.5.0] - 2026-07-03
 
