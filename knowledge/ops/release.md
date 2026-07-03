@@ -59,6 +59,19 @@ Prefer roll-forward: fix on a branch, merge, tag the next patch version. Don't
 retag or force-move a published tag — the image, signature, and provenance are
 already public under the old digest.
 
+Exception: if the workflow failed **before the GitHub Release was published**
+(nothing user-facing exists yet beyond image tags), merging the fix and
+re-pushing the same tag at the fixed commit is acceptable — a re-run of the
+failed run won't help, because re-runs use the workflow file snapshot from the
+original (broken) commit:
+
+```sh
+git push origin :refs/tags/vX.Y.Z          # delete the remote tag
+git fetch origin main
+git tag -fa vX.Y.Z -m "nim-proxy X.Y.Z" origin/main
+git push origin vX.Y.Z
+```
+
 ## One-time repo settings (already done; recorded for reference)
 
 - **Private vulnerability reporting** enabled (Settings → Code security) —

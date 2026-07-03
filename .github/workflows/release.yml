@@ -75,6 +75,9 @@ jobs:
           push-to-registry: true
       # Extract the exact static binaries we just shipped (no separate cross
       # toolchain): create — not run — a container per arch and copy /nim-proxy.
+      # The classic image store maps a digest ref to one platform at a time, so
+      # untag between arches or the second pull fails with "cannot overwrite
+      # digest".
       - name: Extract release binaries
         run: |
           set -euo pipefail
@@ -82,6 +85,7 @@ jobs:
             cid=$(docker create --platform "linux/$arch" "${IMAGE}@${{ steps.build.outputs.digest }}")
             docker cp "$cid:/nim-proxy" "nim-proxy-$arch"
             docker rm "$cid" >/dev/null
+            docker rmi "${IMAGE}@${{ steps.build.outputs.digest }}" >/dev/null
             tar -czf "nim-proxy-${{ steps.meta.outputs.version }}-linux-$arch.tar.gz" "nim-proxy-$arch"
             rm "nim-proxy-$arch"
           done
