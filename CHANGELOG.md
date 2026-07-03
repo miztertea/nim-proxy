@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `docker compose up` now runs the published `ghcr.io/miztertea/nim-proxy:latest`
+  image instead of building from source; source builds move to an explicit dev
+  override (`docker-compose.dev.yml`, tagged `nim-proxy:dev`). README,
+  CONTRIBUTING, and the deploy runbook updated to match.
+
 ## [0.5.0] - 2026-07-03
 
 First public release: the repository is now public, and this tag publishes the
