@@ -1907,12 +1907,13 @@ function renderUsers() {
       <div class="kmeta">${+u.nim_keys} NIM · ${+u.client_keys} client</div>
     </div>
     <span class="rbadge ${RCLS[u.role] || 'user'}" style="margin-left:auto">${esc(String(u.role).toUpperCase())}</span>
-    <button class="gbtn" data-urp="${i}">Reset password</button>
-    ${u.role !== 'superuser' ? `<select class="sin" data-urole="${i}" title="Role">
+    ${u.role !== 'superuser' ? `<button class="gbtn" data-urp="${i}">Reset password</button>
+      <select class="sin" data-urole="${i}" title="Role">
         <option value="admin"${u.role === 'admin' ? ' selected' : ''}>admin</option>
         <option value="user"${u.role === 'user' ? ' selected' : ''}>user</option>
       </select>
-      <button class="dbtn" data-udel="${i}">Delete</button>` : ''}
+      <button class="dbtn" data-udel="${i}">Delete</button>`
+      : `<span class="note" title="The superuser changes its own password in Account settings">self-managed</span>`}
   </div>`).join('');
   $('setbody').innerHTML = `<div class="card">
     <h2>Users <span class="note">deleting a user pulls their NIM keys from the pool &amp; stops their harnesses</span></h2>
