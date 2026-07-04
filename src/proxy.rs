@@ -441,6 +441,15 @@ pub async fn handle(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // Fail closed until first-time setup completes: nothing proxies, and the
+    // error tells the operator exactly why.
+    if state
+        .setup_required
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return crate::auth::setup_required_json();
+    }
+
     // One consistent config view for this request's whole lifetime; a
     // concurrent settings save affects only requests that arrive after it.
     let cfg = state.cfg();
@@ -464,9 +473,9 @@ pub async fn handle(
         return overloaded(cfg.max_inflight);
     }
 
-    // Client auth: local mode (no configured keys) admits everyone as
-    // "local"; otherwise the Bearer token must match a configured key.
-    // The match is constant-time to avoid leaking a valid key byte-by-byte.
+    // Client auth: open mode admits everyone as "local"; keyed mode hashes
+    // the presented bearer and compares against the stored SHA-256 digests
+    // (the store never holds a usable token). Comparisons are constant-time.
     let client = match &cfg.clients {
         None => "local".to_owned(),
         Some(clients) => {
@@ -475,9 +484,10 @@ pub async fn handle(
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("Bearer "))
                 .unwrap_or("");
+            let digest = crate::auth::sha256_hex(token);
             let mut matched = None;
-            for (secret, name) in clients {
-                if crate::auth::ct_eq(token, secret) {
+            for (stored_digest, name) in clients {
+                if crate::auth::ct_eq(&digest, stored_digest) {
                     matched = Some(name.clone());
                 }
             }

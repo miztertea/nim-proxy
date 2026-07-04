@@ -1,9 +1,11 @@
 mod auth;
+mod config;
 mod dispatch;
 mod governor;
 mod history;
 mod pool;
 mod proxy;
+mod settings;
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
@@ -68,6 +70,14 @@ impl Default for GovernorSettings {
 pub struct AppState {
     /// Current config snapshot; read via [`AppState::cfg`], swapped whole.
     pub cfg: RwLock<Arc<Config>>,
+    /// The persisted store of truth. Its mutex doubles as the save-mutex:
+    /// settings writes hold it across build → validate → persist → swap.
+    pub store: std::sync::Mutex<config::StoredConfig>,
+    /// Where the store lives (DATA_DIR).
+    pub data_dir: std::path::PathBuf,
+    /// True until a superuser exists: the wizard is open, everything else
+    /// is closed (dashboard redirects to /setup, /v1 answers 503).
+    pub setup_required: std::sync::atomic::AtomicBool,
     /// Current key pool; the dispatcher reads it per grant, settings swap it.
     pub pool: PoolHandle,
     pub dispatch: Dispatcher,
@@ -77,7 +87,7 @@ pub struct AppState {
     pub no_inject: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Distinct sanitized model labels seen (bounds metric cardinality).
     pub model_labels: std::sync::Mutex<std::collections::HashSet<String>>,
-    /// Admin gate for the dashboard + observability endpoints.
+    /// Session + throttle machinery for the operator surface.
     pub admin: Admin,
     /// Requests currently in flight; capped to bound memory under floods.
     pub inflight: AtomicUsize,
@@ -103,6 +113,41 @@ impl AppState {
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
+}
+
+/// App-level settings moved from env into the UI-managed store (v0.6.0).
+/// Ignore — but call out — any that are still set, so a stale .env can't
+/// silently mislead an operator.
+fn warn_legacy_env() {
+    const LEGACY: &[&str] = &[
+        "NIM_API_KEYS",
+        "NIM_BASE_URL",
+        "RPM_PER_KEY",
+        "PROXY_API_KEYS",
+        "ADMIN_PASSWORD",
+        "INSECURE_NO_AUTH",
+        "MAX_WAIT_SECS",
+        "HEARTBEAT_SECS",
+        "MODELS_TTL_SECS",
+        "STREAM_IDLE_SECS",
+        "REQUEST_TIMEOUT_SECS",
+        "STRICT_PASSTHROUGH",
+        "REF_PRICE_IN",
+        "REF_PRICE_OUT",
+        "HISTORY_DAYS",
+        "MAX_INFLIGHT",
+    ];
+    let set: Vec<&str> = LEGACY
+        .iter()
+        .copied()
+        .filter(|v| std::env::var_os(v).is_some())
+        .collect();
+    if !set.is_empty() {
+        tracing::warn!(
+            "ignoring legacy env vars ({}) — these settings live in the dashboard now",
+            set.join(", ")
+        );
+    }
 }
 
 fn unix_now() -> u64 {
@@ -221,136 +266,68 @@ async fn main() {
         )
         .init();
 
-    let keys: Vec<String> = env_or("NIM_API_KEYS", "")
-        .split(',')
-        .map(|k| k.trim().to_owned())
-        .filter(|k| !k.is_empty())
-        .collect();
-    if keys.is_empty() {
-        eprintln!("NIM_API_KEYS is required (comma-separated nvapi-... keys)");
+    let trust_proxy = env_or("TRUST_PROXY", "false") == "true";
+    warn_legacy_env();
+
+    // The config store is the app's source of truth and holds credentials,
+    // so its home must exist and be writable before anything else happens.
+    let data_dir = std::path::PathBuf::from(env_or("DATA_DIR", "data"));
+    if data_dir.as_os_str().is_empty() {
+        eprintln!("DATA_DIR must point at a writable directory (the config store lives there)");
         std::process::exit(1);
     }
-
-    // PROXY_API_KEYS entries gate /v1/*. Any key works; an optional
-    // "name:secret" form labels that client in metrics, a bare secret is
-    // auto-labeled. Empty = no API keys configured.
-    let clients: Option<HashMap<String, String>> = {
-        let entries: Vec<(String, String)> = env_or("PROXY_API_KEYS", "")
-            .split(',')
-            .map(str::trim)
-            .filter(|e| !e.is_empty())
-            .enumerate()
-            .map(|(i, e)| match e.split_once(':') {
-                Some((name, secret)) => (secret.trim().to_owned(), name.trim().to_owned()),
-                None => (e.to_owned(), format!("client{i}")),
-            })
-            .collect();
-        (!entries.is_empty()).then(|| entries.into_iter().collect())
-    };
-
-    // Admin password gates the dashboard + observability endpoints.
-    let admin_password = {
-        let p = env_or("ADMIN_PASSWORD", "");
-        (!p.is_empty()).then_some(p)
-    };
-    let insecure = env_or("INSECURE_NO_AUTH", "false") == "true";
-    let trust_proxy = env_or("TRUST_PROXY", "false") == "true";
-
-    // Fail closed: refuse to start exposed without auth. Secure mode requires
-    // both an API key and an admin password; the only way to run fully open is
-    // to opt in explicitly (loopback / firewalled deployments).
-    let secure_mode = clients.is_some() && admin_password.is_some();
-    if !(insecure || secure_mode) {
+    let writable = std::fs::create_dir_all(&data_dir).and_then(|()| {
+        let probe = data_dir.join(".write-probe");
+        std::fs::write(&probe, b"ok")?;
+        std::fs::remove_file(&probe)
+    });
+    if let Err(e) = writable {
         eprintln!(
-            "\nnim-proxy refuses to start without authentication.\n\n\
-             Choose one:\n  \
-             1. Secure mode  — set BOTH:\n       \
-             PROXY_API_KEYS=<one-or-more-secrets>   (gates the API)\n       \
-             ADMIN_PASSWORD=<password>              (gates the dashboard/metrics)\n  \
-             2. Open mode    — set INSECURE_NO_AUTH=true\n       \
-             (ONLY on localhost or behind a firewall/VPN; everything is unauthenticated)\n\n\
-             Currently set: PROXY_API_KEYS={}, ADMIN_PASSWORD={}\n",
-            if clients.is_some() { "yes" } else { "no" },
-            if admin_password.is_some() {
-                "yes"
-            } else {
-                "no"
-            },
+            "\nnim-proxy cannot start: DATA_DIR {} is not writable ({e}).\n\
+             The config store (settings, users, keys) persists there.\n",
+            data_dir.display()
         );
         std::process::exit(1);
     }
-
-    let rpm: usize = env_or("RPM_PER_KEY", "40").parse().expect("RPM_PER_KEY");
-    if rpm == 0 {
-        eprintln!("RPM_PER_KEY must be >= 1 (0 would stall every lane).");
-        std::process::exit(1);
-    }
-    let max_inflight: usize = env_or("MAX_INFLIGHT", "512").parse().expect("MAX_INFLIGHT");
-    let cfg = Config {
-        base_url: env_or("NIM_BASE_URL", "https://integrate.api.nvidia.com")
-            .trim_end_matches('/')
-            .to_owned(),
-        max_wait: Duration::from_secs(
-            env_or("MAX_WAIT_SECS", "900")
-                .parse()
-                .expect("MAX_WAIT_SECS"),
-        ),
-        heartbeat: Duration::from_secs(
-            env_or("HEARTBEAT_SECS", "10")
-                .parse()
-                .expect("HEARTBEAT_SECS"),
-        ),
-        models_ttl: Duration::from_secs(
-            env_or("MODELS_TTL_SECS", "600")
-                .parse()
-                .expect("MODELS_TTL_SECS"),
-        ),
-        stream_idle: Duration::from_secs(
-            env_or("STREAM_IDLE_SECS", "300")
-                .parse()
-                .expect("STREAM_IDLE_SECS"),
-        ),
-        request_timeout: Duration::from_secs(
-            env_or("REQUEST_TIMEOUT_SECS", "300")
-                .parse()
-                .expect("REQUEST_TIMEOUT_SECS"),
-        ),
-        strict_passthrough: env_or("STRICT_PASSTHROUGH", "false")
-            .parse()
-            .expect("STRICT_PASSTHROUGH"),
-        price_in: env_or("REF_PRICE_IN", "0.5").parse().expect("REF_PRICE_IN"),
-        price_out: env_or("REF_PRICE_OUT", "2.0")
-            .parse()
-            .expect("REF_PRICE_OUT"),
-        clients,
-        max_inflight,
-        governor: GovernorSettings::default(),
+    let stored = match config::load(&data_dir) {
+        Ok(Some(sc)) => sc,
+        Ok(None) => config::StoredConfig::default(),
+        Err(e) => {
+            eprintln!("\nnim-proxy cannot start: {e}\n");
+            std::process::exit(1);
+        }
     };
+    let setup_required = stored.superuser().is_none();
+    let cfg = stored.runtime();
     let port: u16 = env_or("PORT", "8000").parse().expect("PORT");
 
-    tracing::info!("upstream          {}", cfg.base_url);
-    tracing::info!(
-        "lanes             {} keys x {} rpm = {} rpm aggregate",
-        keys.len(),
-        rpm,
-        keys.len() * rpm
-    );
-    if insecure {
-        tracing::warn!("INSECURE_NO_AUTH=true — API and dashboard are UNAUTHENTICATED. Use only on localhost or behind a firewall.");
+    if setup_required {
+        tracing::warn!(
+            "SETUP REQUIRED — no superuser exists yet. The FIRST VISITOR to the dashboard \
+             claims this proxy; finish setup immediately. /v1 stays closed until then."
+        );
     }
+    tracing::info!("config store      {}", config::store_path(&data_dir).display());
+    tracing::info!("upstream          {}", cfg.base_url);
+    let pool_keys = stored.pool_keys();
+    tracing::info!(
+        "lanes             {} enabled key(s), {} rpm aggregate",
+        pool_keys.len(),
+        pool_keys.iter().map(|(_, rpm)| rpm).sum::<usize>()
+    );
     tracing::info!(
         "API auth          {}",
         match &cfg.clients {
-            Some(c) => format!("required ({} key(s))", c.len()),
-            None => "OFF (no PROXY_API_KEYS)".to_owned(),
+            Some(c) => format!("keyed ({} client key(s))", c.len()),
+            None => "open (no client keys required — keep this on a trusted network)".to_owned(),
         }
     );
     tracing::info!(
         "dashboard auth    {}",
-        if admin_password.is_some() {
-            "required (ADMIN_PASSWORD)"
+        if setup_required {
+            "setup wizard (no users yet)".to_owned()
         } else {
-            "OFF"
+            format!("session ({} user(s))", stored.users.len())
         }
     );
     tracing::info!(
@@ -380,13 +357,11 @@ async fn main() {
     }
     let prometheus = builder.install_recorder().expect("prometheus recorder");
 
-    // Metrics history: 5-minute snapshots, HISTORY_DAYS retention (0 = keep
-    // forever), persisted to DATA_DIR when writable.
-    let history_days: u64 = env_or("HISTORY_DAYS", "30").parse().expect("HISTORY_DAYS");
-    let data_dir = env_or("DATA_DIR", "data");
+    // Metrics history: 5-minute snapshots, store-configured retention,
+    // persisted next to the config store.
     let hist = Arc::new(history::History::load(
-        (!data_dir.is_empty()).then(|| data_dir.into()),
-        history_days,
+        Some(data_dir.clone()),
+        stored.history.days,
     ));
     {
         let hist = hist.clone();
@@ -403,9 +378,7 @@ async fn main() {
         });
     }
 
-    let pool: PoolHandle = Arc::new(RwLock::new(Arc::new(Pool::new(
-        keys.into_iter().map(|k| (k, rpm)).collect(),
-    ))));
+    let pool: PoolHandle = Arc::new(RwLock::new(Arc::new(Pool::new(pool_keys))));
     let state = Arc::new(AppState {
         dispatch: Dispatcher::new(pool.clone()),
         pool,
@@ -417,11 +390,14 @@ async fn main() {
         models_cache: Mutex::new(None),
         no_inject: std::sync::Mutex::new(std::collections::HashSet::new()),
         model_labels: std::sync::Mutex::new(std::collections::HashSet::new()),
-        admin: Admin::new(admin_password, trust_proxy),
+        admin: Admin::new(trust_proxy),
         inflight: AtomicUsize::new(0),
         governor: Arc::new(governor::Governor::default()),
         history: hist,
         started: unix_now(),
+        store: std::sync::Mutex::new(stored),
+        data_dir,
+        setup_required: std::sync::atomic::AtomicBool::new(setup_required),
         cfg: RwLock::new(Arc::new(cfg)),
     });
 
@@ -431,9 +407,10 @@ async fn main() {
             include_str!("dashboard.html"),
         )
     };
-    // Admin-gated surface: dashboard, config, history, metrics. The guard
-    // middleware passes a valid session cookie / Bearer / Basic, else it
-    // redirects browsers to /login and 401s API clients.
+    // Session-gated surface: dashboard, config, history, metrics. The guard
+    // middleware requires an authenticated user (session cookie, or
+    // user:password header credentials for scrapers); pre-setup it routes
+    // everything to the wizard.
     let protected = Router::new()
         .route("/", get(dash))
         .route("/dash", get(dash))
@@ -442,15 +419,21 @@ async fn main() {
         .route("/metrics", get(move || async move { prometheus.render() }))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            auth::require_admin,
+            auth::require_session,
         ));
 
-    // Public surface: health probe, login flow, and the API (its own key gate).
+    // Public surface: health probe, login flow, the first-run wizard (404
+    // once setup completes), and the API (its own key gate + setup gate).
     let app = Router::new()
         .merge(protected)
         .route("/health", get(|| async { "ok" }))
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))
+        .route(
+            "/setup",
+            get(settings::setup_page).post(settings::setup_submit),
+        )
+        .route("/setup/validate-key", post(settings::setup_validate_key))
         .route("/v1/{*path}", any(proxy::handle))
         .layer(axum::middleware::from_fn(security_headers))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))

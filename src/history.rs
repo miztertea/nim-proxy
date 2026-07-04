@@ -71,6 +71,11 @@ impl History {
         }
     }
 
+    /// Retune retention live (settings-driven); applies on the next append.
+    pub fn set_days(&self, days: u64) {
+        self.days.store(days, Ordering::Relaxed);
+    }
+
     pub fn append(&self, t: u64, snapshot: String) {
         let mut points = self.points.lock().unwrap();
         let days = self.days.load(Ordering::Relaxed);
