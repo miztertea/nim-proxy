@@ -120,7 +120,10 @@ claim window (see below).
 A fresh install has no superuser, so `setup_required` is true: `/health` stays
 public, `/v1/*` answers `503 {"code":"setup_required"}` (fail-closed — nothing
 proxies), and browsers land on `/setup`, a wizard whose single atomic POST
-creates the superuser, records ≥1 validated NIM key, and mints a session. The
+creates the superuser, records ≥1 validated NIM key, mints a session, and (by
+default — a checked box with an explicit warning when opted out, since keyed
+mode with zero client keys rejects every `/v1` call) mints the first client
+key, returned once in the response so onboarding ends connected. The
 window between first boot and completing that wizard is claimable by whoever
 reaches it first. **Accepted** — it matches Grafana / Portainer first-run: the
 data plane is closed pre-setup, compose binds loopback, and boot logs a loud

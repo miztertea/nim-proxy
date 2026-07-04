@@ -17,9 +17,11 @@ docker logs nim-proxy-nim-proxy-1
 
 Then open `http://localhost:8000/` — a fresh install shows the **first-run
 wizard**: create the superuser account, add ≥1 NIM key (validated against the
-upstream), finish → you land on the dashboard, logged in. No keys or passwords
-go in `.env` anymore; everything app-level is configured in the UI and stored
-in `DATA_DIR/config.json` ([config store](../decisions/ui-managed-config-store.md)).
+upstream), finish. By default the wizard also mints your first client key
+(`npk_…`, shown once on the closing connect panel) so harnesses can call `/v1`
+immediately. No keys or passwords go in `.env`; everything app-level is
+configured in the UI and stored in `DATA_DIR/config.json`
+([config store](../decisions/ui-managed-config-store.md)).
 
 To build from source instead (development):
 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`

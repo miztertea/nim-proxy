@@ -26,7 +26,11 @@ true:
   ≥1 NIM key with per-key rpm, validated live against the upstream via
   `POST /setup/validate-key` → review & finish). **One atomic POST** creates the
   superuser, records the keys, persists, and mints a session — no
-  half-configured state, nothing to clean up on abandonment.
+  half-configured state, nothing to clean up on abandonment. By default the
+  claim also mints a first **client key** (`create_client_key` in the POST; the
+  wizard's checkbox is on, with an explicit warning when opted out) and the
+  response carries the `npk_` secret exactly once, so a fresh keyed-mode proxy
+  serves `/v1` with no Settings detour.
 
 Post-setup the setup routes 404 (gated on the AtomicBool). Boot logs a loud
 `SETUP REQUIRED — the FIRST VISITOR becomes the superuser` line — the claim

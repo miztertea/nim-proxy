@@ -68,6 +68,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scroll position both survive the 3s live refresh. See
   `knowledge/decisions/dashboard-operator-console-redesign.md`.
 
+- **The wizard mints your first client key**: setup ends on a connect panel
+  with the client base URL and a once-only `npk_` secret, so a fresh
+  keyed-mode proxy serves `/v1` with no Settings detour. On by default;
+  opting out shows an explicit warning (keyed with zero keys rejects every
+  `/v1` call until a key exists).
+- **New dashboard charts** for signals that were collected but never drawn:
+  requests-by-outcome over time (Reliability), requested output budget per
+  harness from `nimproxy_request_max_tokens` (Clients), and tool-call volume
+  per model from `nimproxy_tool_calls_total` (Models).
+
+### Fixed
+
+- **Streaming requests now count against `max_inflight` for their whole
+  lifetime.** The in-flight guard previously dropped when the response headers
+  were returned, so the cap only bounded buffered requests — a flood of live
+  streams could exceed it unbounded.
+- **Own-password change guards against a concurrent admin reset.** The change
+  commits only if the stored hash is still the one the current password was
+  verified against; a reset landing in the verify window now wins with a 409
+  instead of being silently overwritten by the stale change.
+
 ### Changed
 
 - **Env shrinks to 5 container-level vars** (`HOST`, `PORT`, `DATA_DIR`,
