@@ -1472,6 +1472,22 @@ async fn user_role_is_denied_server_settings_and_foreign_keys() {
             serde_json::json!({"add": {"username": "eve", "password": "long-enough-pw", "role": "user"}}),
         ),
         ("/api/settings/clients", serde_json::json!({"mode": "open"})),
+        (
+            "/api/settings/limits",
+            serde_json::json!({
+                "max_wait_secs": 60, "heartbeat_secs": 5, "models_ttl_secs": 600,
+                "stream_idle_secs": 300, "request_timeout_secs": 300,
+                "max_inflight": 512, "strict_passthrough": false
+            }),
+        ),
+        (
+            "/api/settings/pricing",
+            serde_json::json!({"ref_price_in": 1.0, "ref_price_out": 2.0}),
+        ),
+        (
+            "/api/settings/governor",
+            serde_json::json!({"enabled": false}),
+        ),
     ] {
         let (status, v) = post_json(&proxy, &alice, path, body).await;
         assert_eq!(status, 403, "{path} should be admin-only: {v}");
@@ -2015,4 +2031,181 @@ async fn setup_can_mint_a_first_client_key() {
         .await
         .unwrap();
     assert_eq!(no_key.status(), 401, "keyed mode still fails closed");
+}
+
+// ---------- settings-endpoint coverage backfill ----------
+
+/// A DATA_DIR whose path is blocked by a regular file is a hard boot error.
+/// (The write-probe posture; a chmod-based fixture would pass vacuously when
+/// the tests run as root.)
+#[tokio::test]
+async fn boot_refuses_an_unwritable_data_dir() {
+    let dir = scratch_data_dir();
+    std::fs::write(dir.join("blocker"), b"not a directory").unwrap();
+    expect_refuses_to_start(dir.join("blocker").join("data")).await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Governor settings write through the shared pipeline: they reflect in
+/// /api/config, out-of-range overrides are refused, and the state persists
+/// across a restart.
+#[tokio::test]
+async fn governor_settings_reflect_and_persist() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"set_override": {"model": "mock/model-a", "cap": 4}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["server"]["governor"]["overrides"]["mock/model-a"], 4);
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"set_override": {"model": "mock/model-a", "cap": 0}}),
+    )
+    .await;
+    assert_eq!(status, 400, "cap 0 must fail the rulebook: {v}");
+
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"enabled": false}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"remove_override": "mock/model-a"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let proxy = restart(proxy, &[]).await;
+    let root = support::login(&proxy).await;
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(
+        cfg["server"]["governor"]["enabled"], false,
+        "master toggle persisted across restart: {cfg}"
+    );
+    assert!(
+        cfg["server"]["governor"]["overrides"]
+            .as_object()
+            .unwrap()
+            .is_empty(),
+        "removed override stays gone: {cfg}"
+    );
+}
+
+/// Pricing and history retention save through the same pipeline and reflect
+/// in /api/config; a negative reference price is refused.
+#[tokio::test]
+async fn pricing_and_history_settings_reflect_in_api_config() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/pricing",
+        serde_json::json!({"ref_price_in": 1.25, "ref_price_out": 3.5}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/history",
+        serde_json::json!({"days": 7}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["server"]["pricing"]["ref_price_in"], 1.25);
+    assert_eq!(cfg["server"]["pricing"]["ref_price_out"], 3.5);
+    assert_eq!(cfg["server"]["history"]["days"], 7);
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/pricing",
+        serde_json::json!({"ref_price_in": -1.0, "ref_price_out": 3.5}),
+    )
+    .await;
+    assert_eq!(status, 400, "negative prices must be refused: {v}");
+}
+
+/// The limits endpoint enforces the shared rulebook (heartbeat < max_wait)
+/// and rejects partial bodies outright — omitted fields are never silently
+/// reset to defaults.
+#[tokio::test]
+async fn limits_validation_rejects_bad_bounds_and_partial_bodies() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/limits",
+        serde_json::json!({
+            "max_wait_secs": 5, "heartbeat_secs": 10, "models_ttl_secs": 600,
+            "stream_idle_secs": 300, "request_timeout_secs": 300,
+            "max_inflight": 512, "strict_passthrough": false
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("max_wait_secs"),
+        "the rulebook names the offending bound: {v}"
+    );
+
+    let partial = client()
+        .post(proxy.url("/api/settings/limits"))
+        .header("cookie", &root)
+        .json(&serde_json::json!({"max_wait_secs": 60}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        partial.status(),
+        422,
+        "a partial limits body is rejected, not defaulted"
+    );
+}
+
+/// The account endpoint enforces the same 10-character password floor the
+/// wizard and user-management do.
+#[tokio::test]
+async fn account_rejects_a_short_new_password() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/account",
+        serde_json::json!({"current_password": support::TEST_PASSWORD, "new_password": "short"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    assert_eq!(v["error"]["code"], "weak_password");
 }
