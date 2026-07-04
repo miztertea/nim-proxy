@@ -1,0 +1,45 @@
+name: CodeQL
+
+# Static analysis (SAST) for the Rust source. CodeQL's Rust support runs with
+# build-mode: none — the extractor parses source without a cargo build — so
+# the scan stays cheap. Findings land in Security → Code scanning; the weekly
+# cron re-scans unchanged code as new queries ship.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "31 6 * * 2" # weekly, Tuesday 06:31 UTC
+
+# Least privilege by default; the job opts into SARIF upload only.
+permissions:
+  contents: read
+
+# A new push to the same ref supersedes the running scan (but never cancel
+# main's post-merge runs).
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  analyze:
+    name: codeql (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload analysis results to code scanning
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        with:
+          languages: rust
+          build-mode: none
+      - uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        with:
+          category: "/language:rust"

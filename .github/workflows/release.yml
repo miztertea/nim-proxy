@@ -25,6 +25,16 @@ on:
 permissions:
   contents: read
 
+# One release at a time, never cancelled mid-flight: a cancelled run could
+# leave a signed manifest without its GitHub release, or a minted tag without
+# artifacts. A single global group (not per-ref) also serializes a dispatch
+# racing a tag push. Note GitHub keeps at most ONE pending run per group —
+# a third trigger replaces the queued one (re-run it manually if that ever
+# happens); it never cancels the run in progress.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   IMAGE: ghcr.io/${{ github.repository }}
 
@@ -43,16 +53,20 @@ jobs:
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        # credentials kept: this job pushes the minted v* tag
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 # zizmor: ignore[artipacked] credentials kept deliberately: this job pushes the minted v* tag
       - id: resolve
 
         name: Resolve version from Cargo.toml; mint the tag on dispatch
+        # Context values reach the script via env, never inline `${{ }}` in
+        # the run block (template-injection hygiene).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
               echo "::error::dispatch releases run from the default branch only (got $GITHUB_REF_NAME)"
               exit 1
             fi
@@ -191,11 +205,14 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           set -euo pipefail
+          # Each downloaded artifact file is named by its image digest hex.
+          refs=()
+          for d in *; do refs+=("${IMAGE}@sha256:${d}"); done
           docker buildx imagetools create \
             -t "${IMAGE}:${{ needs.prepare.outputs.version }}" \
             -t "${IMAGE}:${{ needs.prepare.outputs.minor }}" \
             -t "${IMAGE}:latest" \
-            $(printf "${IMAGE}@sha256:%s " *)
+            "${refs[@]}"
           digest=$(docker buildx imagetools inspect \
             "${IMAGE}:${{ needs.prepare.outputs.version }}" \
             --format '{{json .Manifest.Digest}}' | tr -d '"')

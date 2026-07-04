@@ -72,7 +72,11 @@ reasoning behind the current defenses is documented in the knowledge base:
   a full commit SHA (Dependabot keeps pins fresh); every CI/release job runs
   [`step-security/harden-runner`](https://github.com/step-security/harden-runner)
   egress monitoring; an [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/miztertea/nim-proxy)
-  workflow scores the posture weekly (badge in the README). Release images are
+  workflow scores the posture weekly (badge in the README). CodeQL scans the
+  Rust source on every change; the workflows themselves are linted by
+  `actionlint` + `zizmor` in CI; PRs that introduce a known-vulnerable crate
+  are blocked by dependency review; and a weekly scheduled `cargo-deny`
+  advisories run catches new RUSTSEC advisories between pushes. Release images are
   built on native runners from the repo Dockerfile, signed with keyless cosign,
   and published with SLSA build provenance and an SPDX SBOM — all anchored to
   the multi-arch manifest digest. `v*` release tags are protected by a ruleset

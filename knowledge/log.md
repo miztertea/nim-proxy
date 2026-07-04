@@ -6,6 +6,34 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — repo-rigor pass 1: SAST, workflow lint, dep review, scheduled audit
+
+Scorecard run #1 scored five checks at 0; the fixable ones drove this PR
+(Code-Review and Maintained are structural for a 2-day-old single-maintainer
+repo — accepted, time fixes them):
+
+- **CodeQL for Rust** (`codeql.yml`): GA since CodeQL 2.23.3 with
+  `build-mode: none`, so the scan needs no cargo build (~4–8 min). Fixes
+  SAST=0. clippy-SARIF-to-code-scanning was rejected — Scorecard's SAST check
+  doesn't recognize it.
+- **Workflow lint** (`lint-workflows` in ci.yml): `actionlint` always gates
+  (correctness); `zizmor` uploads all severities as SARIF and gates only on
+  high so new low-noise rules can't block unrelated PRs. actionlint isn't in
+  install-action's registry → pinned release binary, checksum-verified.
+  zizmor immediately paid for itself: it flagged a real template-injection
+  (`${{ github.event.repository.default_branch }}` inline in the release
+  prepare script) — now passed via `env`. The prepare checkout's kept
+  credentials carry an inline `zizmor: ignore[artipacked]` with reason.
+- **Dependency review** on PRs (vulnerabilities only; `license-check: false`
+  because deny.toml is the single license policy — ClearlyDefined's crate
+  data is spottier and would double-gate with drift).
+- **Weekly advisories run** (`audit.yml`): same cargo-deny + deny.toml as CI
+  (rustsec/audit-check rejected — second ignore-list format). Failure = red
+  scheduled run + GitHub's failure email.
+- **Release concurrency**: global `release` group, `cancel-in-progress:
+  false` — queue, never cancel a half-done signed release; also serializes a
+  dispatch racing a tag push.
+
 ## [2026-07-04] ingest — actions hardening + native-runner releases (v0.6.2+)
 
 Two follow-ups to the release automation, in the order they shipped:
