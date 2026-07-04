@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="position:relative; width:100%">
+  <svg viewBox="0 0 800 {{ H }}" width="100%" height="{{ H }}" preserveAspectRatio="none" onMouseMove="{{ onMove }}" onMouseLeave="{{ onLeave }}" style="display:block; cursor:crosshair">
+    <sc-for list="{{ grid }}" as="g" hint-placeholder-count="4"><line x1="0" y1="{{ g.y }}" x2="800" y2="{{ g.y }}" stroke="rgba(255,255,255,0.05)" stroke-width="1" vector-effect="non-scaling-stroke"></line></sc-for>
+    <sc-for list="{{ areas }}" as="a" hint-placeholder-count="1"><path d="{{ a.d }}" fill="{{ a.fill }}"></path></sc-for>
+    <sc-for list="{{ paths }}" as="p" hint-placeholder-count="3"><path d="{{ p.d }}" fill="none" stroke="{{ p.color }}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path></sc-for>
+    <sc-for list="{{ endDots }}" as="d" hint-placeholder-count="3"><circle cx="{{ d.x }}" cy="{{ d.y }}" r="3.5" fill="{{ d.color }}" stroke="#0B0D09" stroke-width="1.5"></circle></sc-for>
+    <sc-if value="{{ hoverActive }}" hint-placeholder-val="{{ false }}">
+      <line x1="{{ cx }}" y1="6" x2="{{ cx }}" y2="{{ crossBottom }}" stroke="rgba(255,255,255,0.28)" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+      <sc-for list="{{ hoverDots }}" as="d" hint-placeholder-count="3"><circle cx="{{ cx }}" cy="{{ d.y }}" r="4" fill="{{ d.color }}" stroke="#0B0D09" stroke-width="1.5"></circle></sc-for>
+    </sc-if>
+  </svg>
+  {{ labelEls }}
+  <sc-if value="{{ hoverActive }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; top:0; left:{{ tipLeft }}; transform:translateX({{ tipShift }}); pointer-events:none; background:#12150E; border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:7px 9px; box-shadow:0 6px 18px rgba(0,0,0,0.45); z-index:5; white-space:nowrap">
+      <div style="font:400 10px 'Spline Sans Mono', monospace; color:#6F7767; margin-bottom:4px">{{ tipHead }}</div>
+      <sc-for list="{{ tipRows }}" as="r" hint-placeholder-count="2">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; font-size:12px; padding:1px 0">
+          <span style="display:inline-flex; align-items:center; gap:6px; color:#C6CDBB"><span style="width:8px; height:8px; border-radius:2px; background:{{ r.color }}"></span>{{ r.name }}</span>
+          <span style="font:500 12px 'Spline Sans Mono', monospace; color:#F0F2EC; font-variant-numeric:tabular-nums">{{ r.val }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:520,&quot;height&quot;:180},&quot;series&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{name:string,color:string,pts:number[],area?:boolean,areaFill?:string}[]&quot;},&quot;fmt&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(n:number)=&gt;string&quot;},&quot;height&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:180},&quot;xLabels&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string[]&quot;}}">
+class Component extends DCLogic {
+  state = { hi: null };
+  renderVals() {
+    const series = this.props.series || [];
+    const H = this.props.height || 180;
+    const W = 800;
+    const fmt = this.props.fmt || (x => '' + Math.round(x));
+    const n = series.length && series[0].pts ? series[0].pts.length : 0;
+    let vmax = Math.max(1e-6, ...series.flatMap(s => s.pts || []));
+    if (vmax >= 0.5) { const step = Math.pow(10, Math.floor(Math.log10(vmax))); vmax = Math.ceil(vmax / (step / 2)) * (step / 2); }
+    const PT = 8, PB = 8;
+    const X = i => W * i / Math.max(1, n - 1);
+    const Y = v => PT + (H - PT - PB) * (1 - Math.min(v, vmax) / vmax);
+    const mkPath = pts => pts.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1)).join('');
+    const paths = series.map(s => ({ color: s.color, d: mkPath(s.pts) }));
+    const areas = series.filter(s => s.area).map(s => ({ fill: s.areaFill || 'rgba(118,185,0,0.10)', d: mkPath(s.pts) + 'L' + X(n - 1).toFixed(1) + ',' + (H - PB) + 'L0,' + (H - PB) + 'Z' }));
+    const endDots = series.map(s => ({ color: s.color, x: +X(n - 1).toFixed(1), y: +Y(s.pts[n - 1]).toFixed(1) }));
+    const gy = v => PT + (H - PT - PB) * (1 - v / vmax);
+    const grid = [0, 1, 2, 3].map(i => { const y = +gy(vmax * i / 3).toFixed(1); return { y, label: fmt(vmax * i / 3) }; });
+    const labelEls = grid.map((g, i) => React.createElement('div', {
+      key: i, style: { position: 'absolute', right: '3px', top: (g.y / H * 100) + '%', transform: 'translateY(-100%)', font: "400 10px 'Spline Sans Mono', monospace", color: '#6F7767', pointerEvents: 'none' },
+    }, g.label));
+
+    const onMove = e => {
+      const r = e.currentTarget.getBoundingClientRect();
+      const frac = (e.clientX - r.left) / r.width;
+      const i = Math.max(0, Math.min(n - 1, Math.round(frac * (n - 1))));
+      this.setState({ hi: i });
+    };
+    const onLeave = () => this.setState({ hi: null });
+
+    const hi = this.state.hi;
+    const hoverActive = hi != null && n > 0;
+    const cx = hoverActive ? +X(hi).toFixed(1) : 0;
+    const frac = hoverActive ? hi / Math.max(1, n - 1) : 0;
+    const hoverDots = hoverActive ? series.map(s => ({ color: s.color, y: +Y(s.pts[hi]).toFixed(1) })) : [];
+    const tipRows = hoverActive ? series.map(s => ({ name: s.name, color: s.color, val: fmt(s.pts[hi]) })) : [];
+    const tipHead = hoverActive && this.props.xLabels ? (this.props.xLabels[hi] || '') : (hoverActive ? (n - 1 - hi) + ' min ago' : '');
+
+    return {
+      H, grid, paths, areas, endDots, labelEls,
+      crossBottom: H - PB,
+      hoverActive, cx, hoverDots, tipRows, tipHead,
+      tipLeft: (frac * 100) + '%',
+      tipShift: frac > 0.7 ? '-100%' : frac < 0.3 ? '0%' : '-50%',
+      onMove, onLeave,
+    };
+  }
+}
+</script>
+</body>
+</html>
