@@ -44,10 +44,10 @@ jobs:
       # diagnostics), so no setup steps are cargo-culted here. The queries
       # still run on all non-macro code; expect the "extracted with errors"
       # metric to drop as the extractor matures with CodeQL bundle updates.
-      - uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: github/codeql-action/init@8533807ff379ac610d2b2c389c47e7c629d31d13 # v4.36.3
         with:
           languages: rust
           build-mode: none
-      - uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: github/codeql-action/analyze@8533807ff379ac610d2b2c389c47e7c629d31d13 # v4.36.3
         with:
           category: "/language:rust"
