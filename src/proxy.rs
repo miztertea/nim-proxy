@@ -18,7 +18,8 @@ use metrics::{counter, gauge, histogram};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::AppState;
+use crate::dispatch::Slot;
+use crate::{AppState, Config};
 
 /// Per-request metric labels, resolved once up front.
 #[derive(Clone)]
@@ -106,23 +107,24 @@ fn backoff_for(resp: &reqwest::Response) -> Duration {
 /// `on_wait` reports the client is gone.
 async fn reserve_slot(
     state: &AppState,
+    heartbeat: Duration,
     deadline: Instant,
     prefer: Option<usize>,
     mut on_wait: impl FnMut() -> bool,
-) -> Option<(usize, String)> {
+) -> Option<Slot> {
     let queued = Instant::now();
     let mut rx = state.dispatch.acquire(deadline, prefer);
     loop {
         tokio::select! {
             slot = &mut rx => {
                 histogram!("nimproxy_queue_wait_seconds").record(queued.elapsed().as_secs_f64());
-                if let Ok((lane, _)) = &slot {
-                    counter!("nimproxy_lane_requests_total", "lane" => lane.to_string())
+                if let Ok(slot) = &slot {
+                    counter!("nimproxy_lane_requests_total", "lane" => slot.lane.to_string())
                         .increment(1);
                 }
                 return slot.ok();
             }
-            _ = tokio::time::sleep(state.cfg.heartbeat) => {
+            _ = tokio::time::sleep(heartbeat) => {
                 if !on_wait() {
                     return None;
                 }
@@ -131,10 +133,13 @@ async fn reserve_slot(
     }
 }
 
-fn bench(state: &AppState, lane: usize, status: &str, backoff: Duration) {
-    counter!("nimproxy_lane_benched_total", "lane" => lane.to_string(), "status" => status.to_owned())
+/// Bench the granting lane after the upstream told us to back off. Routes
+/// through the slot's own pool, so a bench that races a settings-driven pool
+/// swap lands on the (possibly retired) generation that made the grant.
+fn bench(slot: &Slot, status: &str, backoff: Duration) {
+    counter!("nimproxy_lane_benched_total", "lane" => slot.lane.to_string(), "status" => status.to_owned())
         .increment(1);
-    state.pool.penalize(lane, backoff);
+    slot.pool.penalize(slot.lane, backoff);
 }
 
 fn record_request(ctx: &Ctx, status: &str) {
@@ -365,16 +370,16 @@ impl SseScan {
 }
 
 fn upstream_request(
-    state: &AppState,
+    http: &reqwest::Client,
+    base_url: &str,
     method: &Method,
     path_query: &str,
     headers: &HeaderMap,
     key: &str,
     body: &Bytes,
 ) -> reqwest::RequestBuilder {
-    let url = format!("{}{}", state.cfg.base_url, path_query);
-    let mut req = state
-        .http
+    let url = format!("{base_url}{path_query}");
+    let mut req = http
         .request(method.clone(), url)
         .header(header::AUTHORIZATION, format!("Bearer {key}"));
     for name in [header::CONTENT_TYPE, header::ACCEPT] {
@@ -396,6 +401,10 @@ pub async fn handle(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // One consistent config view for this request's whole lifetime; a
+    // concurrent settings save affects only requests that arrive after it.
+    let cfg = state.cfg();
+
     // Shed load past the in-flight cap so a connection flood can't grow the
     // queue unbounded. A guard decrements on every exit path.
     let inflight = state
@@ -410,15 +419,15 @@ pub async fn handle(
                 .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         }
     });
-    if inflight > state.max_inflight {
+    if inflight > cfg.max_inflight {
         counter!("nimproxy_shed_total").increment(1);
-        return overloaded(&state);
+        return overloaded(cfg.max_inflight);
     }
 
     // Client auth: local mode (no configured keys) admits everyone as
     // "local"; otherwise the Bearer token must match a configured key.
     // The match is constant-time to avoid leaking a valid key byte-by-byte.
-    let client = match &state.clients {
+    let client = match &cfg.clients {
         None => "local".to_owned(),
         Some(clients) => {
             let token = headers
@@ -463,7 +472,7 @@ pub async fn handle(
     // Answer the model-catalog probe from cache: harnesses poll it and it
     // shouldn't burn rate-limit budget on every poll.
     if method == Method::GET && uri.path() == "/v1/models" {
-        let resp = models(state).await;
+        let resp = models(state, cfg).await;
         record_request(&ctx, resp.status().as_str());
         return resp;
     }
@@ -472,7 +481,9 @@ pub async fn handle(
         .as_ref()
         .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
         .unwrap_or(false);
-    let prefer = parsed.as_ref().and_then(|v| affinity(v, state.pool.len()));
+    let prefer = parsed
+        .as_ref()
+        .and_then(|v| affinity(v, state.pool().len()));
 
     // Fingerprint what the harness asked for (generation endpoints only).
     if ctx.path == "/v1/chat/completions" || ctx.path == "/v1/completions" {
@@ -484,7 +495,7 @@ pub async fn handle(
     // keeps the untouched body for a one-shot retry if the model rejects it.
     let mut body = body;
     let mut fallback = None;
-    if wants_stream && !state.cfg.strict_passthrough && uri.path() == "/v1/chat/completions" {
+    if wants_stream && !cfg.strict_passthrough && uri.path() == "/v1/chat/completions" {
         let injectable = parsed
             .as_ref()
             .is_some_and(|v| v.is_object() && v.get("stream_options").is_none())
@@ -504,11 +515,11 @@ pub async fn handle(
 
     if wants_stream {
         streaming(
-            state, ctx, method, path_query, headers, body, prefer, fallback,
+            state, cfg, ctx, method, path_query, headers, body, prefer, fallback,
         )
         .await
     } else {
-        buffered(state, ctx, method, path_query, headers, body, prefer).await
+        buffered(state, cfg, ctx, method, path_query, headers, body, prefer).await
     }
 }
 
@@ -531,8 +542,10 @@ fn affinity(body: &serde_json::Value, lanes: usize) -> Option<usize> {
 }
 
 /// Non-streaming: pace, retry, and return the upstream response verbatim.
+#[allow(clippy::too_many_arguments)]
 async fn buffered(
     state: Arc<AppState>,
+    cfg: Arc<Config>,
     ctx: Ctx,
     method: Method,
     path_query: String,
@@ -542,31 +555,40 @@ async fn buffered(
 ) -> Response {
     let _active = crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
     gauge!("nimproxy_active_requests").increment(1.0);
-    let deadline = Instant::now() + state.cfg.max_wait;
+    let deadline = Instant::now() + cfg.max_wait;
     loop {
-        let Some((lane, key)) = reserve_slot(&state, deadline, prefer, || true).await else {
+        let Some(slot) = reserve_slot(&state, cfg.heartbeat, deadline, prefer, || true).await
+        else {
             record_request(&ctx, "504");
-            return gateway_timeout(&state);
+            return gateway_timeout(&cfg, state.pool().len());
         };
         let sent_at = Instant::now();
         // A non-streaming request gets an overall timeout so a stalled body read
         // can't pin an in-flight slot forever (streaming has no such cap).
-        let resp = match upstream_request(&state, &method, &path_query, &headers, &key, &body)
-            .timeout(state.cfg.request_timeout)
-            .send()
-            .await
+        let resp = match upstream_request(
+            &state.http,
+            &cfg.base_url,
+            &method,
+            &path_query,
+            &headers,
+            &slot.key,
+            &body,
+        )
+        .timeout(cfg.request_timeout)
+        .send()
+        .await
         {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(lane, error = %e, "upstream connection error, retrying");
-                bench(&state, lane, "connect", Duration::from_secs(5));
+                tracing::warn!(lane = slot.lane, error = %e, "upstream connection error, retrying");
+                bench(&slot, "connect", Duration::from_secs(5));
                 continue;
             }
         };
         if retryable(resp.status()) && Instant::now() < deadline {
             let backoff = backoff_for(&resp);
-            tracing::info!(lane, status = %resp.status(), ?backoff, "lane benched, retrying");
-            bench(&state, lane, resp.status().as_str(), backoff);
+            tracing::info!(lane = slot.lane, status = %resp.status(), ?backoff, "lane benched, retrying");
+            bench(&slot, resp.status().as_str(), backoff);
             continue;
         }
         histogram!("nimproxy_upstream_seconds", "model" => ctx.model.clone())
@@ -582,6 +604,7 @@ async fn buffered(
 #[allow(clippy::too_many_arguments)]
 async fn streaming(
     state: Arc<AppState>,
+    cfg: Arc<Config>,
     ctx: Ctx,
     method: Method,
     path_query: String,
@@ -605,15 +628,15 @@ async fn streaming(
             record_request(&ctx, "disconnect");
             return;
         }
-        let deadline = Instant::now() + state.cfg.max_wait;
+        let deadline = Instant::now() + cfg.max_wait;
         loop {
             // Queue for a slot, heartbeating so the harness doesn't hang up.
-            let slot = reserve_slot(&state, deadline, prefer, || {
+            let slot = reserve_slot(&state, cfg.heartbeat, deadline, prefer, || {
                 tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
                     .is_ok()
             })
             .await;
-            let Some((lane, key)) = slot else {
+            let Some(slot) = slot else {
                 record_request(&ctx, "504");
                 let _ = tx
                     .send(Ok(sse_error(
@@ -624,14 +647,22 @@ async fn streaming(
             };
 
             let sent_at = Instant::now();
-            let resp = match upstream_request(&state, &method, &path_query, &headers, &key, &body)
-                .send()
-                .await
+            let resp = match upstream_request(
+                &state.http,
+                &cfg.base_url,
+                &method,
+                &path_query,
+                &headers,
+                &slot.key,
+                &body,
+            )
+            .send()
+            .await
             {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!(lane, error = %e, "upstream connection error, retrying");
-                    bench(&state, lane, "connect", Duration::from_secs(5));
+                    tracing::warn!(lane = slot.lane, error = %e, "upstream connection error, retrying");
+                    bench(&slot, "connect", Duration::from_secs(5));
                     continue;
                 }
             };
@@ -654,8 +685,8 @@ async fn streaming(
                     return;
                 }
                 let backoff = backoff_for(&resp);
-                tracing::info!(lane, status = %resp.status(), ?backoff, "lane benched, retrying");
-                bench(&state, lane, resp.status().as_str(), backoff);
+                tracing::info!(lane = slot.lane, status = %resp.status(), ?backoff, "lane benched, retrying");
+                bench(&slot, resp.status().as_str(), backoff);
                 if !send(": retrying\n\n").await {
                     record_request(&ctx, "disconnect");
                     return;
@@ -681,13 +712,13 @@ async fn streaming(
             let mut chunks = resp.bytes_stream();
             loop {
                 // A stalled upstream would otherwise hold the client forever.
-                let next = if state.cfg.stream_idle.is_zero() {
+                let next = if cfg.stream_idle.is_zero() {
                     chunks.next().await
                 } else {
-                    match tokio::time::timeout(state.cfg.stream_idle, chunks.next()).await {
+                    match tokio::time::timeout(cfg.stream_idle, chunks.next()).await {
                         Ok(n) => n,
                         Err(_) => {
-                            tracing::warn!(model = %ctx.model, idle = ?state.cfg.stream_idle, "upstream stream stalled");
+                            tracing::warn!(model = %ctx.model, idle = ?cfg.stream_idle, "upstream stream stalled");
                             record_request(&ctx, "stall");
                             let _ = tx.send(Ok(sse_error("upstream stream stalled"))).await;
                             return;
@@ -762,19 +793,18 @@ async fn streaming(
 /// /v1/models, cached so harness catalog polls cost zero rate budget. The
 /// lock is held across the refresh so concurrent misses make one upstream
 /// call (followers see the fresh cache when they get the lock).
-async fn models(state: Arc<AppState>) -> Response {
+async fn models(state: Arc<AppState>, cfg: Arc<Config>) -> Response {
     let mut cache = state.models_cache.lock().await;
     if let Some((at, body)) = cache.as_ref() {
-        if at.elapsed() < state.cfg.models_ttl {
+        if at.elapsed() < cfg.models_ttl {
             return json_response(StatusCode::OK, body.clone());
         }
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    let Some((lane, key)) = reserve_slot(&state, deadline, None, || true).await else {
-        return gateway_timeout(&state);
+    let Some(slot) = reserve_slot(&state, cfg.heartbeat, deadline, None, || true).await else {
+        return gateway_timeout(&cfg, state.pool().len());
     };
-    let url = format!("{}/v1/models", state.cfg.base_url);
-    match state.http.get(url).bearer_auth(&key).send().await {
+    match fetch_models(&state.http, &cfg.base_url, &slot.key).await {
         Ok(resp) if resp.status().is_success() => {
             let body = resp.bytes().await.unwrap_or_default();
             *cache = Some((Instant::now(), body.clone()));
@@ -782,7 +812,7 @@ async fn models(state: Arc<AppState>) -> Response {
         }
         Ok(resp) => {
             if retryable(resp.status()) {
-                bench(&state, lane, resp.status().as_str(), backoff_for(&resp));
+                bench(&slot, resp.status().as_str(), backoff_for(&resp));
             }
             let status =
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -791,9 +821,23 @@ async fn models(state: Arc<AppState>) -> Response {
         }
         Err(e) => {
             tracing::warn!(error = %e, "models fetch failed");
-            gateway_timeout(&state)
+            gateway_timeout(&cfg, state.pool().len())
         }
     }
+}
+
+/// The raw model-catalog fetch with an explicit key — shared by the cached
+/// `/v1/models` path above and the setup wizard's key-validation probe
+/// (which must bypass both the pool and the cache).
+pub async fn fetch_models(
+    http: &reqwest::Client,
+    base_url: &str,
+    key: &str,
+) -> reqwest::Result<reqwest::Response> {
+    http.get(format!("{base_url}/v1/models"))
+        .bearer_auth(key)
+        .send()
+        .await
 }
 
 /// Return an upstream response to the client as-is, harvesting the `usage`
@@ -889,13 +933,10 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
-fn overloaded(state: &AppState) -> Response {
+fn overloaded(max_inflight: usize) -> Response {
     let body = proxy_error_json(
         "overloaded",
-        format!(
-            "proxy at capacity ({} concurrent requests); retry shortly",
-            state.max_inflight
-        ),
+        format!("proxy at capacity ({max_inflight} concurrent requests); retry shortly"),
     );
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -910,13 +951,13 @@ fn bad_gateway() -> Response {
     (StatusCode::BAD_GATEWAY, axum::Json(body)).into_response()
 }
 
-fn gateway_timeout(state: &AppState) -> Response {
+fn gateway_timeout(cfg: &Config, pool_len: usize) -> Response {
     let body = proxy_error_json(
         "rate_limited",
         format!(
             "no upstream slot became available within {}s (all {} keys saturated)",
-            state.cfg.max_wait.as_secs(),
-            state.pool.len()
+            cfg.max_wait.as_secs(),
+            pool_len
         ),
     );
     (StatusCode::GATEWAY_TIMEOUT, axum::Json(body)).into_response()

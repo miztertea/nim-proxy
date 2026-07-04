@@ -6,10 +6,10 @@ mod proxy;
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::routing::{any, get, post};
 use axum::Router;
 use bytes::Bytes;
@@ -18,8 +18,11 @@ use tokio::sync::Mutex;
 
 use auth::Admin;
 use dispatch::Dispatcher;
-use pool::Pool;
+use pool::{Pool, PoolHandle};
 
+/// App-level configuration, published as an immutable snapshot: every request
+/// takes one `Arc<Config>` via [`AppState::cfg`] and sees a consistent view;
+/// the settings layer swaps in a replacement under the write lock.
 pub struct Config {
     pub base_url: String,
     pub max_wait: Duration,
@@ -36,16 +39,20 @@ pub struct Config {
     /// Reference $/1M token prices for the dashboard's "dollars saved" figure.
     pub price_in: f64,
     pub price_out: f64,
+    /// token -> client name. None = local mode, no client auth.
+    pub clients: Option<HashMap<String, String>>,
+    /// Cap on concurrent requests; bounds memory under floods.
+    pub max_inflight: usize,
 }
 
 pub struct AppState {
-    pub cfg: Config,
-    pub pool: Arc<Pool>,
+    /// Current config snapshot; read via [`AppState::cfg`], swapped whole.
+    pub cfg: RwLock<Arc<Config>>,
+    /// Current key pool; the dispatcher reads it per grant, settings swap it.
+    pub pool: PoolHandle,
     pub dispatch: Dispatcher,
     pub http: reqwest::Client,
     pub models_cache: Mutex<Option<(Instant, Bytes)>>,
-    /// token -> client name. None = local mode, no client auth.
-    pub clients: Option<HashMap<String, String>>,
     /// Models that rejected stream_options injection; never inject for them again.
     pub no_inject: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Distinct sanitized model labels seen (bounds metric cardinality).
@@ -54,11 +61,70 @@ pub struct AppState {
     pub admin: Admin,
     /// Requests currently in flight; capped to bound memory under floods.
     pub inflight: AtomicUsize,
-    pub max_inflight: usize,
+    pub history: Arc<history::History>,
+    /// Unix time this process started (dashboard uptime).
+    pub started: u64,
+}
+
+impl AppState {
+    /// One consistent config snapshot; never hold this across a save.
+    pub fn cfg(&self) -> Arc<Config> {
+        self.cfg.read().unwrap().clone()
+    }
+
+    /// The current pool generation (observability only — reservations go
+    /// through the dispatcher, which snapshots under the same lock).
+    pub fn pool(&self) -> Arc<Pool> {
+        self.pool.read().unwrap().clone()
+    }
 }
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Live dashboard bootstrap config — reflects the current pool and pricing
+/// even after a settings change swaps them.
+async fn dash_config(State(state): State<Arc<AppState>>) -> axum::Json<serde_json::Value> {
+    let cfg = state.cfg();
+    let pool = state.pool();
+    let rpms = pool.rpms();
+    axum::Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "lanes": pool.len(),
+        // Uniform-rpm compatibility value; per-lane truth is in `rpms`.
+        "rpm": rpms.iter().copied().max().unwrap_or(0),
+        "rpms": rpms,
+        "capacity_rpm": pool.capacity_rpm(),
+        "price_in": cfg.price_in,
+        "price_out": cfg.price_out,
+        "auth": cfg.clients.is_some(),
+        "started": state.started,
+    }))
+}
+
+async fn api_history(
+    State(state): State<Arc<AppState>>,
+    q: axum::extract::Query<HashMap<String, String>>,
+) -> axum::Json<Vec<serde_json::Value>> {
+    let now = unix_now();
+    let get = |k: &str, d: u64| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
+    let (from, to) = (get("from", now.saturating_sub(86400)), get("to", now));
+    axum::Json(
+        state
+            .history
+            .range(from, to, 288)
+            .into_iter()
+            .map(|(t, m)| serde_json::json!({"t": t, "m": m}))
+            .collect(),
+    )
 }
 
 /// Add hardening headers to every response. The CSP allows the dashboard's
@@ -197,6 +263,7 @@ async fn main() {
         eprintln!("RPM_PER_KEY must be >= 1 (0 would stall every lane).");
         std::process::exit(1);
     }
+    let max_inflight: usize = env_or("MAX_INFLIGHT", "512").parse().expect("MAX_INFLIGHT");
     let cfg = Config {
         base_url: env_or("NIM_BASE_URL", "https://integrate.api.nvidia.com")
             .trim_end_matches('/')
@@ -233,6 +300,8 @@ async fn main() {
         price_out: env_or("REF_PRICE_OUT", "2.0")
             .parse()
             .expect("REF_PRICE_OUT"),
+        clients,
+        max_inflight,
     };
     let port: u16 = env_or("PORT", "8000").parse().expect("PORT");
 
@@ -248,7 +317,7 @@ async fn main() {
     }
     tracing::info!(
         "API auth          {}",
-        match &clients {
+        match &cfg.clients {
             Some(c) => format!("required ({} key(s))", c.len()),
             None => "OFF (no PROXY_API_KEYS)".to_owned(),
         }
@@ -288,34 +357,6 @@ async fn main() {
     }
     let prometheus = builder.install_recorder().expect("prometheus recorder");
 
-    let max_inflight: usize = env_or("MAX_INFLIGHT", "512").parse().expect("MAX_INFLIGHT");
-    let pool = Arc::new(Pool::new(keys, rpm));
-    let state = Arc::new(AppState {
-        dispatch: Dispatcher::new(pool.clone()),
-        pool,
-        clients,
-        http: reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            // No overall timeout: generations stream for a long time.
-            .build()
-            .expect("http client"),
-        models_cache: Mutex::new(None),
-        no_inject: std::sync::Mutex::new(std::collections::HashSet::new()),
-        model_labels: std::sync::Mutex::new(std::collections::HashSet::new()),
-        admin: Admin::new(admin_password, trust_proxy),
-        inflight: AtomicUsize::new(0),
-        max_inflight,
-        cfg,
-    });
-
-    let unix_now = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    };
-    let started = unix_now();
-
     // Metrics history: 5-minute snapshots, HISTORY_DAYS retention (0 = keep
     // forever), persisted to DATA_DIR when writable.
     let history_days: u64 = env_or("HISTORY_DAYS", "30").parse().expect("HISTORY_DAYS");
@@ -338,16 +379,27 @@ async fn main() {
             }
         });
     }
-    let dash_config = serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "lanes": state.pool.len(),
-        "rpm": rpm,
-        "price_in": state.cfg.price_in,
-        "price_out": state.cfg.price_out,
-        "auth": state.clients.is_some(),
-        "started": started,
-    })
-    .to_string();
+
+    let pool: PoolHandle = Arc::new(RwLock::new(Arc::new(Pool::new(
+        keys.into_iter().map(|k| (k, rpm)).collect(),
+    ))));
+    let state = Arc::new(AppState {
+        dispatch: Dispatcher::new(pool.clone()),
+        pool,
+        http: reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            // No overall timeout: generations stream for a long time.
+            .build()
+            .expect("http client"),
+        models_cache: Mutex::new(None),
+        no_inject: std::sync::Mutex::new(std::collections::HashSet::new()),
+        model_labels: std::sync::Mutex::new(std::collections::HashSet::new()),
+        admin: Admin::new(admin_password, trust_proxy),
+        inflight: AtomicUsize::new(0),
+        history: hist,
+        started: unix_now(),
+        cfg: RwLock::new(Arc::new(cfg)),
+    });
 
     let dash = || async {
         (
@@ -361,35 +413,8 @@ async fn main() {
     let protected = Router::new()
         .route("/", get(dash))
         .route("/dash", get(dash))
-        .route(
-            "/dash/config.json",
-            get(move || async move {
-                (
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    dash_config,
-                )
-            }),
-        )
-        .route(
-            "/api/history",
-            get(
-                move |q: axum::extract::Query<std::collections::HashMap<String, String>>| {
-                    let hist = hist.clone();
-                    async move {
-                        let now = unix_now();
-                        let get =
-                            |k: &str, d: u64| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
-                        let (from, to) = (get("from", now.saturating_sub(86400)), get("to", now));
-                        let body: Vec<serde_json::Value> = hist
-                            .range(from, to, 288)
-                            .into_iter()
-                            .map(|(t, m)| serde_json::json!({"t": t, "m": m}))
-                            .collect();
-                        axum::Json(body)
-                    }
-                },
-            ),
-        )
+        .route("/dash/config.json", get(dash_config))
+        .route("/api/history", get(api_history))
         .route("/metrics", get(move || async move { prometheus.render() }))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
