@@ -1,8 +1,18 @@
 name: Release
 
+# Two entry points, one pipeline:
+#   - push of a v* tag (the classic path)
+#   - workflow_dispatch from the default branch: resolves the version from
+#     Cargo.toml, mints the tag itself, and continues — releases can be cut
+#     from the Actions UI (or an API call) with no local terminal.
+# The dispatch-minted tag is pushed with GITHUB_TOKEN, whose ref pushes
+# deliberately trigger no follow-on workflow runs (GitHub suppresses them to
+# prevent recursion) — which is exactly right here: THIS run carries the
+# release end-to-end and never depends on the tag-push event.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: {}
 
 # Least privilege by default; each job opts into exactly what it needs.
 permissions:
@@ -12,8 +22,53 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  prepare:
+    name: resolve version (mint tag on dispatch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # mints the v* tag on the dispatch path
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      minor: ${{ steps.resolve.outputs.minor }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve version from Cargo.toml; mint the tag on dispatch
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]; then
+              echo "::error::dispatch releases run from the default branch only (got $GITHUB_REF_NAME)"
+              exit 1
+            fi
+            if git ls-remote --exit-code origin "refs/tags/v$version" >/dev/null 2>&1; then
+              echo "::error::v$version already exists — bump Cargo.toml (and promote the CHANGELOG) first"
+              exit 1
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "v$version" -m "nim-proxy $version" "$GITHUB_SHA"
+            git push origin "v$version"
+          else
+            # The binary reports CARGO_PKG_VERSION; the image is labeled with
+            # the git tag. Refuse to ship an image where the two disagree.
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+              grep '^version = ' Cargo.toml
+              exit 1
+            fi
+          fi
+          {
+            echo "version=$version"
+            echo "minor=${version%.*}"
+            echo "tag=v$version"
+          } >> "$GITHUB_OUTPUT"
+
   image:
     name: image → GHCR (multi-arch, signed)
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,19 +77,8 @@ jobs:
       attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
-      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      # The binary reports CARGO_PKG_VERSION; the image is labeled with the git
-      # tag. Refuse to ship an image where the two would disagree.
-      - name: Tag must match Cargo.toml version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          grep -Fxq "version = \"$tag\"" Cargo.toml || {
-            echo "::error::tag v$tag does not match Cargo.toml version:"
-            grep '^version = ' Cargo.toml
-            exit 1
-          }
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
@@ -43,13 +87,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Tags come from the prepare job, not from the git ref: the dispatch
+      # path has no tag ref at trigger time, so semver patterns would be empty.
       - id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.minor }}
             type=raw,value=latest
       - id: build
         uses: docker/build-push-action@v7
@@ -60,7 +106,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ needs.prepare.outputs.version }}
           provenance: true
           sbom: true
       - name: Install cosign
@@ -86,7 +132,7 @@ jobs:
             docker cp "$cid:/nim-proxy" "nim-proxy-$arch"
             docker rm "$cid" >/dev/null
             docker rmi "${IMAGE}@${{ steps.build.outputs.digest }}" >/dev/null
-            tar -czf "nim-proxy-${{ steps.meta.outputs.version }}-linux-$arch.tar.gz" "nim-proxy-$arch"
+            tar -czf "nim-proxy-${{ needs.prepare.outputs.version }}-linux-$arch.tar.gz" "nim-proxy-$arch"
             rm "nim-proxy-$arch"
           done
       - name: Generate SBOM (SPDX)
@@ -105,7 +151,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: image
+    needs: [prepare, image]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
@@ -116,6 +162,9 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
+          # Explicit: on the dispatch path the triggering ref is a branch, so
+          # the action must not derive the release tag from it.
+          tag_name: ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
           files: |
             nim-proxy-*.tar.gz
@@ -124,13 +173,13 @@ jobs:
             Container image (multi-arch, signed, with SBOM + provenance):
 
             ```sh
-            docker pull ghcr.io/${{ github.repository }}:${{ needs.image.outputs.version }}
+            docker pull ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }}
             ```
 
             Verify the signature:
 
             ```sh
-            cosign verify ghcr.io/${{ github.repository }}:${{ needs.image.outputs.version }} \
+            cosign verify ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }} \
               --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*' \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com
             ```
