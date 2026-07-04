@@ -1,0 +1,69 @@
+name: Fuzz
+
+# Smoke-fuzz the untrusted-byte parsers (SSE scanner, Prometheus-label
+# sanitizer, config-store round-trip) with cargo-fuzz/libFuzzer: weekly, on
+# demand, and on PRs that touch the fuzzed code. 60s per target — a smoke
+# pass that keeps the harnesses honest, not a deep campaign. Deliberately
+# NOT a required merge check.
+on:
+  schedule:
+    - cron: "17 5 * * 3" # weekly, Wednesday 05:17 UTC
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "src/proxy.rs"
+      - "src/config.rs"
+      - "fuzz/**"
+      - ".github/workflows/fuzz.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  fuzz:
+    name: smoke fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # cargo-fuzz needs nightly; the explicit +nightly below outranks the
+      # repo's rust-toolchain.toml (channel = stable).
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master (toolchain via input)
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz each target for 60s
+        run: |
+          set -euo pipefail
+          # --target is load-bearing: cargo-fuzz defaults to the triple IT was
+          # compiled for, and install-action ships a musl-linked binary — so
+          # without this it tries x86_64-unknown-linux-musl, where ASan can't
+          # link against static libc.
+          # First corpus dir is the (throwaway) working corpus libFuzzer
+          # writes to; the second is the committed seed corpus it starts from.
+          for t in sse_scan sanitize_label config_roundtrip; do
+            mkdir -p "fuzz/corpus/$t"
+            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$t" \
+              "fuzz/corpus/$t" "fuzz/seeds/$t" -- -max_total_time=60
+          done
+      # A crash reproducer is the whole point — surface it if one appears.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          retention-days: 30

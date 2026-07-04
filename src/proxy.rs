@@ -1213,3 +1213,44 @@ mod tests {
         assert!(!is_json_mode(&serde_json::json!({"model": "x"})));
     }
 }
+
+/// Fuzzing-only surface (see fuzz/). Thin wrappers so the fuzz targets can
+/// exercise the untrusted-byte parsers without widening the visibility of
+/// the real items.
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub mod fuzz {
+    /// Drive the SSE scanner with arbitrary bytes, twice: once as a single
+    /// chunk and once re-fragmented at a size derived from the input (the
+    /// network delivers these bytes arbitrarily split). Must never panic,
+    /// and the pathological-line guard must keep the buffer bounded.
+    pub fn sse_scan(data: &[u8]) {
+        let mut whole = super::SseScan::default();
+        whole.feed(data);
+
+        let step = data.first().map_or(3, |b| (*b as usize % 17) + 1);
+        let mut frag = super::SseScan::default();
+        for chunk in data.chunks(step) {
+            frag.feed(chunk);
+            assert!(
+                frag.buf.len() <= 1_048_576 + chunk.len(),
+                "SSE buffer must stay bounded by the guard"
+            );
+        }
+    }
+
+    /// The sanitizer's output invariants ARE the security property: bounded
+    /// length, never empty, and only chars that are inert in the Prometheus
+    /// exposition format, access logs, and persisted history.
+    pub fn sanitize_label(data: &[u8]) {
+        let raw = String::from_utf8_lossy(data);
+        let out = super::sanitize_label(&raw);
+        assert!(!out.is_empty(), "sanitized label must never be empty");
+        assert!(out.len() <= 64, "sanitized label must be length-capped");
+        assert!(
+            out.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':')),
+            "sanitized label must stay in the safe charset"
+        );
+    }
+}

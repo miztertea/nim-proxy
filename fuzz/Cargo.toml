@@ -1,0 +1,37 @@
+# Fuzz harnesses for the untrusted-byte parsers (cargo-fuzz / libFuzzer).
+# Not part of the parent workspace: needs nightly and never ships.
+[package]
+name = "nim-proxy-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nim-proxy = { path = ".." }
+
+[[bin]]
+name = "sse_scan"
+path = "fuzz_targets/sse_scan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sanitize_label"
+path = "fuzz_targets/sanitize_label.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_roundtrip"
+path = "fuzz_targets/config_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
