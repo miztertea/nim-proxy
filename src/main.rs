@@ -1,5 +1,6 @@
 mod auth;
 mod dispatch;
+mod governor;
 mod history;
 mod pool;
 mod proxy;
@@ -43,6 +44,25 @@ pub struct Config {
     pub clients: Option<HashMap<String, String>>,
     /// Cap on concurrent requests; bounds memory under floods.
     pub max_inflight: usize,
+    /// Model-pressure governor settings (worker concurrency, not RPM).
+    pub governor: GovernorSettings,
+}
+
+pub struct GovernorSettings {
+    /// Adaptive governing on worker-exhaustion errors (on by default; the
+    /// governor stays dormant until an upstream actually exhausts).
+    pub enabled: bool,
+    /// Operator-pinned per-model concurrency caps (model id -> max in-flight).
+    pub overrides: HashMap<String, usize>,
+}
+
+impl Default for GovernorSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            overrides: HashMap::new(),
+        }
+    }
 }
 
 pub struct AppState {
@@ -61,6 +81,8 @@ pub struct AppState {
     pub admin: Admin,
     /// Requests currently in flight; capped to bound memory under floods.
     pub inflight: AtomicUsize,
+    /// Per-model worker-concurrency gate (runtime state, settings in Config).
+    pub governor: Arc<governor::Governor>,
     pub history: Arc<history::History>,
     /// Unix time this process started (dashboard uptime).
     pub started: u64,
@@ -302,6 +324,7 @@ async fn main() {
             .expect("REF_PRICE_OUT"),
         clients,
         max_inflight,
+        governor: GovernorSettings::default(),
     };
     let port: u16 = env_or("PORT", "8000").parse().expect("PORT");
 
@@ -396,6 +419,7 @@ async fn main() {
         model_labels: std::sync::Mutex::new(std::collections::HashSet::new()),
         admin: Admin::new(admin_password, trust_proxy),
         inflight: AtomicUsize::new(0),
+        governor: Arc::new(governor::Governor::default()),
         history: hist,
         started: unix_now(),
         cfg: RwLock::new(Arc::new(cfg)),

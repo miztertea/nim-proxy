@@ -117,6 +117,7 @@ def main():
     after = fetch_json(f"{args.mock}/control/stats")
     violations = after["violations"] - before["violations"]
     upstream_hits = after["chat_requests"] - before["chat_requests"]
+    exhausted = after.get("worker_exhausted", 0) - before.get("worker_exhausted", 0)
     per_key = {k: after["per_key"].get(k, 0) - before["per_key"].get(k, 0)
                for k in after["per_key"]}
 
@@ -134,6 +135,8 @@ latency p50 / p95    {p50:.2f}s / {p95:.2f}s
 latency max          {lat[-1]:.2f}s
 upstream requests    {upstream_hits}
 upstream by key      {json.dumps(per_key)}
+worker exhaustions   {exhausted}  (per-model cap hits; governor should bound these)
+peak workers/model   {json.dumps(after.get("max_workers", {}))}
 RATE VIOLATIONS      {violations}  (upstream requests beyond the per-key rpm window)
 """, flush=True)
 

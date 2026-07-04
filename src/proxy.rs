@@ -19,6 +19,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::dispatch::Slot;
+use crate::governor::{self, ModelPermit};
 use crate::{AppState, Config};
 
 /// Per-request metric labels, resolved once up front.
@@ -129,6 +130,45 @@ async fn reserve_slot(
                     return None;
                 }
             }
+        }
+    }
+}
+
+/// Wait for a model-pressure permit (the governor's worker-concurrency gate),
+/// heartbeating so streaming callers keep their client alive. `Ok(None)`
+/// means the request isn't gated (governor off, non-generation path, or no
+/// model to scope by); `Err(())` means the deadline passed or the client left.
+async fn acquire_model_permit(
+    state: &AppState,
+    cfg: &Config,
+    ctx: &Ctx,
+    deadline: Instant,
+    mut on_wait: impl FnMut() -> bool,
+) -> Result<Option<ModelPermit>, ()> {
+    let gated = cfg.governor.enabled
+        && ctx.model != "none"
+        && matches!(
+            ctx.path.as_str(),
+            "/v1/chat/completions" | "/v1/completions"
+        );
+    if !gated {
+        return Ok(None);
+    }
+    let pinned = cfg.governor.overrides.get(&ctx.model).copied();
+    let mut next_heartbeat = Instant::now() + cfg.heartbeat;
+    loop {
+        if let Some(p) = state.governor.admit(&ctx.model, pinned) {
+            return Ok(Some(p));
+        }
+        if Instant::now() + governor::POLL > deadline {
+            return Err(());
+        }
+        tokio::time::sleep(governor::POLL).await;
+        if Instant::now() >= next_heartbeat {
+            if !on_wait() {
+                return Err(());
+            }
+            next_heartbeat = Instant::now() + cfg.heartbeat;
         }
     }
 }
@@ -557,6 +597,13 @@ async fn buffered(
     gauge!("nimproxy_active_requests").increment(1.0);
     let deadline = Instant::now() + cfg.max_wait;
     loop {
+        // Two admission gates: a model-pressure permit (worker concurrency,
+        // held through the whole upstream exchange — dropped on every exit
+        // from this iteration), then an RPM slot.
+        let Ok(_permit) = acquire_model_permit(&state, &cfg, &ctx, deadline, || true).await else {
+            record_request(&ctx, "504");
+            return gateway_timeout(&cfg, state.pool().len());
+        };
         let Some(slot) = reserve_slot(&state, cfg.heartbeat, deadline, prefer, || true).await
         else {
             record_request(&ctx, "504");
@@ -586,9 +633,20 @@ async fn buffered(
             }
         };
         if retryable(resp.status()) && Instant::now() < deadline {
+            let status = resp.status();
             let backoff = backoff_for(&resp);
-            tracing::info!(lane = slot.lane, status = %resp.status(), ?backoff, "lane benched, retrying");
-            bench(&slot, resp.status().as_str(), backoff);
+            // Sniff the error body: worker exhaustion is model-scoped (shared
+            // across every key), so benching the lane would just burn healthy
+            // key capacity on a failover that cannot help.
+            let detail = resp.text().await.unwrap_or_default();
+            if governor::is_worker_exhausted(&detail) {
+                state
+                    .governor
+                    .note_exhausted(&ctx.model, cfg.governor.overrides.get(&ctx.model).copied());
+                continue; // permit drops here; re-admission waits out the drain
+            }
+            tracing::info!(lane = slot.lane, %status, ?backoff, "lane benched, retrying");
+            bench(&slot, status.as_str(), backoff);
             continue;
         }
         histogram!("nimproxy_upstream_seconds", "model" => ctx.model.clone())
@@ -630,7 +688,24 @@ async fn streaming(
         }
         let deadline = Instant::now() + cfg.max_wait;
         loop {
-            // Queue for a slot, heartbeating so the harness doesn't hang up.
+            // Model-pressure permit first (worker concurrency), then an RPM
+            // slot — both heartbeating so the harness doesn't hang up. The
+            // permit spans the whole upstream exchange and drops on every
+            // exit from this iteration.
+            let Ok(_permit) = acquire_model_permit(&state, &cfg, &ctx, deadline, || {
+                tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
+                    .is_ok()
+            })
+            .await
+            else {
+                record_request(&ctx, "504");
+                let _ = tx
+                    .send(Ok(sse_error(
+                        "proxy timed out waiting for an upstream slot",
+                    )))
+                    .await;
+                return;
+            };
             let slot = reserve_slot(&state, cfg.heartbeat, deadline, prefer, || {
                 tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
                     .is_ok()
@@ -684,9 +759,20 @@ async fn streaming(
                         .await;
                     return;
                 }
+                let status = resp.status();
                 let backoff = backoff_for(&resp);
-                tracing::info!(lane = slot.lane, status = %resp.status(), ?backoff, "lane benched, retrying");
-                bench(&slot, resp.status().as_str(), backoff);
+                // Worker exhaustion is model-scoped: back off the model via
+                // the governor, never the lane (see `buffered`).
+                let detail = resp.text().await.unwrap_or_default();
+                if governor::is_worker_exhausted(&detail) {
+                    state.governor.note_exhausted(
+                        &ctx.model,
+                        cfg.governor.overrides.get(&ctx.model).copied(),
+                    );
+                } else {
+                    tracing::info!(lane = slot.lane, %status, ?backoff, "lane benched, retrying");
+                    bench(&slot, status.as_str(), backoff);
+                }
                 if !send(": retrying\n\n").await {
                     record_request(&ctx, "disconnect");
                     return;

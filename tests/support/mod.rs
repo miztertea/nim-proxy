@@ -22,6 +22,9 @@ pub enum Behavior {
     Ok,
     /// 429 with this Retry-After (seconds).
     RateLimited(u64),
+    /// 429 carrying NIM's worker-exhaustion signature — model-scoped, so the
+    /// proxy must back off the model (governor), never bench the lane.
+    WorkerExhausted,
     /// A retryable server error.
     ServerError(u16),
     /// 400 unconditionally.
@@ -128,6 +131,12 @@ async fn mock_chat(
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header(header::RETRY_AFTER, secs.to_string())
             .body(Body::from(r#"{"error":"rate limited"}"#))
+            .unwrap(),
+        Behavior::WorkerExhausted => Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .body(Body::from(
+                r#"{"detail":"ResourceExhausted: Worker local total request limit reached (32/32)"}"#,
+            ))
             .unwrap(),
         Behavior::ServerError(code) => Response::builder()
             .status(StatusCode::from_u16(code).unwrap())

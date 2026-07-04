@@ -1053,3 +1053,90 @@ async fn dashboard_sends_security_headers() {
     assert_eq!(h["x-content-type-options"], "nosniff");
     assert_eq!(h["x-frame-options"], "DENY");
 }
+
+#[tokio::test]
+async fn worker_exhaustion_governs_the_model_and_spares_the_lane() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::WorkerExhausted);
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let started = Instant::now();
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["choices"][0]["message"]["content"], "hello world");
+    assert_eq!(mock.state.hit_count(), 2, "one exhausted try, one success");
+    // The retry waited out the governor's ~2s drain gap, not the 10s default
+    // lane bench a plain 429-without-Retry-After would have earned.
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "retry took {:?} — looks like a lane bench, not a model drain gap",
+        started.elapsed()
+    );
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains(r#"nimproxy_worker_exhausted_total{model="mock/model-a"} 1"#),
+        "exhaustion counted: {metrics}"
+    );
+    assert!(
+        !metrics.contains("nimproxy_lane_benched_total"),
+        "worker exhaustion must never bench a lane: {metrics}"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_model_limit{model="mock/model-a"} 1"#),
+        "governor engaged at max(1, inflight/2) = 1: {metrics}"
+    );
+    assert!(
+        metrics.contains(r#"nimproxy_model_inflight{model="mock/model-a"} 0"#),
+        "permit released after completion: {metrics}"
+    );
+}
+
+#[tokio::test]
+async fn worker_exhaustion_streaming_retries_inside_the_stream() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::WorkerExhausted);
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", true))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "stream commits to 200 before retrying");
+    let body = read_sse(resp).await;
+    assert!(body.contains(": retrying"), "retry notice sent: {body}");
+    assert!(body.contains("hello"), "content delivered: {body}");
+    assert!(body.contains("data: [DONE]"), "stream completed: {body}");
+
+    let metrics = client()
+        .get(proxy.url("/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains(r#"nimproxy_worker_exhausted_total{model="mock/model-a"} 1"#),
+        "exhaustion counted: {metrics}"
+    );
+    assert!(
+        !metrics.contains("nimproxy_lane_benched_total"),
+        "worker exhaustion must never bench a lane: {metrics}"
+    );
+}
