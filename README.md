@@ -10,6 +10,7 @@ One job: obey the NIM speed limit so your agent harness never sees it.
 [![CI](https://github.com/miztertea/nim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/miztertea/nim-proxy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/miztertea/nim-proxy)](https://github.com/miztertea/nim-proxy/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/miztertea/nim-proxy/badge)](https://scorecard.dev/viewer/?uri=github.com/miztertea/nim-proxy)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13484/badge)](https://www.bestpractices.dev/projects/13484)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Container: GHCR](https://img.shields.io/badge/container-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/miztertea/nim-proxy/pkgs/container/nim-proxy)
 
@@ -292,6 +293,17 @@ It exits non-zero on any client-visible failure or a single upstream rate violat
 ## Project knowledge base
 
 The `knowledge/` directory holds the project's long-term memory — design decisions with their reasoning, validated research about NIM, per-component architecture notes, and runbooks, all cross-linked markdown. Start at [`knowledge/index.md`](knowledge/index.md). [`AGENTS.md`](AGENTS.md) tells AI agents how to maintain it.
+
+## Contributing, security & support
+
+- **Contributing** — PRs welcome; read [CONTRIBUTING.md](CONTRIBUTING.md)
+  first (build/test commands, the knowledge-base rules, and the zero-warning
+  bar). For anything beyond a small fix, open an issue before writing code.
+- **Security** — report vulnerabilities privately via
+  [SECURITY.md](SECURITY.md), never in a public issue.
+- **Support** — questions go to
+  [Discussions](https://github.com/miztertea/nim-proxy/discussions); see
+  [SUPPORT.md](SUPPORT.md) for the routing map.
 
 ## License
 

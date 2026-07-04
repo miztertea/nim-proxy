@@ -71,7 +71,11 @@ cosign verify ghcr.io/miztertea/nim-proxy:X.Y.Z \
 ```
 
 Also check the GitHub Release page: two `nim-proxy-X.Y.Z-linux-*.tar.gz` assets
-plus `nim-proxy-sbom.spdx.json`, and generated release notes.
+plus `nim-proxy-sbom.spdx.json`, and generated release notes. The notes are
+grouped by PR label via `.github/release.yml` (Security / Breaking changes /
+Features=`enhancement` / Fixes=`bug` / Documentation / Dependencies —
+Dependabot's default label / Other; `skip-changelog` excludes a PR) — so
+label PRs as they merge, not at release time.
 
 ## Fixing a bad release
 

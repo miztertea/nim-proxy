@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Repo hygiene & metadata**: `.editorconfig`, `.gitattributes` (LF
+  normalization + language-stats fix so the repo reads as Rust, not HTML),
+  `rust-toolchain.toml` (stable + rustfmt/clippy for contributors),
+  `SUPPORT.md`, and a release-notes template (`.github/release.yml`) that
+  groups generated notes by PR label. Cargo.toml now declares
+  `rust-version = "1.87"` (measured with `cargo msrv find`) plus
+  keywords/categories/homepage, and a new CI `msrv` job builds with exactly
+  that toolchain. The Docker build base is digest-pinned. README gains the
+  OpenSSF Best Practices badge and a contributing/security/support section.
+
 - **CodeQL static analysis** for the Rust source on every PR, push to main,
   and a weekly re-scan (`build-mode: none` — no cargo build needed).
 - **Workflow lint job in CI**: `actionlint` (correctness, always gates) and

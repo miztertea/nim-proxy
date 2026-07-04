@@ -1,0 +1,9 @@
+# Contributor convenience: rustup auto-installs the matching toolchain and
+# the components the pre-PR checks need (cargo fmt / cargo clippy) on first
+# build. Tracks stable — CI installs the same channel — rather than a pinned
+# 1.XX, which would only create weekly bump chores. The declared minimum
+# supported version lives in Cargo.toml `rust-version` and is enforced by
+# CI's `msrv` job.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

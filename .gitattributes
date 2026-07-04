@@ -1,0 +1,15 @@
+# Normalize line endings to LF in the repo and in checkouts (matches
+# .editorconfig), so Windows contributors can't introduce CRLF churn.
+* text=auto eol=lf
+
+# Binary assets — never diff, never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+
+# The design/ prototypes are reference documents (~220 KB of generated HTML),
+# not shipped source — keep them out of GitHub's language statistics so the
+# repo reads as the Rust project it is. src/*.html stays counted: the embedded
+# dashboard and setup wizard are real shipped source.
+design/** linguist-documentation
