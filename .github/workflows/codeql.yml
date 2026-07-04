@@ -36,6 +36,18 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      # The build-mode:none Rust extractor expands macros with rust-analyzer
+      # machinery, which needs the standard-library sources (rust-src) and the
+      # dependency sources in the cargo cache. Without them, run #1 reported
+      # every file "extracted with errors" — even format!/vec! failed to
+      # expand — and the scan ran hollow while the job stayed green.
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master (toolchain via input)
+        with:
+          toolchain: stable
+          components: rust-src
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Prefetch dependency sources for the extractor
+        run: cargo fetch --locked
       - uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
         with:
           languages: rust
