@@ -8,6 +8,7 @@
 use std::fs;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 pub const SAMPLE_SECS: u64 = 300;
@@ -15,7 +16,9 @@ pub const SAMPLE_SECS: u64 = 300;
 pub struct History {
     points: Mutex<Vec<(u64, String)>>,
     file: Option<PathBuf>,
-    days: u64,
+    /// Retention in days (0 = keep forever). Atomic so the settings layer can
+    /// retune it live; the sampler reads it on every append.
+    days: AtomicU64,
     dropped_since_compact: Mutex<usize>,
 }
 
@@ -63,15 +66,21 @@ impl History {
         Self {
             points: Mutex::new(points),
             file,
-            days,
+            days: AtomicU64::new(days),
             dropped_since_compact: Mutex::new(0),
         }
     }
 
+    /// Retune retention live (settings-driven); applies on the next append.
+    pub fn set_days(&self, days: u64) {
+        self.days.store(days, Ordering::Relaxed);
+    }
+
     pub fn append(&self, t: u64, snapshot: String) {
         let mut points = self.points.lock().unwrap();
-        if self.days > 0 {
-            let cutoff = t.saturating_sub(self.days * 86400);
+        let days = self.days.load(Ordering::Relaxed);
+        if days > 0 {
+            let cutoff = t.saturating_sub(days * 86400);
             let before = points.len();
             points.retain(|p| p.0 >= cutoff);
             *self.dropped_since_compact.lock().unwrap() += before - points.len();
@@ -128,7 +137,7 @@ mod tests {
         let h = History {
             points: Mutex::new(Vec::new()),
             file: None,
-            days: 1,
+            days: AtomicU64::new(1),
             dropped_since_compact: Mutex::new(0),
         };
         h.append(1_000, "old".into());
@@ -145,7 +154,7 @@ mod tests {
         let h = History {
             points: Mutex::new((0..1000u64).map(|i| (i, i.to_string())).collect()),
             file: None,
-            days: 0,
+            days: AtomicU64::new(0),
             dropped_since_compact: Mutex::new(0),
         };
         let r = h.range(0, 999, 100);

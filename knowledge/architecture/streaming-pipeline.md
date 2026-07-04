@@ -11,7 +11,7 @@ timestamp: 2026-07-02T00:00:00Z
 For a `stream: true` chat request:
 
 1. **Auth + parse** once: client name, model label, stream flag, affinity
-   hash, and (unless `STRICT_PASSTHROUGH`)
+   hash, and (unless `strict_passthrough` is set in Settings)
    [usage injection](../decisions/usage-injection-auto-fallback.md) with the
    untouched body kept for fallback.
 2. **Commit** to `200 text/event-stream` immediately; a spawned task owns the
@@ -25,7 +25,7 @@ For a `stream: true` chat request:
    `error` event; success → pipe.
 5. **Pipe with watchdog**: chunks forward verbatim while `SseScan` (a
    line-reassembling observer) counts data events and extracts the `usage`
-   object. `tokio::time::timeout(STREAM_IDLE_SECS)` around each read cuts
+   object. A `tokio::time::timeout` of the `stream_idle` limit around each read cuts
    stalled upstreams with an in-stream error (status label `stall`).
 6. **Account**: TTFT histogram at first chunk; tokens/sec and prompt/
    completion counters at end (`source="usage"` exact, `"estimate"` =

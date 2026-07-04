@@ -65,3 +65,35 @@ IP-level limiting.
   `docker compose up` can't accidentally expose an open instance.
 - Session-cookie state is per-boot; a restart logs dashboard users out (API
   keys unaffected).
+
+## Amendment (v0.6.0 — store-backed users)
+
+The fail-closed *stance* below is unchanged; its inputs moved from env vars
+into the [UI-managed config store](ui-managed-config-store.md), which changes
+three specifics:
+
+- **`INSECURE_NO_AUTH` retires.** Its replacement is the store's `open|keyed`
+  API-access mode, and it now governs **only `/v1`**. `keyed` (default) is
+  fail-closed — keyed with zero client keys rejects everything; `open` (labeled
+  "local") is trusted-network only. Every dashboard/`/metrics`/`/api/history`
+  surface **always** requires a logged-in session post-setup; there is no
+  "everything open" mode for the UI anymore. Pre-setup, only `/health`,
+  `/setup`, and `/login` (which redirects to `/setup`) are reachable.
+- **The single `ADMIN_PASSWORD` becomes multi-user.** Users live in the store
+  (`{username, password_hash, role}`); login is username + password. Passwords
+  are **PBKDF2-HMAC-SHA256, 600k iterations**, the iteration count encoded in
+  the stored string (`pbkdf2-sha256$iters$salt$hash`) so it's tunable without a
+  migration, pinned by RFC 7914 test vectors. Client API keys are now
+  server-generated 128-bit secrets (`npk_` prefix), shown once, stored as
+  SHA-256 digests + last-4 — see [ui-managed-config-store](ui-managed-config-store.md).
+- **Sessions carry identity, not just expiry.** The signed cookie payload
+  extends to `expiry || username || first8(sha256(password_hash))`. Role is
+  looked up from the config snapshot on every request (never baked into the
+  token), so role changes and user deletion take effect immediately; the
+  password-hash fragment means **a password change or reset invalidates that
+  user's existing sessions instantly**. `Admin` no longer holds a password —
+  credentials live in the store, hashed. Prometheus scrapers authenticate with
+  `Authorization: Bearer <username>:<password>` (or HTTP Basic), verified once
+  against the store then memoized via HMAC (no 600k-iteration PBKDF2 per
+  scrape). The per-boot signing key and per-process login throttle are
+  unchanged.

@@ -11,6 +11,8 @@ readme = "README.md"
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip"] }
+# derive adds zero new crates: the proc-macro stack is already in the tree.
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
@@ -33,6 +35,26 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde_json = "1"
 bytes = "1"
 futures-util = "0.3"
+# The e2e harness hashes client secrets when writing store fixtures.
+sha2 = "0.10"
+
+# PBKDF2 password hashing runs 600k HMAC-SHA256 iterations. At opt-level 0
+# every dev-build login (and the e2e auth suite) would take multiple seconds
+# — the generic HMAC glue monomorphizes into this crate, so the hashing
+# chain's own opt level isn't enough. Level 1 keeps debuginfo and fast
+# builds while making hashing near release speed.
+[profile.dev]
+opt-level = 1
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3
+[profile.dev.package.generic-array]
+opt-level = 3
 
 [profile.release]
 lto = true

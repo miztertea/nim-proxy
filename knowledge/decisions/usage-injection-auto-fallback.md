@@ -30,7 +30,8 @@ This tension sits against the project's "strict pass-through" principle.
 
 ## Choice
 
-Option 4, with `STRICT_PASSTHROUGH=true` as the kill switch for purists.
+Option 4, with the `strict_passthrough` Settings toggle as the kill switch for
+purists.
 Injection only applies to `/v1/chat/completions` with `stream: true` and no
 existing `stream_options`.
 

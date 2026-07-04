@@ -22,11 +22,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ARGS = None
 LOCK = threading.Lock()
 WINDOWS = defaultdict(deque)  # key -> deque[timestamps]
+WORKERS = defaultdict(int)  # model -> generations in flight (--worker-slots)
 STATS = {
     "chat_requests": 0,
     "models_requests": 0,
     "violations": 0,  # requests that arrived while the key's window was full
     "served_429": 0,
+    "worker_exhausted": 0,  # requests refused at the per-model worker cap
+    "max_workers": defaultdict(int),  # model -> peak concurrent generations
     "per_key": defaultdict(int),
 }
 
@@ -59,7 +62,8 @@ class Handler(BaseHTTPRequestHandler):
                 for m in ARGS.models.split(",")]})
         elif self.path == "/control/stats":
             with LOCK:
-                self._json(200, {**STATS, "per_key": dict(STATS["per_key"])})
+                self._json(200, {**STATS, "per_key": dict(STATS["per_key"]),
+                                 "max_workers": dict(STATS["max_workers"])})
         else:
             self._json(404, {"error": "not found"})
 
@@ -89,6 +93,29 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 win.append(now)
 
+        # NIM's second, orthogonal constraint: a per-model worker-concurrency
+        # cap shared across ALL keys. The proxy's governor must absorb this
+        # without benching lanes (key failover cannot help).
+        model = req.get("model", "none")
+        if ARGS.worker_slots:
+            with LOCK:
+                if WORKERS[model] >= ARGS.worker_slots:
+                    STATS["worker_exhausted"] += 1
+                    self._json(429, {"detail":
+                                     "ResourceExhausted: Worker local total request limit "
+                                     f"reached ({ARGS.worker_slots}/{ARGS.worker_slots})"})
+                    return
+                WORKERS[model] += 1
+                STATS["max_workers"][model] = max(STATS["max_workers"][model],
+                                                  WORKERS[model])
+        try:
+            self._generate(req)
+        finally:
+            if ARGS.worker_slots:
+                with LOCK:
+                    WORKERS[model] -= 1
+
+    def _generate(self, req):
         if ARGS.delay_ms:
             time.sleep(ARGS.delay_ms / 1000)
 
@@ -154,6 +181,9 @@ def main():
                    help="pre-response latency to simulate inference queueing")
     p.add_argument("--token-ms", type=int, default=20,
                    help="delay between streamed tokens")
+    p.add_argument("--worker-slots", type=int, default=0,
+                   help="per-model concurrent-generation cap; excess requests "
+                        "get NIM's real worker-exhaustion 429 (0 = off)")
     p.add_argument("--models", default="moonshotai/kimi-k2-instruct,deepseek-ai/deepseek-r1,meta/llama-3.3-70b-instruct")
     ARGS = p.parse_args()
     srv = ThreadingHTTPServer(("127.0.0.1", ARGS.port), Handler)

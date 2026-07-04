@@ -53,4 +53,5 @@ glibc-host cross-builds never hit this, which is why it survived until CI.)
 - No exec-ing into the container for debugging — logs and `/metrics` are the
   observability surface (by design).
 - Corporate-MITM environments that need custom CA roots can't add them via
-  the filesystem; `NIM_BASE_URL` through such proxies is unsupported.
+  the filesystem; pointing the upstream base URL through such proxies is
+  unsupported.

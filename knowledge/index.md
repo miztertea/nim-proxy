@@ -28,6 +28,7 @@ the chronology in [log.md](log.md).
 | [input-sanitizing-and-xss](decisions/input-sanitizing-and-xss.md) | Sanitize client `model`/`path` labels; escape + CSP the dashboard (XSS/cardinality/log-injection) |
 | [request-shape-metrics](decisions/request-shape-metrics.md) | Capture agent-behavior & quality signal as bounded metrics — counts, never content — for benchmarking |
 | [dashboard-operator-console-redesign](decisions/dashboard-operator-console-redesign.md) | 6→5 tabs (Compare merged in), dark-only palette, webfonts via Google Fonts CDN under CSP, window-halves delta chips |
+| [ui-managed-config-store](decisions/ui-managed-config-store.md) | App config moves from env into a JSON store edited from the dashboard; first-run wizard, multi-user + per-key ownership, no encryption at rest |
 
 ## Research — validated external facts
 
@@ -43,18 +44,19 @@ the chronology in [log.md](log.md).
 |---|---|
 | [key-pool](architecture/key-pool.md) | Per-key sliding-window lanes; least-loaded selection; cooldown benching |
 | [dispatcher](architecture/dispatcher.md) | Global FIFO slot queue; abandoned-waiter slot return; affinity accounting |
+| [governor](architecture/governor.md) | Per-model concurrency gate; classifies worker exhaustion apart from 429s and backs off the model, adaptively |
 | [streaming-pipeline](architecture/streaming-pipeline.md) | Heartbeats, retry/failover, idle timeout, SSE usage scanning |
 | [metrics-history](architecture/metrics-history.md) | Prometheus registry + 5-min snapshot history replayed by the dashboard |
 | [dashboard](architecture/dashboard.md) | Single embedded HTML; dark operator console; 5 tabs; hover charts & sortable tables |
-| [client-auth](architecture/client-auth.md) | API Bearer keys + admin-password dashboard session; fail-closed posture |
+| [client-auth](architecture/client-auth.md) | `/v1` client keys (open/keyed) + store-backed multi-user dashboard sessions; fail-closed posture |
 
 ## Operations — runbooks
 
 | Page | One-liner |
 |---|---|
 | [deploy-docker](ops/deploy-docker.md) | Compose, volume, healthcheck, hardening flags |
-| [configure-env](ops/configure-env.md) | Every env var, defaults, and when to change them |
-| [sharing-with-friends](ops/sharing-with-friends.md) | Multi-user setup, key etiquette, ToS positioning |
+| [configure-env](ops/configure-env.md) | The 5 container env vars; everything else lives in the Settings UI; lockout recovery |
+| [sharing-with-friends](ops/sharing-with-friends.md) | Create-a-user multi-user setup, key etiquette, ToS positioning |
 | [capacity-math](ops/capacity-math.md) | What N clients on K keys actually does (the 50-clients/3-lanes analysis) |
 
 ## Testing

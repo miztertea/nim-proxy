@@ -35,7 +35,7 @@ upstream 401 arrives as an in-stream error, not a 401. Harnesses handle
 in-stream errors; they don't handle mid-task 429s.
 
 Non-streaming requests can't be heartbeated (no wire format for partial JSON)
-— they wait silently up to `MAX_WAIT_SECS`. Documented limitation; agent
+— they wait silently up to the `max_wait` limit. Documented limitation; agent
 traffic streams.
 
 ## Consequences
@@ -43,5 +43,5 @@ traffic streams.
 - Long-running OpenCode tasks survive saturation; verified e2e (429s →
   `: retrying` comments → data → `[DONE]`).
 - A stalled upstream would hold the committed stream forever, hence the
-  `STREAM_IDLE_SECS` cutoff in the
+  `stream_idle` cutoff in the
   [streaming pipeline](../architecture/streaming-pipeline.md).

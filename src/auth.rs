@@ -1,8 +1,15 @@
-//! Authentication: a shared-password admin gate for the dashboard and
+//! Authentication: store-backed user sessions for the dashboard and
 //! observability endpoints, plus the primitives (constant-time compare,
-//! HMAC-signed session cookies, a failed-attempt throttle) the rest of the
-//! app uses. The `/v1/*` API keeps its own Bearer-key check in `proxy.rs`;
-//! this module is about protecting the operator surface.
+//! PBKDF2 password hashing, HMAC-signed session cookies, a failed-attempt
+//! throttle) the rest of the app uses. The `/v1/*` API keeps its own
+//! client-key check in `proxy.rs`; this module protects the operator surface.
+//!
+//! A session token binds three things: an expiry, the username, and a short
+//! fragment of the user's *current* password hash. The fragment means a
+//! password change (or admin reset) invalidates that user's outstanding
+//! sessions instantly, and the username lookup happens against the live
+//! config store on every request — deleting a user kills their session the
+//! same moment.
 
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,10 +19,11 @@ use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
+use crate::config::StoredConfig;
 use crate::AppState;
 
 const COOKIE: &str = "nimproxy_session";
@@ -28,6 +36,78 @@ pub fn ct_eq(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
+pub fn sha256_hex(s: &str) -> String {
+    hex(&Sha256::digest(s.as_bytes()))
+}
+
+/// PBKDF2-HMAC-SHA256 iteration count for newly minted hashes (OWASP's
+/// recommendation). Every stored hash encodes its own count, so this can be
+/// raised later without invalidating existing credentials.
+const PBKDF2_ITERS: u32 = 600_000;
+
+/// One PBKDF2-HMAC-SHA256 block (dkLen = 32, one SHA-256 output — all a
+/// password hash needs). Hand-rolled over the installed hmac/sha2 pair,
+/// pinned by the RFC 7914 §11 test vectors below.
+fn pbkdf2_sha256(password: &[u8], salt: &[u8], iters: u32) -> [u8; 32] {
+    // Key the HMAC once and clone the initialized state per iteration —
+    // rekeying every round would double the SHA-256 compressions.
+    let keyed = Hmac::<Sha256>::new_from_slice(password).expect("HMAC accepts any key length");
+    let prf = |data: &[u8], extra: &[u8]| {
+        let mut m = keyed.clone();
+        m.update(data);
+        m.update(extra);
+        m.finalize().into_bytes()
+    };
+    let mut u = prf(salt, &1u32.to_be_bytes()); // U1 = PRF(P, S || INT(1))
+    let mut out: [u8; 32] = u.into();
+    for _ in 1..iters {
+        u = prf(&u, &[]);
+        for (o, b) in out.iter_mut().zip(u.iter()) {
+            *o ^= b;
+        }
+    }
+    out
+}
+
+/// Hash a password for storage: `pbkdf2-sha256$<iters>$<salt>$<hash>` (hex).
+pub fn hash_password(password: &str) -> String {
+    let mut salt = [0u8; 16];
+    getrandom::getrandom(&mut salt).expect("OS RNG for salt");
+    let dk = pbkdf2_sha256(password.as_bytes(), &salt, PBKDF2_ITERS);
+    format!("pbkdf2-sha256${PBKDF2_ITERS}${}${}", hex(&salt), hex(&dk))
+}
+
+/// Verify a password against a stored hash string; malformed strings fail
+/// closed. Honors the hash's own iteration count. CPU-bound (~hundreds of
+/// ms by design) — call inside `spawn_blocking` on request paths.
+pub fn verify_password(password: &str, stored: &str) -> bool {
+    let mut parts = stored.split('$');
+    let (Some("pbkdf2-sha256"), Some(iters), Some(salt), Some(hash), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        return false;
+    };
+    let Ok(iters @ 1..) = iters.parse::<u32>() else {
+        return false;
+    };
+    let Some(salt) = unhex(salt) else {
+        return false;
+    };
+    let dk = pbkdf2_sha256(password.as_bytes(), &salt, iters);
+    ct_eq(&hex(&dk), hash)
+}
+
+/// First 8 hex chars of SHA-256(password_hash): enough to bind a session to
+/// a password *generation* (invalidation on change), too short to help brute
+/// force the hash itself.
+fn pw_fragment(password_hash: &str) -> String {
+    sha256_hex(password_hash)[..8].to_owned()
+}
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -35,13 +115,17 @@ fn now() -> u64 {
         .as_secs()
 }
 
-/// Admin auth state: the shared password and a random per-boot signing key.
-/// `None` password means insecure mode (no admin gate).
+/// Session/throttle state: a random per-boot signing key (sessions don't
+/// survive restarts — deliberate, see the auth-posture ADR), the login
+/// throttle, and a memo of the last verified scraper credential so
+/// Prometheus polls don't pay PBKDF2 every 15 seconds.
 pub struct Admin {
-    password: Option<String>,
     signing_key: [u8; 32],
     trust_proxy: bool,
     throttle: Mutex<Throttle>,
+    /// (HMAC(signing_key, "user:pass"), username) of the last verified
+    /// header credential. Cleared whenever users change.
+    scraper_memo: Mutex<Option<([u8; 32], String)>>,
 }
 
 /// Fixed-window failed-login limiter (per process, not per IP — a reverse
@@ -55,60 +139,71 @@ const THROTTLE_WINDOW_SECS: u64 = 60;
 const THROTTLE_MAX_FAILURES: u32 = 10;
 
 impl Admin {
-    pub fn new(password: Option<String>, trust_proxy: bool) -> Self {
+    pub fn new(trust_proxy: bool) -> Self {
         let mut signing_key = [0u8; 32];
         getrandom::getrandom(&mut signing_key).expect("OS RNG for session key");
         Self {
-            password,
             signing_key,
             trust_proxy,
             throttle: Mutex::new(Throttle {
                 window_start: now(),
                 failures: 0,
             }),
+            scraper_memo: Mutex::new(None),
         }
     }
 
-    pub fn enabled(&self) -> bool {
-        self.password.is_some()
-    }
-
-    /// Sign an expiry into a session token: `hex(expiry).hex(hmac)`.
-    fn sign(&self, expiry: u64) -> String {
+    fn mac(&self, parts: &[&[u8]]) -> [u8; 32] {
         let mut mac =
             Hmac::<Sha256>::new_from_slice(&self.signing_key).expect("HMAC accepts any key length");
-        mac.update(&expiry.to_be_bytes());
-        let tag = mac.finalize().into_bytes();
-        format!("{expiry:x}.{}", hex(&tag))
-    }
-
-    /// Verify a session token: HMAC matches (constant-time) and not expired.
-    fn verify(&self, token: &str) -> bool {
-        let Some((exp_hex, tag_hex)) = token.split_once('.') else {
-            return false;
-        };
-        let Ok(expiry) = u64::from_str_radix(exp_hex, 16) else {
-            return false;
-        };
-        if expiry < now() {
-            return false;
+        for p in parts {
+            mac.update(&(p.len() as u64).to_be_bytes()); // length-prefix each part
+            mac.update(p);
         }
-        // Recompute and compare in constant time.
-        let expected = self.sign(expiry);
-        let Some((_, expected_tag)) = expected.split_once('.') else {
-            return false;
-        };
-        ct_eq(tag_hex, expected_tag)
+        mac.finalize().into_bytes().into()
     }
 
-    fn password_matches(&self, candidate: &str) -> bool {
-        self.password
-            .as_deref()
-            .is_some_and(|p| ct_eq(candidate, p))
+    /// Mint a session token for `user`:
+    /// `hex(expiry).hex(username).pw_fragment.hex(hmac)`.
+    pub fn sign_session(&self, expiry: u64, username: &str, password_hash: &str) -> String {
+        let frag = pw_fragment(password_hash);
+        let tag = self.mac(&[&expiry.to_be_bytes(), username.as_bytes(), frag.as_bytes()]);
+        format!(
+            "{expiry:x}.{}.{frag}.{}",
+            hex(username.as_bytes()),
+            hex(&tag)
+        )
+    }
+
+    /// Verify a session token against the live store: signature intact, not
+    /// expired, user still exists, password unchanged since minting.
+    /// Returns the authenticated username.
+    pub fn verify_session(&self, token: &str, sc: &StoredConfig) -> Option<String> {
+        let mut parts = token.split('.');
+        let (Some(exp_hex), Some(user_hex), Some(frag), Some(tag_hex), None) = (
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+        ) else {
+            return None;
+        };
+        let expiry = u64::from_str_radix(exp_hex, 16).ok()?;
+        if expiry < now() {
+            return None;
+        }
+        let username = String::from_utf8(unhex(user_hex)?).ok()?;
+        let expected = self.mac(&[&expiry.to_be_bytes(), username.as_bytes(), frag.as_bytes()]);
+        if !ct_eq(tag_hex, &hex(&expected)) {
+            return None;
+        }
+        let user = sc.user(&username)?;
+        ct_eq(frag, &pw_fragment(&user.password_hash)).then_some(username)
     }
 
     /// Record a failed attempt; returns true if the caller is now throttled.
-    fn note_failure(&self) -> bool {
+    pub fn note_failure(&self) -> bool {
         let mut t = self.throttle.lock().unwrap();
         let n = now();
         if n.saturating_sub(t.window_start) >= THROTTLE_WINDOW_SECS {
@@ -119,10 +214,28 @@ impl Admin {
         t.failures > THROTTLE_MAX_FAILURES
     }
 
-    fn is_throttled(&self) -> bool {
+    pub fn is_throttled(&self) -> bool {
         let t = self.throttle.lock().unwrap();
         now().saturating_sub(t.window_start) < THROTTLE_WINDOW_SECS
             && t.failures > THROTTLE_MAX_FAILURES
+    }
+
+    /// Forget the memoized scraper credential. Call on any change to users
+    /// (password change/reset, user removal) so revocation is immediate.
+    pub fn clear_scraper_memo(&self) {
+        *self.scraper_memo.lock().unwrap() = None;
+    }
+
+    fn memo_hit(&self, cred: &str) -> Option<String> {
+        let tag = self.mac(&[cred.as_bytes()]);
+        let memo = self.scraper_memo.lock().unwrap();
+        let (t, user) = memo.as_ref()?;
+        bool::from(tag.ct_eq(t)).then(|| user.clone())
+    }
+
+    fn memoize(&self, cred: &str, username: &str) {
+        *self.scraper_memo.lock().unwrap() =
+            Some((self.mac(&[cred.as_bytes()]), username.to_owned()));
     }
 
     fn cookie(&self, headers: &HeaderMap, token: &str, max_age: i64) -> String {
@@ -138,13 +251,23 @@ impl Admin {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         let _ = write!(s, "{b:02x}");
     }
     s
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
+    s.as_bytes()
+        .chunks(2)
+        .map(|c| Some(hex_val(c[0])? << 4 | hex_val(c[1])?))
+        .collect()
 }
 
 fn cookie_token(headers: &HeaderMap) -> Option<String> {
@@ -158,43 +281,42 @@ fn cookie_token(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// True if the request carries valid admin credentials: a valid session
-/// cookie, `Authorization: Bearer <password>`, or HTTP Basic with the
-/// password. All secret comparisons are constant-time.
-pub fn authorized(admin: &Admin, headers: &HeaderMap) -> bool {
-    if !admin.enabled() {
-        return true; // insecure mode: no admin gate
-    }
+/// Resolve the request's identity: a valid session cookie, or scraper-style
+/// header credentials (`Authorization: Bearer user:pass` or HTTP Basic)
+/// verified against the store. Header verification pays PBKDF2 once, then
+/// hits an HMAC memo on subsequent polls. Returns the username.
+pub async fn identify(state: &Arc<AppState>, headers: &HeaderMap) -> Option<String> {
     if let Some(tok) = cookie_token(headers) {
-        if admin.verify(&tok) {
-            return true;
+        let sc = state.store.lock().unwrap();
+        if let Some(user) = state.admin.verify_session(&tok, &sc) {
+            return Some(user);
         }
     }
-    if let Some(auth) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Some(bearer) = auth.strip_prefix("Bearer ") {
-            if admin.password_matches(bearer.trim()) {
-                return true;
-            }
-        }
-        if let Some(basic) = auth.strip_prefix("Basic ") {
-            // "user:pass" base64; accept any user, match the password half.
-            if let Some(pass) = decode_basic_password(basic.trim()) {
-                if admin.password_matches(&pass) {
-                    return true;
-                }
-            }
-        }
+    let auth = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let cred = if let Some(bearer) = auth.strip_prefix("Bearer ") {
+        bearer.trim().to_owned()
+    } else if let Some(basic) = auth.strip_prefix("Basic ") {
+        String::from_utf8(base64_decode(basic.trim())?).ok()?
+    } else {
+        return None;
+    };
+    if let Some(user) = state.admin.memo_hit(&cred) {
+        return Some(user);
     }
-    false
-}
-
-fn decode_basic_password(b64: &str) -> Option<String> {
-    let decoded = base64_decode(b64)?;
-    let s = String::from_utf8(decoded).ok()?;
-    Some(s.split_once(':').map(|(_, p)| p).unwrap_or(&s).to_owned())
+    let (username, password) = cred.split_once(':')?;
+    let stored_hash = {
+        let sc = state.store.lock().unwrap();
+        sc.user(username)?.password_hash.clone()
+    };
+    let password = password.to_owned();
+    let ok = tokio::task::spawn_blocking(move || verify_password(&password, &stored_hash))
+        .await
+        .unwrap_or(false);
+    if !ok {
+        return None;
+    }
+    state.admin.memoize(&cred, username);
+    Some(username.to_owned())
 }
 
 /// Minimal base64 decoder (standard alphabet, optional padding) — avoids a
@@ -234,36 +356,52 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// axum middleware: gate the admin surface. HTML clients get a redirect to
-/// the login page; API clients (and scrapers) get a 401.
-pub async fn require_admin(
+/// axum middleware: gate the operator surface. Pre-setup everything routes
+/// to the wizard (browsers) or a 503 (API clients); post-setup a session is
+/// required. The authenticated username is stored in request extensions for
+/// downstream role checks.
+pub async fn require_session(
     State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    if authorized(&state.admin, req.headers()) {
-        return next.run(req).await;
+    if state
+        .setup_required
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return if wants_html(req.headers()) {
+            redirect("/setup")
+        } else {
+            setup_required_json()
+        };
     }
-    let wants_html = req
-        .headers()
+    match identify(&state, req.headers()).await {
+        Some(username) => {
+            req.extensions_mut().insert(Identity(username));
+            next.run(req).await
+        }
+        None if wants_html(req.headers()) => redirect_found("/login"),
+        None => unauthorized_json(),
+    }
+}
+
+/// The authenticated username, inserted by [`require_session`] for the
+/// settings handlers' role and ownership checks.
+#[derive(Clone)]
+#[allow(dead_code)] // read by the settings API (next phase)
+pub struct Identity(pub String);
+
+fn wants_html(headers: &HeaderMap) -> bool {
+    headers
         .get(header::ACCEPT)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|a| a.contains("text/html"));
-    if wants_html {
-        Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, "/login")
-            .body(Body::empty())
-            .unwrap()
-    } else {
-        unauthorized_json()
-    }
+        .is_some_and(|a| a.contains("text/html"))
 }
 
 fn unauthorized_json() -> Response {
     let body = serde_json::json!({
         "error": {
-            "message": "admin authentication required (session cookie or Authorization: Bearer <password>)",
+            "message": "authentication required (session cookie, or Authorization: Bearer <username>:<password>)",
             "type": "proxy_error",
             "code": "unauthorized"
         }
@@ -276,30 +414,68 @@ fn unauthorized_json() -> Response {
         .into_response()
 }
 
-/// `GET /login` — serve the form, or bounce to `/` if already authed.
+pub fn setup_required_json() -> Response {
+    let body = serde_json::json!({
+        "error": {
+            "message": "first-time setup has not been completed; open the dashboard to create the superuser",
+            "type": "proxy_error",
+            "code": "setup_required"
+        }
+    });
+    (StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response()
+}
+
+/// `GET /login` — serve the form, bounce to `/setup` pre-setup, or to `/`
+/// if already authed.
 pub async fn login_page(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    if authorized(&state.admin, &headers) {
-        return redirect("/");
+    if state
+        .setup_required
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return redirect("/setup");
+    }
+    if identify(&state, &headers).await.is_some() {
+        return redirect_found("/");
     }
     login_html(false)
 }
 
-/// `POST /login` — verify the password, set the session cookie.
+/// `POST /login` — verify username + password, set the session cookie.
 pub async fn login_submit(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: String,
 ) -> Response {
+    if state
+        .setup_required
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return redirect("/setup");
+    }
     let admin = &state.admin;
     if admin.is_throttled() {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         return too_many();
     }
+    let username = form_field(&body, "username").unwrap_or_default();
     let password = form_field(&body, "password").unwrap_or_default();
-    if admin.password_matches(&password) {
-        let expiry = now() + SESSION_TTL_SECS;
-        let token = admin.sign(expiry);
-        let cookie = admin.cookie(&headers, &token, SESSION_TTL_SECS as i64);
+    let stored_hash = {
+        let sc = state.store.lock().unwrap();
+        sc.user(&username).map(|u| u.password_hash.clone())
+    };
+    // Verify even for unknown users (against a burner hash) so the response
+    // time doesn't reveal which usernames exist.
+    let hash = stored_hash.clone().unwrap_or_else(|| {
+        "pbkdf2-sha256$600000$00000000000000000000000000000000$0000000000000000000000000000000000000000000000000000000000000000".to_owned()
+    });
+    let pw = password.clone();
+    let ok = tokio::task::spawn_blocking(move || verify_password(&pw, &hash))
+        .await
+        .unwrap_or(false)
+        && stored_hash.is_some();
+    if ok {
+        let hash = stored_hash.expect("checked above");
+        let cookie = mint_session_cookie(&state, &headers, &username, &hash);
         return Response::builder()
             .status(StatusCode::SEE_OTHER)
             .header(header::LOCATION, "/")
@@ -311,6 +487,19 @@ pub async fn login_submit(
     admin.note_failure();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     login_html(true)
+}
+
+/// Mint a Set-Cookie value for a just-verified user — shared by login and
+/// the setup wizard's completion.
+pub fn mint_session_cookie(
+    state: &AppState,
+    headers: &HeaderMap,
+    username: &str,
+    password_hash: &str,
+) -> String {
+    let expiry = now() + SESSION_TTL_SECS;
+    let token = state.admin.sign_session(expiry, username, password_hash);
+    state.admin.cookie(headers, &token, SESSION_TTL_SECS as i64)
 }
 
 /// `POST /logout` — clear the cookie.
@@ -332,6 +521,10 @@ fn redirect(to: &str) -> Response {
         .unwrap()
 }
 
+fn redirect_found(to: &str) -> Response {
+    redirect(to)
+}
+
 fn too_many() -> Response {
     (
         StatusCode::TOO_MANY_REQUESTS,
@@ -342,7 +535,7 @@ fn too_many() -> Response {
 }
 
 /// Parse a single field from an application/x-www-form-urlencoded body.
-fn form_field(body: &str, field: &str) -> Option<String> {
+pub fn form_field(body: &str, field: &str) -> Option<String> {
     for pair in body.split('&') {
         if let Some((k, v)) = pair.split_once('=') {
             if k == field {
@@ -387,7 +580,7 @@ fn hex_val(b: u8) -> Option<u8> {
 
 fn login_html(error: bool) -> Response {
     let err = if error {
-        r#"<p class="err">Incorrect password.</p>"#
+        r#"<p class="err">Incorrect username or password.</p>"#
     } else {
         ""
     };
@@ -410,9 +603,10 @@ button {{ width:100%; font:inherit; font-weight:600; padding:9px; border:0; bord
 .err {{ color:#d03b3b; font-size:13px; margin:0 0 12px; }}
 </style></head><body>
 <form class="card" method="post" action="/login">
-  <h1>NIM&nbsp;Proxy</h1><p class="sub">Enter the dashboard password.</p>
+  <h1>NIM&nbsp;Proxy</h1><p class="sub">Sign in to the dashboard.</p>
   {err}
-  <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password">
+  <input type="text" name="username" placeholder="Username" autofocus autocomplete="username">
+  <input type="password" name="password" placeholder="Password" autocomplete="current-password">
   <button type="submit">Sign in</button>
 </form></body></html>"##
     );
@@ -432,9 +626,72 @@ button {{ width:100%; font:inherit; font-weight:600; padding:9px; border:0; bord
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Role, User};
 
     fn admin() -> Admin {
-        Admin::new(Some("hunter2".into()), false)
+        Admin::new(false)
+    }
+
+    fn store_with(username: &str, password_hash: &str) -> StoredConfig {
+        StoredConfig {
+            users: vec![User {
+                username: username.into(),
+                password_hash: password_hash.into(),
+                role: Role::Superuser,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn pbkdf2_matches_rfc7914_vectors() {
+        // RFC 7914 §11 PBKDF2-HMAC-SHA256 vectors (first 32 of dkLen=64 —
+        // blocks are independent, and we only ever derive one).
+        assert_eq!(
+            hex(&pbkdf2_sha256(b"passwd", b"salt", 1)),
+            "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc"
+        );
+        assert_eq!(
+            hex(&pbkdf2_sha256(b"Password", b"NaCl", 80_000)),
+            "4ddcd8f60b98be21830cee5ef22701f9641a4418d04c0414aeff08876b34ab56"
+        );
+    }
+
+    #[test]
+    fn password_hash_round_trips_and_rejects_wrong_password() {
+        // Manually built low-iteration hash: the count is read back from the
+        // string, so verification honors it (this is also what keeps test
+        // fixtures cheap without a prod knob).
+        let dk = pbkdf2_sha256(b"hunter22", b"\x01\x02\x03\x04", 1_000);
+        let stored = format!("pbkdf2-sha256$1000$01020304${}", hex(&dk));
+        assert!(verify_password("hunter22", &stored));
+        assert!(!verify_password("hunter23", &stored));
+    }
+
+    #[test]
+    fn malformed_hash_strings_fail_closed() {
+        for bad in [
+            "",
+            "plaintext",
+            "pbkdf2-sha256$0$aa$bb",       // zero iterations
+            "pbkdf2-sha256$x$aa$bb",       // non-numeric iterations
+            "pbkdf2-sha256$1000$zz$bb",    // bad salt hex
+            "pbkdf2-sha256$1000$aa",       // missing field
+            "pbkdf2-sha256$1000$aa$bb$cc", // extra field
+            "scrypt$1000$aa$bb",           // unknown scheme
+        ] {
+            assert!(!verify_password("x", bad), "accepted: {bad}");
+        }
+    }
+
+    #[test]
+    fn hash_password_emits_current_format() {
+        let h = hash_password("correct horse");
+        assert!(h.starts_with("pbkdf2-sha256$600000$"), "{h}");
+        assert!(verify_password("correct horse", &h));
+        assert!(!verify_password("wrong horse", &h));
+        // Distinct salts: hashing the same password twice differs.
+        assert_ne!(h, hash_password("correct horse"));
     }
 
     #[test]
@@ -446,60 +703,104 @@ mod tests {
     }
 
     #[test]
-    fn valid_session_round_trips() {
+    fn valid_session_round_trips_and_carries_identity() {
         let a = admin();
-        let tok = a.sign(now() + 100);
-        assert!(a.verify(&tok));
+        let sc = store_with("alice", "hash-v1");
+        let tok = a.sign_session(now() + 100, "alice", "hash-v1");
+        assert_eq!(a.verify_session(&tok, &sc).as_deref(), Some("alice"));
     }
 
     #[test]
     fn expired_session_rejected() {
         let a = admin();
-        let tok = a.sign(now() - 1);
-        assert!(!a.verify(&tok));
+        let sc = store_with("alice", "hash-v1");
+        let tok = a.sign_session(now() - 1, "alice", "hash-v1");
+        assert!(a.verify_session(&tok, &sc).is_none());
     }
 
     #[test]
     fn tampered_session_rejected() {
         let a = admin();
-        let tok = a.sign(now() + 100);
-        // Flip the last hex nibble of the tag.
+        let sc = store_with("alice", "hash-v1");
+        let tok = a.sign_session(now() + 100, "alice", "hash-v1");
         let mut chars: Vec<char> = tok.chars().collect();
         let last = chars.len() - 1;
         chars[last] = if chars[last] == 'a' { 'b' } else { 'a' };
         let tampered: String = chars.into_iter().collect();
-        assert!(!a.verify(&tampered));
+        assert!(a.verify_session(&tampered, &sc).is_none());
     }
 
     #[test]
     fn foreign_key_session_rejected() {
         let a = admin();
         let b = admin(); // different random signing key
-        let tok = a.sign(now() + 100);
-        assert!(!b.verify(&tok), "token signed by a must not verify under b");
+        let sc = store_with("alice", "hash-v1");
+        let tok = a.sign_session(now() + 100, "alice", "hash-v1");
+        assert!(b.verify_session(&tok, &sc).is_none());
     }
 
     #[test]
-    fn basic_auth_password_extracted() {
-        // base64("alice:hunter2")
-        let b64 = "YWxpY2U6aHVudGVyMg==";
-        assert_eq!(decode_basic_password(b64).as_deref(), Some("hunter2"));
-    }
-
-    #[test]
-    fn bearer_and_basic_authorize() {
+    fn password_change_invalidates_existing_sessions() {
         let a = admin();
-        let mut h = HeaderMap::new();
-        h.insert(header::AUTHORIZATION, "Bearer hunter2".parse().unwrap());
-        assert!(authorized(&a, &h));
-        h.insert(header::AUTHORIZATION, "Bearer wrong".parse().unwrap());
-        assert!(!authorized(&a, &h));
+        let tok = a.sign_session(now() + 100, "alice", "hash-v1");
+        let rotated = store_with("alice", "hash-v2");
+        assert!(
+            a.verify_session(&tok, &rotated).is_none(),
+            "session minted against the old password hash must die on change"
+        );
     }
 
     #[test]
-    fn insecure_mode_allows_all() {
-        let a = Admin::new(None, false);
-        assert!(authorized(&a, &HeaderMap::new()));
+    fn deleted_user_session_rejected() {
+        let a = admin();
+        let tok = a.sign_session(now() + 100, "alice", "hash-v1");
+        let sc = store_with("bob", "hash-v1");
+        assert!(a.verify_session(&tok, &sc).is_none());
+    }
+
+    #[test]
+    fn session_username_is_authenticated_not_just_parsed() {
+        // Re-labeling the username segment without re-signing must fail.
+        let a = admin();
+        let sc = StoredConfig {
+            users: vec![
+                User {
+                    username: "alice".into(),
+                    password_hash: "h".into(),
+                    role: Role::User,
+                },
+                User {
+                    username: "admin".into(),
+                    password_hash: "h".into(),
+                    role: Role::Superuser,
+                },
+            ],
+            ..Default::default()
+        };
+        let tok = a.sign_session(now() + 100, "alice", "h");
+        let mut parts: Vec<&str> = tok.split('.').collect();
+        let admin_hex = hex(b"admin");
+        parts[1] = &admin_hex;
+        let forged = parts.join(".");
+        assert!(a.verify_session(&forged, &sc).is_none());
+    }
+
+    #[test]
+    fn scraper_memo_round_trips_and_clears() {
+        let a = admin();
+        assert!(a.memo_hit("alice:pw").is_none());
+        a.memoize("alice:pw", "alice");
+        assert_eq!(a.memo_hit("alice:pw").as_deref(), Some("alice"));
+        assert!(a.memo_hit("alice:other").is_none());
+        a.clear_scraper_memo();
+        assert!(a.memo_hit("alice:pw").is_none());
+    }
+
+    #[test]
+    fn basic_auth_decodes() {
+        // base64("alice:hunter2")
+        let decoded = base64_decode("YWxpY2U6aHVudGVyMg==").unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "alice:hunter2");
     }
 
     #[test]

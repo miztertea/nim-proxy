@@ -40,8 +40,8 @@ Watch the **Release** workflow (`image` job → `release` job) under Actions.
 ```sh
 docker pull ghcr.io/miztertea/nim-proxy:X.Y.Z
 docker buildx imagetools inspect ghcr.io/miztertea/nim-proxy:X.Y.Z   # amd64 + arm64
-docker run -d --name rel-smoke -e NIM_API_KEYS=test -e INSECURE_NO_AUTH=true \
-  -p 127.0.0.1:8000:8000 ghcr.io/miztertea/nim-proxy:X.Y.Z
+docker run -d --name rel-smoke -p 127.0.0.1:8000:8000 ghcr.io/miztertea/nim-proxy:X.Y.Z
+# boots into setup-required (no store yet); /health is public regardless
 curl -fsS http://127.0.0.1:8000/health && docker logs rel-smoke | head -20  # banner shows vX.Y.Z
 docker rm -f rel-smoke
 

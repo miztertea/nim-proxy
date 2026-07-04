@@ -37,6 +37,17 @@ detail**:
   provisioning, rate-limit pressure), lane utilization meters, 429s/min by
   lane, per-lane table.
 
+The tabs are **identical for every role** — all authenticated users see the
+same observability, the deliberate shared-pool-among-friends model. v0.6.0 adds
+a **Settings** area (its own sub-nav: Access & keys · Server · Users · Account;
+Server/Users hidden for the `user` role) that reads role-filtered data from
+`GET /api/config` (hidden sections are absent from the payload, not CSS-hidden —
+see [client-auth](client-auth.md) and
+[ui-managed-config-store](../decisions/ui-managed-config-store.md)), and a
+**Model pressure** card on Reliability (worker-exhaustion rate + per-model
+`inflight vs limit` rows) that appears only once the
+[governor](governor.md) has engaged.
+
 The former **Compare** tab (head-to-head scorecard + bar race) was folded
 into Models as a section — it never carried enough unique content to justify
 a sixth tab. See

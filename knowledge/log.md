@@ -6,6 +6,53 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — UI-managed config store, multi-user, governor (v0.6.0)
+
+App-level configuration moved out of env vars and into a store the app owns,
+edited from a new dashboard Settings area and claimed by a first-run wizard.
+New ADR [ui-managed-config-store](decisions/ui-managed-config-store.md); the
+[auth-posture](decisions/auth-posture-and-dashboard-password.md) ADR gained a
+v0.6.0 amendment.
+
+- **Store**: `DATA_DIR/config.json`, version 1, atomic writes (tmp + fsync +
+  rename + dir fsync), 0600, snapshot-cached (`RwLock<Arc<Config>>`). JSON not
+  SQLite (kilobytes, read-mostly, single-writer; recovery = text edit; zero
+  binary weight — revisit triggers recorded in the ADR). Corrupt/unreadable/
+  `version>1` = **hard boot error**, never a silent fall-through to setup.
+- **First run**: `/v1` → `503 setup_required`, browsers → `/setup`, a 3-step
+  wizard (superuser [password ≥10] → ≥1 NIM key validated live → finish) does
+  one atomic POST, mints a session, lands on the dashboard. Claim risk accepted
+  (matches Grafana/Portainer; loud boot log; no claim token).
+- **Multi-user**: roles superuser (undeletable admin — deletion guard only) /
+  admin / user; per-key ownership; `GET /api/config` filtered server-side.
+  Sessions carry `username || first8(sha256(password_hash))`, so password
+  change/reset invalidates sessions and role/deletion apply next request.
+  `INSECURE_NO_AUTH` retired → store `open|keyed` mode, `/v1`-only. Client keys
+  are `npk_…` 128-bit secrets shown once, stored as SHA-256 digests. Passwords
+  PBKDF2-HMAC-SHA256 600k, RFC 7914 vectors.
+- **Env retired to 5 container vars** (`HOST`, `PORT`, `DATA_DIR`, `RUST_LOG`,
+  `TRUST_PROXY`); legacy vars ignored with one boot warning; no seed-from-env,
+  no migration. `configure-env` rewritten; `.env.example` shrunk.
+- **Model-pressure governor** (new component page
+  [governor](architecture/governor.md)): classifies NIM's per-model
+  worker-exhaustion error apart from 429s and backs off the **model** (never
+  benches the lane); adaptive AIMD (engage at half in-flight, +1/stable-min,
+  dissolve after 30 clean min) with optional pinned caps. New metrics
+  `nimproxy_worker_exhausted_total` / `nimproxy_model_inflight` /
+  `nimproxy_model_limit`; a Reliability "Model pressure" card appears once
+  engaged.
+- **Key pool**: per-key rpm (default 40, 1–10000) replacing global
+  `RPM_PER_KEY`; live `rebuild` with rate-state carryover; superuser-key pool
+  floor invariant. [key-pool](architecture/key-pool.md) updated.
+- Docs swept: README (quickstart→wizard, 5-var table, auth/sharing/metrics),
+  `deploy-docker` (volume now holds credentials), `sharing-with-friends`
+  (create-a-user flow), `client-auth` rewritten, `examples/README`, CHANGELOG.
+- **Lint** — flagged in the summary: the Settings admin API (PR 4) and Settings
+  UI incl. `npk_` client-key generation and role-filtered `/api/config` (PR 5)
+  are not yet in `src/` on this branch; docs describe the intended v0.6.0
+  surface per the plan. The store, wizard, auth, and governor **are**
+  implemented.
+
 ## [2026-07-03] ingest — dashboard operator-console redesign
 
 Presentation-only redesign of `src/dashboard.html` (data layer, metrics, and

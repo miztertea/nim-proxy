@@ -24,8 +24,8 @@ Worked example — **50 clients, 3 keys (120 RPM)**:
   request per client in flight); a slot frees every 0.5 s, so the 50th
   waiter waits ~25 s. FIFO spreads the slowdown evenly. Heartbeats keep
   every stream alive throughout.
-- **Load shedding** begins when queue wait exceeds `MAX_WAIT_SECS` (900 s
-  default) — roughly `0.67 × keys × MAX_WAIT` simultaneous waiters
+- **Load shedding** begins when queue wait exceeds the `max_wait` limit (900 s
+  default, in Settings) — roughly `0.67 × keys × max_wait` simultaneous waiters
   (~2,000 per 5 keys). Below that: slower, never broken.
 
 Measured (100 clients × 3 requests, 3 enforced lanes, `scripts/loadtest.py`):
