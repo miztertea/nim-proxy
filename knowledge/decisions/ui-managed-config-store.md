@@ -127,7 +127,12 @@ data plane is closed pre-setup, compose binds loopback, and boot logs a loud
 `SETUP REQUIRED — the FIRST VISITOR becomes the superuser` line telling the
 operator to finish setup immediately. No claim token — it would be one more
 secret to route to the operator for a window measured in seconds, with no
-deployments upgrading into it.
+deployments upgrading into it. The one pre-auth surface in that window, the
+wizard's key-validation probe (`/setup/validate-key`, which fetches the
+operator-supplied upstream to confirm a key), rejects link-local targets
+(`169.254.0.0/16`, `fe80::/10`) so it can't be turned into a cloud-metadata
+SSRF oracle — loopback and RFC1918 stay allowed because local and LAN
+self-hosted NIM are real upstreams (`config::check_base_url`).
 
 ## Consequences
 

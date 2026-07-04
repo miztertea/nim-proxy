@@ -1887,3 +1887,31 @@ async fn authenticated_key_validation_ignores_caller_supplied_base_url() {
     );
     assert_eq!(v["models"], 1, "{v}");
 }
+
+#[tokio::test]
+async fn setup_key_validation_rejects_link_local_base_url() {
+    // Pre-auth setup probe must not be usable as an SSRF oracle against the
+    // cloud metadata endpoint; loopback/LAN upstreams stay allowed.
+    let mock = start_mock().await;
+    let proxy = support::start_proxy_fresh().await;
+
+    let bad = client()
+        .post(proxy.url("/setup/validate-key"))
+        .json(
+            &serde_json::json!({"key": "x", "base_url": "http://169.254.169.254/latest/meta-data"}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400, "link-local base_url must be rejected");
+
+    // A normal (loopback mock) upstream still validates fine.
+    let ok = client()
+        .post(proxy.url("/setup/validate-key"))
+        .json(&serde_json::json!({"key": "x", "base_url": mock.url}))
+        .send()
+        .await
+        .unwrap();
+    let v: serde_json::Value = ok.json().await.unwrap();
+    assert_eq!(v["ok"], true, "loopback upstream still probes: {v}");
+}
