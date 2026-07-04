@@ -227,7 +227,7 @@ inject into the exposition format or explode the registry.
 Three layers, all runnable locally:
 
 ```sh
-cargo test          # 29 unit + 21 end-to-end tests (real binary vs scripted mock NIM)
+cargo test          # 65 unit + 44 end-to-end tests (real binary vs scripted mock NIM)
 ```
 
 The e2e suite covers auth (client keys, multi-user login / session cookie / scraper Bearer, role and ownership enforcement, the fail-closed setup posture and the wizard), the config store (round-trip across restart, atomic-save, refusal on corrupt/future-version stores), 429 ride-out with key failover, per-model worker-exhaustion governing, Retry-After timing, pacing enforcement (incl. live pool rebuilds mid-run), fail-fast 504s, conversation affinity, models caching, usage injection (incl. rejection fallback), stalled-stream recovery, label-injection sanitizing, security headers, metrics accuracy (incl. request-shape & response-quality signal on both the streaming and buffered paths, and the finish-reason cardinality clamp), history persistence across restart, and SIGTERM. Tests boot the real binary against a pre-written `config.json` (or drive the `/setup` wizard) in a tempdir `DATA_DIR`.
