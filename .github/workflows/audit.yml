@@ -10,7 +10,7 @@ name: Security audit
 # activity — acceptable; an inactive repo isn't shipping releases either.
 on:
   schedule:
-    - cron: "42 6 * * 1" # weekly, Monday 06:42 UTC
+    - cron: "43 6 * * 1" # weekly, Monday 06:42 UTC
   workflow_dispatch: {}
 
 permissions:
