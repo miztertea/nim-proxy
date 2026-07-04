@@ -6,6 +6,32 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — repo-rigor pass 3: fuzzing the untrusted-byte parsers
+
+- **cargo-fuzz harnesses** for the three surfaces that parse bytes we don't
+  control: `SseScan::feed` (upstream SSE arrives arbitrarily fragmented —
+  fed whole AND re-fragmented at an input-derived chunk size, asserting the
+  1 MiB pathological-line guard), `sanitize_label` (asserting the output
+  invariants that ARE the metric-injection defense: non-empty, ≤64 chars,
+  safe charset), and the `StoredConfig` JSON round-trip (operator-edited
+  file: parse never panics, serialize→parse→serialize is a fixpoint).
+- **Crate restructure**: src/main.rs became a 3-line shim over src/lib.rs
+  (`nim_proxy::run()`) so the fuzz crate can link the internals. Modules
+  stay private; the fuzz surface is `#[doc(hidden)]` wrapper fns re-exported
+  as `fuzz_proxy`/`fuzz_config`. All `crate::` paths survived the move
+  unchanged; 69 unit + 53 e2e tests unaffected.
+- **fuzz.yml**: weekly + dispatch + PR-path-filtered smoke pass (60 s per
+  target, nightly via explicit `cargo +nightly` which outranks
+  rust-toolchain.toml); crash reproducers upload as artifacts on failure.
+  Deliberately not a required merge check. ClusterFuzzLite deferred —
+  OSS-Fuzz scaffolding is disproportionate; escalate if Scorecard doesn't
+  credit in-repo cargo-fuzz or a target finds a real bug.
+- Seed corpora committed under `fuzz/seeds/` (real SSE shapes incl.
+  truncated mid-JSON, hostile label bytes, a full store.json), marked
+  `binary` in .gitattributes so eol-normalization can't corrupt them.
+  `fuzz/corpus/` is the gitignored working corpus — a local run generates
+  thousands of evolved entries that must never be committed.
+
 ## [2026-07-04] ingest — repo-rigor pass 2: hygiene, metadata, MSRV, release-notes taxonomy
 
 - **MSRV**: measured honestly with `cargo msrv find` → **1.87.0**, re-verified

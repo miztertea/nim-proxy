@@ -8,6 +8,10 @@
 *.jpeg binary
 *.ico binary
 
+# Fuzz seed inputs are exact bytes; eol-normalizing them would corrupt the
+# corpus.
+fuzz/seeds/** binary
+
 # The design/ prototypes are reference documents (~220 KB of generated HTML),
 # not shipped source — keep them out of GitHub's language statistics so the
 # repo reads as the Rust project it is. src/*.html stays counted: the embedded

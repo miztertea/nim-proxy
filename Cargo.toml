@@ -13,6 +13,11 @@ rust-version = "1.87"
 keywords = ["proxy", "openai", "rate-limiting", "nvidia", "llm"]
 categories = ["network-programming", "web-programming::http-server"]
 
+# `--cfg fuzzing` is set by cargo-fuzz for the whole build graph; teach the
+# unexpected_cfgs lint about it so -D warnings stays clean in normal builds.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }

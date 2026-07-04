@@ -1,0 +1,8 @@
+data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"ls"}},{"index":1}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":120,"completion_tokens":48,"completion_tokens_details":{"reasoning_tokens":12}}}
+
+data: [DONE]
+

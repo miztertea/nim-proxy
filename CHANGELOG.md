@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fuzz testing** (`fuzz/` + a weekly smoke-fuzz workflow): cargo-fuzz
+  targets for the three untrusted-byte parsers — the upstream SSE scanner
+  (arbitrary fragmentation, buffer-bound invariant), the Prometheus-label
+  sanitizer (charset/length/non-empty invariants), and the config-store
+  JSON round-trip (parse never panics; save→load is a fixpoint). The crate
+  is now a thin binary over a library so the fuzz harnesses can link the
+  internals; no public API is added (`#[doc(hidden)]` wrappers only).
+
 - **Repo hygiene & metadata**: `.editorconfig`, `.gitattributes` (LF
   normalization + language-stats fix so the repo reads as Rust, not HTML),
   `rust-toolchain.toml` (stable + rustfmt/clippy for contributors),

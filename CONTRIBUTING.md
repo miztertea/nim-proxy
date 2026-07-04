@@ -95,6 +95,16 @@ It exits non-zero on any client-visible failure **or a single upstream rate
 violation**. Zero violations is a hard requirement, not a target — this harness
 is what caught the boundary-jitter bug that motivated the 1 s window margin.
 
+### Fuzzing
+
+The untrusted-byte parsers (SSE scanner, label sanitizer, config round-trip)
+have cargo-fuzz harnesses under `fuzz/` — CI smoke-fuzzes them weekly and on
+PRs that touch the fuzzed code. To run one locally (needs nightly):
+
+```sh
+cargo +nightly fuzz run sse_scan -- -max_total_time=60
+```
+
 ### The dashboard
 
 The dashboard is **one embedded file**, `src/dashboard.html` — no build step and

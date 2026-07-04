@@ -776,3 +776,26 @@ mod tests {
         assert!(sc.runtime().clients.is_none());
     }
 }
+
+/// Fuzzing-only surface (see fuzz/): the store parser must never panic on
+/// arbitrary operator-edited JSON, and a parsed config must round-trip to a
+/// serialization fixpoint (what we save is what we load).
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub mod fuzz {
+    pub fn config_roundtrip(data: &[u8]) {
+        let Ok(text) = std::str::from_utf8(data) else {
+            return;
+        };
+        if let Ok(cfg) = serde_json::from_str::<super::StoredConfig>(text) {
+            let ser = serde_json::to_string(&cfg).expect("a parsed config must serialize");
+            let re: super::StoredConfig =
+                serde_json::from_str(&ser).expect("a saved config must parse back");
+            let ser2 = serde_json::to_string(&re).expect("re-serialize");
+            assert_eq!(
+                ser, ser2,
+                "serialize -> parse -> serialize must be a fixpoint"
+            );
+        }
+    }
+}
