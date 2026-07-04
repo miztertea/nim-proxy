@@ -32,6 +32,19 @@ description: Append-only record of ingests, decisions, and maintenance passes.
   `fuzz/corpus/` is the gitignored working corpus — a local run generates
   thousands of evolved entries that must never be committed.
 
+## [2026-07-04] gotcha — pin the PEELED commit SHA for annotated tags
+
+Bumping CodeQL Action v3→v4 broke the Scorecard `publish_results` step:
+`400 … imposter commit: 8533807f…`. Cause: the bulk `git ls-remote 'refs/tags/v4*'
+| grep -v '^{}'` dropped the peeled entries, so for github/codeql-action's
+**annotated** tags it returned the tag-OBJECT SHA, not the commit. GitHub
+Actions dereferences a tag-object SHA silently (init/analyze ran green), but
+Scorecard's imposter-commit check rejects any pin that isn't a real commit.
+Fix: pin the `refs/tags/vX^{}` peeled commit SHA
+(`54f647b7…` for v4.36.3). Rule going forward: always resolve pins with
+`git ls-remote <repo> refs/tags/TAG 'refs/tags/TAG^{}'` and take the `^{}`
+value when the two differ.
+
 ## [2026-07-04] ingest — repo-rigor pass 2: hygiene, metadata, MSRV, release-notes taxonomy
 
 - **MSRV**: measured honestly with `cargo msrv find` → **1.87.0**, re-verified
