@@ -9,6 +9,13 @@ name: Release
 # deliberately trigger no follow-on workflow runs (GitHub suppresses them to
 # prevent recursion) — which is exactly right here: THIS run carries the
 # release end-to-end and never depends on the tag-push event.
+#
+# The image is built per-arch on NATIVE runners in parallel (amd64 on
+# ubuntu-latest, arm64 on ubuntu-24.04-arm — free for public repos), pushed
+# by digest, then stitched into one multi-arch manifest. QEMU emulation made
+# the arm64 Rust compile the whole run's critical path (~30 min); native
+# builds bring the release to a few minutes. Signing, provenance attestation,
+# and the SBOM all target the final manifest digest.
 on:
   push:
     tags: ["v*"]
@@ -66,20 +73,25 @@ jobs:
             echo "tag=v$version"
           } >> "$GITHUB_OUTPUT"
 
-  image:
-    name: image → GHCR (multi-arch, signed)
+  build:
+    name: build ${{ matrix.arch }} (native)
     needs: prepare
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-      packages: write # push to GHCR
-      id-token: write # keyless cosign + provenance via OIDC
-      attestations: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      packages: write # push per-arch image by digest
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -87,78 +99,124 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Tags come from the prepare job, not from the git ref: the dispatch
-      # path has no tag ref at trigger time, so semver patterns would be empty.
+      # Labels only — tags are applied by the merge job on the manifest.
       - id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=${{ needs.prepare.outputs.version }}
-            type=raw,value=${{ needs.prepare.outputs.minor }}
-            type=raw,value=latest
       - id: build
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
+          # Push by digest only; the merge job stitches the tagged manifest.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
+      # The documented multi-runner pattern: matrix job outputs clobber each
+      # other, so each leg exports its digest as an artifact file instead.
+      - name: Export digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+      # Extract the exact static binary we just shipped — natively on this
+      # runner: create (not run) a container and copy /nim-proxy out.
+      - name: Extract release binary
+        run: |
+          set -euo pipefail
+          cid=$(docker create --platform "${{ matrix.platform }}" "${IMAGE}@${{ steps.build.outputs.digest }}")
+          docker cp "$cid:/nim-proxy" "nim-proxy-${{ matrix.arch }}"
+          docker rm "$cid" >/dev/null
+          tar -czf "nim-proxy-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" "nim-proxy-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.arch }}
+          path: nim-proxy-*.tar.gz
+          if-no-files-found: error
+
+  merge:
+    name: manifest → sign → attest → SBOM
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the tagged multi-arch manifest
+      id-token: write # keyless cosign + provenance via OIDC
+      attestations: write
+    outputs:
+      digest: ${{ steps.manifest.outputs.digest }}
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v4
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - id: manifest
+        name: Stitch the multi-arch manifest and tag it
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${IMAGE}:${{ needs.prepare.outputs.version }}" \
+            -t "${IMAGE}:${{ needs.prepare.outputs.minor }}" \
+            -t "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)
+          digest=$(docker buildx imagetools inspect \
+            "${IMAGE}:${{ needs.prepare.outputs.version }}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
       - name: Sign image (keyless)
-        run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
+        run: cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
-      # Extract the exact static binaries we just shipped (no separate cross
-      # toolchain): create — not run — a container per arch and copy /nim-proxy.
-      # The classic image store maps a digest ref to one platform at a time, so
-      # untag between arches or the second pull fails with "cannot overwrite
-      # digest".
-      - name: Extract release binaries
-        run: |
-          set -euo pipefail
-          for arch in amd64 arm64; do
-            cid=$(docker create --platform "linux/$arch" "${IMAGE}@${{ steps.build.outputs.digest }}")
-            docker cp "$cid:/nim-proxy" "nim-proxy-$arch"
-            docker rm "$cid" >/dev/null
-            docker rmi "${IMAGE}@${{ steps.build.outputs.digest }}" >/dev/null
-            tar -czf "nim-proxy-${{ needs.prepare.outputs.version }}-linux-$arch.tar.gz" "nim-proxy-$arch"
-            rm "nim-proxy-$arch"
-          done
       - name: Generate SBOM (SPDX)
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          image: ${{ env.IMAGE }}@${{ steps.manifest.outputs.digest }}
           format: spdx-json
           output-file: nim-proxy-sbom.spdx.json
       - uses: actions/upload-artifact@v7
         with:
-          name: release-assets
-          path: |
-            nim-proxy-*.tar.gz
-            nim-proxy-sbom.spdx.json
+          name: sbom
+          path: nim-proxy-sbom.spdx.json
           if-no-files-found: error
 
   release:
     name: GitHub Release
-    needs: [prepare, image]
+    needs: [prepare, merge]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: release-assets
+          pattern: "{binary-*,sbom}"
+          merge-multiple: true
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
