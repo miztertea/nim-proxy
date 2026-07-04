@@ -375,6 +375,31 @@ fn label_ok(s: &str, max: usize) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+/// Guard an upstream URL: require an http(s) scheme, and refuse the
+/// link-local range (169.254.0.0/16 and IPv6 fe80::/10) — that's the cloud
+/// metadata endpoint (169.254.169.254) and has no legitimate NIM use, so
+/// blocking it defangs the setup-probe SSRF while still allowing loopback
+/// and RFC1918 hosts (local and LAN self-hosted NIM are real use cases).
+pub fn check_base_url(base: &str) -> Result<(), String> {
+    let rest = base
+        .strip_prefix("http://")
+        .or_else(|| base.strip_prefix("https://"))
+        .ok_or("upstream base_url must start with http:// or https://")?;
+    let authority = rest.split('/').next().unwrap_or("");
+    // A bracketed IPv6 literal keeps its inner colons; otherwise the host is
+    // everything up to the port separator.
+    let host = if let Some(inner) = authority.strip_prefix('[') {
+        inner.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+    let host = host.to_ascii_lowercase();
+    if host.starts_with("169.254.") || host.starts_with("fe80:") {
+        return Err("upstream base_url must not point at a link-local address".into());
+    }
+    Ok(())
+}
+
 /// One shared rulebook for the wizard, every settings endpoint, and boot.
 pub fn validate(sc: &StoredConfig) -> Result<(), String> {
     if sc.version != 1 {
@@ -400,10 +425,7 @@ pub fn validate(sc: &StoredConfig) -> Result<(), String> {
     {
         return Err("reference prices must be non-negative numbers".into());
     }
-    let base = &sc.upstream.base_url;
-    if !(base.starts_with("http://") || base.starts_with("https://")) {
-        return Err("upstream base_url must start with http:// or https://".into());
-    }
+    check_base_url(&sc.upstream.base_url)?;
 
     let mut names = std::collections::HashSet::new();
     for u in &sc.users {
@@ -543,6 +565,31 @@ mod tests {
                 }],
             },
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn check_base_url_blocks_link_local_but_allows_local_and_lan() {
+        // Legitimate NIM locations pass.
+        for ok in [
+            "https://integrate.api.nvidia.com",
+            "http://127.0.0.1:9999",
+            "http://localhost:8000",
+            "http://192.168.1.50:8000", // LAN self-hosted NIM
+            "http://10.0.0.4",
+        ] {
+            assert!(check_base_url(ok).is_ok(), "{ok} should be allowed");
+        }
+        // Link-local (cloud metadata) and non-http schemes are refused.
+        for bad in [
+            "http://169.254.169.254/latest/meta-data",
+            "http://169.254.169.254",
+            "http://[fe80::1]/x",
+            "file:///etc/passwd",
+            "gopher://169.254.169.254",
+            "integrate.api.nvidia.com", // no scheme
+        ] {
+            assert!(check_base_url(bad).is_err(), "{bad} should be rejected");
         }
     }
 

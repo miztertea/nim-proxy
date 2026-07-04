@@ -186,6 +186,12 @@ pub async fn setup_validate_key(
         .clone()
         .unwrap_or_else(|| state.store.lock().unwrap().upstream.base_url.clone());
     let base = base.trim().trim_end_matches('/').to_owned();
+    // The wizard's advanced path lets an unauthenticated pre-claim caller
+    // supply base_url, so guard it against the link-local metadata range
+    // before probing (loopback/RFC1918 stay allowed for self-hosted NIM).
+    if let Err(e) = config::check_base_url(&base) {
+        return json_error(StatusCode::BAD_REQUEST, "invalid_base_url", e);
+    }
     axum::Json(match probe_key(&state.http, &base, req.key.trim()).await {
         Ok(models) => serde_json::json!({"ok": true, "models": models}),
         Err(e) => serde_json::json!({"ok": false, "error": e}),
