@@ -6,6 +6,37 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — repo-rigor pass 2: hygiene, metadata, MSRV, release-notes taxonomy
+
+- **MSRV**: measured honestly with `cargo msrv find` → **1.87.0**, re-verified
+  with `--all-targets` (dev-deps included). Declared in Cargo.toml
+  `rust-version` and enforced by a CI `msrv` job that must `rm
+  rust-toolchain.toml` first — the toolchain file (channel=stable) outranks
+  `rustup default`, so without the rm the job would silently test stable.
+- **Language stats**: GitHub listed the repo as an HTML project (design/
+  prototypes ≈220 KB HTML vs ≈198 KB Rust). `.gitattributes` marks `design/**`
+  linguist-documentation; `src/*.html` deliberately stays counted (shipped
+  source).
+- **Release notes**: `.github/release.yml` groups generated notes by PR label
+  (Dependabot's default `dependencies` label buckets its bumps for free);
+  `skip-changelog` opts a PR out. Labels to create in repo settings:
+  `security`, `breaking-change`, `skip-changelog`.
+- **Docker base digest-pinned** (`rust:1-alpine@sha256:a41f…`); Dependabot's
+  docker ecosystem advances the pin. `FROM scratch` has no digest to pin.
+- Also: `.editorconfig`, `rust-toolchain.toml` (stable channel — a pinned
+  1.XX rejected as weekly bump chores), SUPPORT.md, Best Practices badge
+  (bestpractices.dev project 13484, registered by the maintainer same day),
+  README contributing/security/support section.
+- **CodeQL Rust caveat (investigated, upstream)**: the maintainer spotted
+  "11/11 files extracted with errors" in a green CodeQL run. Every
+  diagnostic is a failed macro expansion — including std macros like
+  `format!` — which is an open limitation of the Rust extractor
+  (github/codeql#19966, #19982, #20659), not a local config problem: adding
+  a rust-src toolchain + `cargo fetch` produced byte-identical diagnostics
+  (195 suppressed, 0/11 clean) and was reverted rather than cargo-culted.
+  Queries still run on all non-macro code. Watch the "extracted with
+  errors" metric drop as CodeQL bundles update.
+
 ## [2026-07-04] ingest — repo-rigor pass 1: SAST, workflow lint, dep review, scheduled audit
 
 Scorecard run #1 scored five checks at 0; the fixable ones drove this PR

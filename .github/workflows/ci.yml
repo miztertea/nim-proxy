@@ -82,6 +82,29 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # rust-toolchain.toml (channel = stable) outranks `rustup default`, so
+      # drop it here — this job's whole point is building with the declared
+      # minimum, not stable. Keep this toolchain in lockstep with
+      # `rust-version` in Cargo.toml.
+      - run: rm rust-toolchain.toml
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master (toolchain via input)
+        with:
+          toolchain: "1.87"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Check with the minimum supported Rust
+        run: cargo check --locked --all-targets
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

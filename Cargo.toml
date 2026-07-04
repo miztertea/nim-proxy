@@ -5,7 +5,13 @@ edition = "2021"
 description = "Rate-limit-aware OpenAI-compatible proxy for NVIDIA NIM with multi-key load balancing"
 license = "MIT"
 repository = "https://github.com/miztertea/nim-proxy"
+homepage = "https://github.com/miztertea/nim-proxy"
 readme = "README.md"
+# Measured with `cargo msrv find` and verified with --all-targets; CI's
+# `msrv` job builds with exactly this toolchain so the claim can't rot.
+rust-version = "1.87"
+keywords = ["proxy", "openai", "rate-limiting", "nvidia", "llm"]
+categories = ["network-programming", "web-programming::http-server"]
 
 [dependencies]
 axum = "0.8"

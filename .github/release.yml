@@ -1,0 +1,22 @@
+# Template for GitHub's generated release notes (the Release workflow passes
+# generate_release_notes: true). Categories key on PR labels; Dependabot
+# labels its PRs `dependencies` automatically, so its bumps bucket without
+# any manual labeling.
+changelog:
+  exclude:
+    labels: [skip-changelog]
+  categories:
+    - title: Security
+      labels: [security]
+    - title: Breaking changes
+      labels: [breaking-change]
+    - title: Features
+      labels: [enhancement]
+    - title: Fixes
+      labels: [bug]
+    - title: Documentation
+      labels: [documentation]
+    - title: Dependencies
+      labels: [dependencies]
+    - title: Other changes
+      labels: ["*"]
