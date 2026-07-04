@@ -201,9 +201,11 @@ function showConnect(secret) {
 }
 document.querySelectorAll("[data-copy]").forEach(b => {
   b.onclick = async () => {
-    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); }
-    catch { /* clipboard unavailable (plain-http remote) — text stays selectable */ }
-    b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1200);
+    // Never claim "Copied" when the write failed (no clipboard API on a
+    // plain-http remote) — this is a once-only secret.
+    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = "Copied"; }
+    catch { b.textContent = "Select & copy"; }
+    setTimeout(() => { b.textContent = "Copy"; }, 1500);
   };
 });
 $("opendash").onclick = () => { window.location = "/"; };

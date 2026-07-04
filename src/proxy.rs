@@ -822,11 +822,25 @@ async fn streaming(
             let mut first_chunk: Option<Instant> = None;
             let mut chunks = resp.bytes_stream();
             loop {
-                // A stalled upstream would otherwise hold the client forever.
-                let next = if cfg.stream_idle.is_zero() {
-                    chunks.next().await
-                } else {
-                    match tokio::time::timeout(cfg.stream_idle, chunks.next()).await {
+                // Two ways out of a blocked upstream read: the stall cutoff
+                // (a stalled upstream would otherwise hold the client
+                // forever), and the client hanging up (`tx.closed()`) — which
+                // must free the in-flight slot promptly, not at the cutoff
+                // (and with stream_idle 0 there is no cutoff: a hung upstream
+                // would pin the slot until restart).
+                let upstream_read = async {
+                    if cfg.stream_idle.is_zero() {
+                        Ok(chunks.next().await)
+                    } else {
+                        tokio::time::timeout(cfg.stream_idle, chunks.next()).await
+                    }
+                };
+                let next = tokio::select! {
+                    _ = tx.closed() => {
+                        record_request(&ctx, "disconnect");
+                        return;
+                    }
+                    read = upstream_read => match read {
                         Ok(n) => n,
                         Err(_) => {
                             tracing::warn!(model = %ctx.model, idle = ?cfg.stream_idle, "upstream stream stalled");

@@ -87,6 +87,11 @@ Nothing yet.
   lifetime.** The in-flight guard previously dropped when the response headers
   were returned, so the cap only bounded buffered requests — a flood of live
   streams could exceed it unbounded.
+- **A client disconnect during a blocked upstream read is noticed
+  immediately.** The streaming relay now races each upstream read against the
+  client channel closing, so a hang-up frees the request's `max_inflight`
+  slot at disconnect time instead of at the `stream_idle` cutoff — and a hung
+  upstream can no longer pin a slot until restart when `stream_idle` is 0.
 - **Own-password change guards against a concurrent admin reset.** The change
   commits only if the stored hash is still the one the current password was
   verified against; a reset landing in the verify window now wins with a 409

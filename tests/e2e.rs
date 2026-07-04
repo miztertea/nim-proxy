@@ -2209,3 +2209,70 @@ async fn account_rejects_a_short_new_password() {
     assert_eq!(status, 400, "{v}");
     assert_eq!(v["error"]["code"], "weak_password");
 }
+
+/// A stream whose upstream hangs must release its in-flight slot promptly
+/// once the client disconnects — otherwise hung upstreams accumulate and
+/// permanently consume the cap (503s forever until restart).
+#[tokio::test]
+async fn disconnected_stream_releases_its_inflight_slot() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            max_inflight: 1,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    // Occupy the only slot with a hung stream. Read PAST the upstream's only
+    // data chunk so the relay task is parked on the upstream read with
+    // nothing left to send — the state where a disconnect used to go
+    // unnoticed until the stream_idle cutoff — then hang up.
+    let mut hog = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hog", true))
+        .send()
+        .await
+        .unwrap()
+        .bytes_stream();
+    use futures_util::StreamExt;
+    let read_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let chunk = tokio::time::timeout(
+            read_deadline.saturating_duration_since(Instant::now()),
+            hog.next(),
+        )
+        .await
+        .expect("upstream chunk within 5s")
+        .expect("stream open")
+        .expect("chunk ok");
+        if String::from_utf8_lossy(&chunk).contains("choices") {
+            break; // the mock's single pre-hang data chunk has been relayed
+        }
+    }
+    drop(hog);
+
+    // The slot must come back well before the stream_idle cutoff (300s here):
+    // the proxy notices the closed client channel, not just the stalled read.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let resp = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("after-disconnect", false))
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == 200 {
+            break;
+        }
+        assert_eq!(resp.status(), 503, "only sheds while the slot is held");
+        assert!(
+            Instant::now() < deadline,
+            "slot never released after client disconnect"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}

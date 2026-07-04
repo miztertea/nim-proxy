@@ -15,6 +15,11 @@ and cuts the version:
   into the spawned streaming task, so live streams occupy their slot until the
   stream ends (it previously dropped at response-header time, bounding only
   buffered requests). E2e-proven with a hang-stream + shed test.
+- **Disconnect noticed during blocked upstream reads** (blind-review finding):
+  the streaming relay races each upstream read against `tx.closed()`, so a
+  client hang-up frees its `max_inflight` slot immediately instead of at the
+  `stream_idle` cutoff — and hung upstreams can't pin slots until restart
+  when `stream_idle` is 0. E2e: `disconnected_stream_releases_its_inflight_slot`.
 - **Password-change TOCTOU closed**: an own-password change commits only if
   the stored hash is still the one the current password was verified against
   (verify runs outside the store lock); a concurrent admin reset now wins with

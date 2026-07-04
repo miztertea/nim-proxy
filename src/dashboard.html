@@ -795,9 +795,13 @@ function lineChart(el, series, unitFmt, opts = {}) {
 function stackChart(el, series, unitFmt, opts = {}) {
   const H = opts.height || 190;
   el.classList.add('chart');
-  const bands = series.filter(s => s.pts.length > 1);
+  let bands = series.filter(s => s.pts.length > 1);
   const n = bands.length ? Math.max(...bands.map(s => s.pts.length)) : 0;
-  const ts = (bands.find(s => s.pts.length === n) || { pts: [] }).pts.map(p => p.t);
+  // Bands pair positionally on one shared time axis; a series with a
+  // different sample count (e.g. a null-dropping average) would draw against
+  // wrong timestamps, so it is dropped rather than drawn wrong.
+  bands = bands.filter(s => s.pts.length === n);
+  const ts = (bands[0] || { pts: [] }).pts.map(p => p.t);
   const at = (s, i) => Math.max(0, s.pts[i] ? s.pts[i].v : 0);
   const totals = ts.map((_, i) => bands.reduce((a, s) => a + at(s, i), 0));
   if (ts.length < 2 || !totals.some(v => v > 0)) { el.innerHTML = '<div class="empty">No data in this window</div>'; return; }
