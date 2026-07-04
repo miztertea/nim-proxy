@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Workflow hardening to the OpenSSF-recommended baseline**: every GitHub
+  Actions step is pinned to a full commit SHA (Dependabot keeps the pins
+  fresh); all CI/release jobs start with `step-security/harden-runner` egress
+  monitoring (audit mode); checkouts that don't push drop their credentials
+  (`persist-credentials: false`); and a weekly OpenSSF Scorecard workflow
+  publishes the repo's supply-chain score to code scanning and the README
+  badge.
 
 ## [0.6.2] - 2026-07-04
 

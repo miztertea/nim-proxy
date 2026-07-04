@@ -6,6 +6,29 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — actions hardening + native-runner releases (v0.6.2+)
+
+Two follow-ups to the release automation, in the order they shipped:
+
+- **v0.6.2 — native-runner split**: the release image build moved from one
+  QEMU-emulated multi-arch buildx invocation to two parallel native jobs
+  (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), pushed by digest
+  and stitched by a `merge` job; cosign/provenance/SBOM anchor to the manifest
+  digest. Measured: v0.6.1 (QEMU) 34m12s → v0.6.2 (native) **5m18s**, same
+  artifact set. Buildx GHA caching + CI concurrency groups landed alongside.
+- **Workflow hardening (OpenSSF baseline)**: all actions pinned to full commit
+  SHAs (Dependabot's `github-actions` ecosystem keeps pins fresh);
+  `step-security/harden-runner` (egress audit) opens every job;
+  `persist-credentials: false` on non-pushing checkouts (the release `prepare`
+  job keeps credentials — it pushes the minted tag); a weekly OpenSSF
+  Scorecard workflow publishes to code scanning + a README badge. The SLSA L3
+  isolated builder was considered and deferred (documented in SECURITY.md
+  posture; revisit if consumers demand L3). A `v*` tag ruleset (no
+  update/delete/force-push; admin bypass) was applied in repo settings —
+  "Restrict creations" is deliberately unchecked because the built-in
+  github-actions app cannot be added to bypass lists on personal repos and
+  the dispatch path mints tags with `GITHUB_TOKEN`.
+
 ## [2026-07-04] ingest — release automation: workflow_dispatch cuts releases (v0.6.1)
 
 Tagging by hand (`git tag` + `git push`) was the one release step that

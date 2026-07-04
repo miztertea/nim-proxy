@@ -68,6 +68,17 @@ reasoning behind the current defenses is documented in the knowledge base:
   and all responses carry a strict `Content-Security-Policy` plus
   anti-framing/anti-sniffing headers.
 
+- **Supply chain / release integrity.** Every GitHub Actions step is pinned to
+  a full commit SHA (Dependabot keeps pins fresh); every CI/release job runs
+  [`step-security/harden-runner`](https://github.com/step-security/harden-runner)
+  egress monitoring; an [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/miztertea/nim-proxy)
+  workflow scores the posture weekly (badge in the README). Release images are
+  built on native runners from the repo Dockerfile, signed with keyless cosign,
+  and published with SLSA build provenance and an SPDX SBOM — all anchored to
+  the multi-arch manifest digest. `v*` release tags are protected by a ruleset
+  (no updates, deletions, or force pushes), so a published tag can never be
+  silently moved.
+
 **In scope** (please report):
 
 - Authentication or authorization bypass (reaching `/v1/*` in `keyed` mode, or
