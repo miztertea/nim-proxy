@@ -769,6 +769,14 @@ pub async fn users(
             let Some(user) = cand.users.iter_mut().find(|u| u.username == reset.username) else {
                 return bad_request("no such user");
             };
+            // The superuser is inviolable: an admin resetting it would be
+            // account takeover + lockout (the change invalidates the real
+            // owner's sessions). The superuser rotates its own password via
+            // /account (current-password re-auth); a forgotten one is the
+            // documented volume-edit recovery.
+            if user.role == Role::Superuser {
+                return forbidden("the superuser's password can only be changed by the superuser (Account settings)");
+            }
             user.password_hash = new_hash.expect("hashed above");
         }
         (None, None, None, Some(set)) => {
@@ -875,15 +883,16 @@ pub async fn account(
 }
 
 /// `POST /api/settings/validate-key` — authenticated twin of the setup
-/// probe (no throttle: the caller already holds a session).
+/// probe. The upstream is ALWAYS the configured `base_url`, never a
+/// caller-supplied one: a request-supplied target would let any logged-in
+/// user turn the proxy into an SSRF probe of internal hosts (the response
+/// distinguishes reachable/rejected/unreachable). An admin testing a new
+/// upstream saves it first, then validates. `req.base_url` is ignored.
 pub async fn validate_key(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<ValidateKeyReq>,
 ) -> Response {
-    let base = req
-        .base_url
-        .clone()
-        .unwrap_or_else(|| state.store.lock().unwrap().upstream.base_url.clone());
+    let base = state.store.lock().unwrap().upstream.base_url.clone();
     let base = base.trim().trim_end_matches('/').to_owned();
     axum::Json(match probe_key(&state.http, &base, req.key.trim()).await {
         Ok(models) => serde_json::json!({"ok": true, "models": models}),

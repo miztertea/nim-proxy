@@ -1820,3 +1820,70 @@ async fn base_url_change_flushes_the_models_cache() {
         "catalog refetches from the new upstream, not the stale cache"
     );
 }
+
+#[tokio::test]
+async fn admin_cannot_reset_or_takeover_the_superuser() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![("adm".into(), "admin".into())],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let adm = support::login_as(&proxy, "adm").await;
+
+    // An admin resetting the superuser's password would be account takeover
+    // (the change kills the real superuser's sessions). Must be refused.
+    let (status, v) = post_json(
+        &proxy,
+        &adm,
+        "/api/settings/users",
+        serde_json::json!({"reset_password": {"username": support::TEST_USER, "new_password": "attacker-chosen-pw"}}),
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "admin must not reset the superuser's password: {v}"
+    );
+
+    // The superuser can still log in with the original password afterwards.
+    let su = support::login(&proxy).await;
+    assert!(!su.is_empty());
+
+    // A normal reset of a peer admin still works.
+    let (status, v) = post_json(
+        &proxy,
+        &su,
+        "/api/settings/users",
+        serde_json::json!({"reset_password": {"username": "adm", "new_password": "brand-new-admin-pw"}}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "resetting a non-superuser must still work: {v}"
+    );
+}
+
+#[tokio::test]
+async fn authenticated_key_validation_ignores_caller_supplied_base_url() {
+    // The configured upstream is the mock; a caller-supplied base_url must be
+    // ignored so the endpoint can't be turned into an SSRF probe.
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/validate-key",
+        serde_json::json!({"key": "nvapi-x", "base_url": "http://169.254.169.254"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    // It probed the real (mock) upstream, which answers with model-a — not the
+    // attacker's target (which would have errored "cannot reach upstream").
+    assert_eq!(
+        v["ok"], true,
+        "validated against the configured upstream: {v}"
+    );
+    assert_eq!(v["models"], 1, "{v}");
+}

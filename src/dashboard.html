@@ -230,7 +230,74 @@ td .sw { margin-right: 8px; vertical-align: baseline; }
 .seglegend .sl .sll { font-size: 12px; color: var(--ink-2); }
 .seglegend .sl .slv { font: 500 13px var(--mono); color: var(--ink-1); }
 
+/* ---------- settings ---------- */
+body.on-settings .tright, body.on-settings #custom { display: none; }
+.setwrap { display: flex; gap: 16px; align-items: flex-start; }
+.setnav { width: 186px; flex: none; position: sticky; top: 22px; display: flex; flex-direction: column; gap: 2px; }
+.setnav button {
+  display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 9px;
+  font-size: 13px; color: var(--ink-nav); white-space: nowrap;
+}
+.setnav button .nbar { width: 3px; height: 15px; border-radius: 2px; background: transparent; flex: none; }
+.setnav button svg { width: 15px; height: 15px; flex: none; fill: none; stroke: var(--ink-3); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.setnav button:hover { color: var(--ink-1); }
+.setnav button[aria-selected="true"] { color: var(--ink-1); background: rgba(118,185,0,0.12); }
+.setnav button[aria-selected="true"] .nbar { background: var(--green); }
+.setnav button[aria-selected="true"] svg { stroke: var(--green); }
+.setbody { flex: 1; min-width: 0; }
+.sin {
+  font: 500 12px var(--mono); color: var(--ink-1); background: rgba(255,255,255,0.04);
+  border: 1px solid var(--card-border); border-radius: 8px; padding: 7px 10px;
+}
+.sin:focus { outline: none; border-color: var(--green-dk); }
+.sin:disabled { color: var(--ink-25); }
+.sin.num { width: 84px; text-align: right; }
+.rpmwrap { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.unitl { font: 400 10.5px var(--mono); color: var(--ink-3); }
+.slabel { font-size: 11px; color: var(--ink-3); margin: 0 0 5px; }
+.shint { font-size: 12px; color: var(--ink-25); margin: 0 0 12px; line-height: 1.5; max-width: 640px; }
+.pbtn { background: var(--green); color: #0A0A0A; font: 600 12px var(--mono); border-radius: 99px; padding: 7px 14px; white-space: nowrap; flex: none; }
+.pbtn:disabled { opacity: 0.55; cursor: default; }
+.gbtn { font: 500 11.5px var(--mono); color: var(--ink-2); border: 1px solid var(--card-border); border-radius: 99px; padding: 5px 12px; white-space: nowrap; flex: none; }
+.gbtn:hover { color: var(--ink-1); border-color: rgba(255,255,255,0.18); }
+.dbtn { font: 500 11.5px var(--mono); color: var(--red); border: 1px solid rgba(227,104,104,0.35); border-radius: 99px; padding: 5px 12px; white-space: nowrap; flex: none; }
+.dbtn:hover { background: rgba(227,104,104,0.12); }
+.dbtn.icon { padding: 5px 8px; display: inline-flex; border-radius: 8px; }
+.tog { position: relative; width: 34px; height: 19px; border-radius: 99px; background: var(--track); transition: background 0.15s; flex: none; }
+.tog::after { content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--ink-25); transition: left 0.15s, background 0.15s; }
+.tog[aria-checked="true"] { background: var(--green); }
+.tog[aria-checked="true"]::after { left: 17px; background: #0A0A0A; }
+.krow { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--hairline); }
+.krow:first-child { border-top: 0; }
+.krow.koff .kmask, .krow.koff .kmeta { color: var(--ink-4); }
+.kmask { font: 600 13px var(--mono); color: var(--ink-1); }
+.kmeta { font: 400 11px var(--mono); color: var(--ink-3); margin-top: 2px; }
+.kstate { margin-left: auto; font: 500 11.5px var(--mono); color: var(--ink-25); flex: none; white-space: nowrap; }
+.klock { color: var(--ink-3); display: inline-flex; padding: 5px 8px; cursor: help; flex: none; }
+.tag { font: 600 10px var(--mono); border-radius: 99px; padding: 2px 8px; background: rgba(118,185,0,0.14); color: var(--green-lt); vertical-align: middle; }
+.addrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.serr { font: 400 11.5px var(--mono); color: var(--red); min-height: 1.2em; margin-top: 8px; }
+.serr.ok { color: var(--green-lt); }
+.congrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.conbox { border: 1px solid var(--card-border); border-radius: 12px; padding: 12px 14px; background: rgba(255,255,255,0.02); min-width: 0; }
+.limgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+.umono { width: 32px; height: 32px; flex: none; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: rgba(118,185,0,0.14); color: var(--green-lt); font: 600 13px var(--mono); }
+.rbadge { font: 600 10px var(--mono); border-radius: 99px; padding: 2px 9px; letter-spacing: 0.4px; flex: none; }
+.rbadge.superuser { background: var(--green); color: #0A0A0A; }
+.rbadge.admin { background: rgba(118,185,0,0.14); color: var(--green-lt); }
+.rbadge.user { background: rgba(255,255,255,0.07); color: var(--ink-2); }
+.ochip { display: inline-flex; align-items: center; gap: 8px; font: 500 12px var(--mono); border: 1px solid var(--card-border); border-radius: 10px; padding: 6px 10px; margin: 0 8px 8px 0; }
+.ochip b { color: var(--green-lt); font-weight: 600; }
+.ochip button { color: var(--ink-3); padding: 0 2px; } .ochip button:hover { color: var(--red); }
+#modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.62); z-index: 20; }
+#modal.show { display: flex; }
+#modal .box { background: var(--side); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 22px 24px; max-width: 520px; width: 92%; box-shadow: 0 14px 40px rgba(0,0,0,0.5); }
+.secretbox { font: 500 13px var(--mono); background: var(--thead); border: 1px solid var(--card-border); border-radius: 10px; padding: 12px 14px; word-break: break-all; user-select: all; }
+
 @media (max-width: 860px) {
+  .setwrap { flex-direction: column; }
+  .setnav { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; }
+
   #side { width: 58px; padding: 20px 8px; }
   #side .wordmark, #side nav .label, .foot span:not(.dot), .foot #uptime, .foot #verinfo, .live #liveText { display: none; }
   #side nav button { justify-content: center; padding: 9px 0; }
@@ -253,6 +320,7 @@ td .sw { margin-right: 8px; vertical-align: baseline; }
     <button role="tab" data-tab="clients" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg><span class="label">Clients</span></button>
     <button role="tab" data-tab="reliability" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l5 2v4c0 3.5-2.4 6-5 7-2.6-1-5-3.5-5-7v-4z"/></svg><span class="label">Reliability</span></button>
     <button role="tab" data-tab="capacity" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11a6 6 0 0112 0M8 11l3-3.5"/></svg><span class="label">Capacity</span></button>
+    <button role="tab" data-tab="settings" aria-selected="false"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.6v2.1M8 12.3v2.1M1.6 8h2.1M12.3 8h2.1M3.5 3.5L5 5M11 11l1.5 1.5M12.5 3.5L11 5M5 11l-1.5 1.5"/></svg><span class="label">Settings</span></button>
   </nav>
   <div class="foot">
     <button class="live" id="live" title="Click to pause/resume the live poll"><span class="dot"></span><span id="liveText">connecting</span></button>
@@ -436,6 +504,11 @@ td .sw { margin-right: 8px; vertical-align: baseline; }
         <div id="heatmap"></div>
       </div>
     </div>
+    <div class="card mb" id="card-pressure" hidden>
+      <h2>Model pressure <span class="note">governor engaged — worker exhaustions &amp; per-model caps</span></h2>
+      <div id="chart-exhaust"></div>
+      <div id="pressure-bars" style="margin-top:12px"></div>
+    </div>
     <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
       <div class="card">
         <h2>Non-success outcomes</h2>
@@ -478,9 +551,17 @@ td .sw { margin-right: 8px; vertical-align: baseline; }
       <div id="table-lanes"></div>
     </div>
   </section>
+
+  <section id="tab-settings" hidden>
+    <div class="setwrap">
+      <nav class="setnav" id="setnav" role="tablist"></nav>
+      <div class="setbody" id="setbody"></div>
+    </div>
+  </section>
   </main>
 </div>
 <div id="tooltip"></div>
+<div id="modal"><div class="box"><h3 style="margin:0 0 12px;font-size:15px;font-weight:600">One-time secret</h3><div id="modal-body"></div></div></div>
 
 <script>
 "use strict";
@@ -561,6 +642,10 @@ const POLL_MS = 3000, KEEP = 400;
 let samples = [];              // [{t(ms), rows}]
 let mode = { kind: 'live', paused: false };
 let cfg = { lanes: 0, rpm: 40, price_in: 0.5, price_out: 2.0, started: Date.now()/1000, version: '' };
+/* pool capacity from per-lane rpms when the server provides them (keys can
+   have different limits); the uniform `rpm` field is the fallback */
+const poolCapacity = () => Math.max(1, cfg.capacity_rpm ?? cfg.lanes * cfg.rpm);
+const laneRpm = i => (cfg.rpms && cfg.rpms[i]) ?? cfg.rpm;
 
 function rate(cur, prev, curT, prevT) {
   if (prev === undefined || cur < prev || curT <= prevT) return 0;
@@ -749,7 +834,7 @@ function barList(el, entries, fmtV, maxV) {
   el.innerHTML = entries.map(e =>
     `<div class="brow"><span class="bname" title="${esc(e.name)}">${esc(e.label ?? e.name)}</span>` +
     `<span class="btrack">${isFinite(e.v) ? `<span style="width:${Math.max(2, e.v / max * 100).toFixed(0)}%;background:${e.color}"></span>` : ''}</span>` +
-    `<span class="bval">${isFinite(e.v) ? fmtV(e.v) : '–'}</span></div>`).join('');
+    `<span class="bval">${e.vtext ?? (isFinite(e.v) ? fmtV(e.v) : '–')}</span></div>`).join('');
 }
 
 /* leaderboard rows: chip square + name + value + thin progress bar */
@@ -919,7 +1004,7 @@ function seriesColors(models) {
    only the active tab (hidden tabs re-render on switch, so their charts size
    to a real clientWidth). */
 let activeTab = 'overview';
-const TITLES = { overview: 'Overview', models: 'Models', clients: 'Clients', reliability: 'Reliability', capacity: 'Capacity' };
+const TITLES = { overview: 'Overview', models: 'Models', clients: 'Clients', reliability: 'Reliability', capacity: 'Capacity', settings: 'Settings' };
 
 function render() {
   if (!samples.length) return;
@@ -975,7 +1060,7 @@ function render() {
   const curRpm = recent.length ? recent.reduce((a,p) => a+p.v, 0) / recent.length : 0;
   const avgRpm = reqPts.length ? reqPts.reduce((a,p) => a+p.v, 0) / reqPts.length : 0;
   const peakRpm = reqPts.length ? Math.max(...reqPts.map(p => p.v)) : 0;
-  const capacity = Math.max(1, cfg.lanes * cfg.rpm);
+  const capacity = poolCapacity();
   const rpmNow = mode.kind === 'live' ? curRpm : avgRpm;
   const capRatio = rpmNow / capacity;
   // Green while there's headroom, amber approaching the cap, red once saturated.
@@ -1353,6 +1438,22 @@ function renderReliability(c) {
   }
   heatmap($('heatmap'), matrix, hmax);
 
+  /* model-pressure governor telemetry — surfaces only once NIM has actually
+     exhausted a worker or the governor holds a per-model cap */
+  const exhausted = windowed(s => sum(s.rows, 'nimproxy_worker_exhausted_total'));
+  const govLimits = [...groups(rows, 'nimproxy_model_limit', 'model').entries()].filter(([, cap]) => cap > 0);
+  const pcard = $('card-pressure');
+  pcard.hidden = !(exhausted > 0 || govLimits.length);
+  if (!pcard.hidden) {
+    lineChart($('chart-exhaust'), [{ name: 'exhaustions/min', color: css('--amber'),
+      pts: rateSeries(s => sum(s.rows, 'nimproxy_worker_exhausted_total')), area: 'url(#gMuted)' }], fmt, { height: 130 });
+    const inflight = groups(rows, 'nimproxy_model_inflight', 'model');
+    barList($('pressure-bars'), govLimits.map(([m, cap]) => ({
+      name: m, label: prettyName(m), v: (inflight.get(m) || 0) / cap * 100,
+      vtext: `${fmt(inflight.get(m) || 0)} / ${fmt(cap)}`, color: publisher(m).color,
+    })), v => Math.round(v) + '%', 100);
+  }
+
   /* non-success outcomes ranked by count */
   const REASONS = {
     'disconnect': 'Client disconnected', 'stall': 'Stream stalled',
@@ -1422,16 +1523,19 @@ function renderCapacity(c) {
       <span style="color:var(--green-lt)">${fmt(headroom)} rpm free</span>
     </div>`;
 
-  /* hero: provisioning */
-  const keysNeed = peakRpm > 0 ? Math.ceil(peakRpm / cfg.rpm) : cfg.lanes;
-  const short = keysNeed - cfg.lanes;
+  /* hero: provisioning — rpm shortfall at the observed peak, translated to
+     keys at NIM's default 40 rpm */
+  const shortRpm = Math.max(0, Math.ceil(peakRpm - capacity));
+  const moreKeys = Math.ceil(shortRpm / 40);
   $('k-prov').innerHTML =
     `<div style="display:flex;justify-content:space-between;align-items:center"><span class="hlabel">Provisioning</span>
-    ${short > 0 ? `<span style="font:600 10px var(--mono);color:#0A0A0A;background:var(--amber);border-radius:99px;padding:2px 8px">ADD ${short} KEY${short === 1 ? '' : 'S'}</span>` : ''}</div>
+    ${shortRpm > 0 ? `<span style="font:600 10px var(--mono);color:#0A0A0A;background:var(--amber);border-radius:99px;padding:2px 8px">≈ ${moreKeys} MORE KEY${moreKeys === 1 ? '' : 'S'} @ 40</span>` : ''}</div>
     <div style="display:flex;align-items:baseline;gap:8px;margin-top:12px">
-      <span style="font-size:34px;font-weight:600;letter-spacing:-1px">${cfg.lanes}</span>
-      <span style="font:400 12px var(--mono);color:var(--ink-3)">key${cfg.lanes === 1 ? '' : 's'} active</span></div>
-    <div style="font:400 11.5px var(--mono);color:var(--ink-25);margin-top:6px">peak demand needs <span style="color:${short > 0 ? 'var(--amber)' : 'var(--green-lt)'};font-weight:500">${keysNeed} key${keysNeed === 1 ? '' : 's'}</span></div>`;
+      <span style="font-size:34px;font-weight:600;letter-spacing:-1px;color:${shortRpm > 0 ? 'var(--amber)' : 'var(--ink-1)'}">${fmt(shortRpm)}</span>
+      <span style="font:400 12px var(--mono);color:var(--ink-3)">rpm short at peak</span></div>
+    <div style="font:400 11.5px var(--mono);color:var(--ink-25);margin-top:6px">${shortRpm > 0
+      ? `peak ${fmt(peakRpm)} vs ${fmt(capacity)} rpm capacity — <span style="color:var(--amber)">≈ ${moreKeys} more key${moreKeys === 1 ? '' : 's'} @ 40</span>`
+      : `<span style="color:var(--green-lt)">${cfg.lanes} key${cfg.lanes === 1 ? '' : 's'} · ${fmt(capacity)} rpm covers the peak</span>`}</div>`;
 
   /* hero: rate-limit pressure */
   const sticky = windowed(s => sum(s.rows, 'nimproxy_affinity_total', l => l.result === 'sticky'));
@@ -1458,7 +1562,7 @@ function renderCapacity(c) {
     const k = String(i);
     const inWindow = Math.max(0, (laneCum.get(k) || 0) - (laneBase.get(k) || 0));
     return { i, name: `Key ${i + 1}`, cur: laneNow.get(k) || 0, inWindow,
-      util: Math.min(1, inWindow / cfg.rpm), b429: lane429.get(k) || 0, bOther: laneOther.get(k) || 0 };
+      util: Math.min(1, inWindow / laneRpm(i)), b429: lane429.get(k) || 0, bOther: laneOther.get(k) || 0 };
   });
   if (!lanes.length) $('meters').innerHTML = '<div class="empty">No lanes configured</div>';
   else barList($('meters'), lanes.map(l => ({
@@ -1478,14 +1582,436 @@ function renderCapacity(c) {
   ], lanes.map(l => ({
     vals: [l.name, l.cur, l.cur / totalLane * 100, l.inWindow, l.b429, l.bOther],
     cells: [`<i class="sw" style="background:${laneColor(l.i)}"></i>${esc(l.name)}`,
-      fmt(l.cur), (l.cur / totalLane * 100).toFixed(0) + '%', `${fmt(l.inWindow)} / ${cfg.rpm}`,
+      fmt(l.cur), (l.cur / totalLane * 100).toFixed(0) + '%', `${fmt(l.inWindow)} / ${laneRpm(l.i)}`,
       `<span class="${l.b429 ? 'warnc' : 'dim'}">${fmt(l.b429)}</span>`,
       `<span class="${l.bOther ? 'critc' : 'dim'}">${fmt(l.bOther)}</span>`],
   })), { defaultIdx: 1, maxH: 360, minW: 560, empty: 'No lanes configured' });
 }
 
+/* ===== settings — config-driven, not metrics-driven: fetched from
+   /api/config on tab entry and after every save (the server filters by role
+   BEFORE serialization, so sections render purely from data presence). Only
+   the lane-state chips ride a 5s in-place refresh. ===== */
+let SET = null, setSub = 'access';
+
+async function sPost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let j = {}; try { j = await r.json(); } catch {}
+  if (!r.ok || j.ok === false) throw new Error((j.error && j.error.message) || j.error || `request failed (${r.status})`);
+  return j;
+}
+/* inline feedback next to the control that caused it (textContent — never markup) */
+const note = (id, msg, ok) => { const el = $(id); if (el) { el.textContent = msg || ''; el.classList.toggle('ok', !!ok); } };
+
+async function loadSettings() {
+  try {
+    const j = await (await fetch('/api/config')).json();
+    if (!j.nim_keys) throw 0;
+    SET = j;
+  } catch { $('setbody').innerHTML = '<div class="empty">Could not load settings — reload to sign in again</div>'; return; }
+  renderSettings();
+}
+
+const TRASH = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4"/></svg>';
+const LOCK = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>';
+const SICONS = {
+  access: '<svg viewBox="0 0 16 16"><circle cx="11" cy="5" r="2.5"/><path d="M9.2 6.8L2.5 13.5M4.8 11.2l1.5 1.5"/></svg>',
+  server: '<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="4.5" rx="1.5"/><rect x="2" y="9" width="12" height="4.5" rx="1.5"/><path d="M4.6 4.75h.01M4.6 11.25h.01"/></svg>',
+  users: '<svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.2"/><path d="M2 13.5c.5-2.4 2-3.6 4-3.6s3.5 1.2 4 3.6M10.4 3.6a2.2 2.2 0 010 3.8M11.8 10c1.3.5 2 1.6 2.3 3.5"/></svg>',
+  account: '<svg viewBox="0 0 16 16"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c.6-2.8 2.4-4.2 5-4.2s4.4 1.4 5 4.2"/></svg>',
+};
+
+function renderSettings() {
+  const subs = [['access', 'Access & keys'], ['server', 'Server'], ['users', 'Users'], ['account', 'Account']]
+    .filter(([id]) => id === 'access' || id === 'account' || (id === 'server' ? !!SET.server : !!SET.users));
+  if (!subs.some(([id]) => id === setSub)) setSub = 'access';
+  $('setnav').innerHTML = subs.map(([id, label]) =>
+    `<button role="tab" data-sub="${id}" aria-selected="${id === setSub}"><span class="nbar"></span>${SICONS[id]}<span>${esc(label)}</span></button>`).join('');
+  for (const b of $('setnav').querySelectorAll('button'))
+    b.addEventListener('click', () => { setSub = b.dataset.sub; renderSettings(); });
+  ({ access: renderAccess, server: renderServer, users: renderUsers, account: renderAccount })[setSub]();
+}
+
+/* live lane state for one key row (also patched in place by the 5s refresh) */
+function keyState(k) {
+  if (!k.enabled) return { text: 'disabled', cls: 'kstate dim' };
+  if (k.cooldown_ms > 0) return { text: `cooldown ${Math.ceil(k.cooldown_ms / 1000)}s`, cls: 'kstate warnc' };
+  if (k.in_window != null) return { text: `${+k.in_window} / ${+k.rpm} in window`, cls: 'kstate' };
+  return { text: 'unassigned', cls: 'kstate dim' };
+}
+const poolNote = () => `${+SET.pool.enabled} enabled in pool · ${+SET.pool.capacity_rpm} rpm total`;
+const clampInt = (v, lo, hi, dflt) => { const n = Math.round(+v); return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
+
+async function copyText(text, btn) {
+  const old = btn.textContent;
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'copied ✓'; }
+  catch { btn.textContent = 'copy failed'; }
+  setTimeout(() => { btn.textContent = old; }, 1500);
+}
+
+/* show-once client-key secret: modal only closes on an explicit Done, so a
+   stray re-render can't eat the one chance to copy it */
+function showSecret(name, secret) {
+  $('modal-body').innerHTML =
+    `<p style="margin:0 0 12px;color:var(--ink-2);font-size:13px">Client key <b>${esc(name)}</b> is ready. Copy it now — <b style="color:var(--amber-lt)">you won't see this again.</b></p>
+    <div class="secretbox">${esc(secret)}</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button class="pbtn" id="modal-copy">Copy key</button>
+      <button class="gbtn" id="modal-done">Done</button>
+    </div>`;
+  $('modal-copy').addEventListener('click', () => copyText(secret, $('modal-copy')));
+  $('modal-done').addEventListener('click', () => $('modal').classList.remove('show'));
+  $('modal').classList.add('show');
+}
+
+function renderAccess() {
+  const admin = !!SET.users;
+  const ownerChip = o => admin ? ` <span class="tag">${esc(o)}</span>` : '';
+  const keyRows = SET.nim_keys.map((k, i) => {
+    const st = keyState(k);
+    return `<div class="krow${k.enabled ? '' : ' koff'}">
+      <div style="min-width:0">
+        <div class="kmask">nvapi-••••${esc(k.last4)}${ownerChip(k.owner)}</div>
+        <div class="kmeta">fp ${esc(String(k.fingerprint).slice(0, 8))} · ${k.lane != null ? `lane ${+k.lane}` : k.enabled ? 'unassigned' : 'off'}</div>
+      </div>
+      <span class="${st.cls}" data-ksfp="${esc(k.fingerprint)}">${esc(st.text)}</span>
+      <span class="rpmwrap"><input class="sin num" type="number" min="1" max="10000" value="${+k.rpm}" data-rpm="${i}"><span class="unitl">rpm</span></span>
+      <button class="tog" role="switch" aria-checked="${!!k.enabled}" data-tog="${i}" title="${k.enabled ? 'Disable — its rate window stays warm' : 'Enable'}"></button>
+      ${k.guarded
+        ? `<span class="klock" title="The pool keeps at least one enabled superuser key — add or enable another key before removing this one">${LOCK}</span>`
+        : `<button class="dbtn icon" data-kdel="${i}" title="Remove key">${TRASH}</button>`}
+    </div>`;
+  }).join('');
+  const ckRows = SET.client_keys.map((ck, i) =>
+    `<div class="krow">
+      <span style="font-weight:600;flex:0 1 160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(ck.name)}">${esc(ck.name)}</span>
+      <span class="kmask" style="color:var(--ink-25);font-weight:500">npk_••••••••${esc(ck.last4)}</span>
+      ${admin ? `<span class="tag">${esc(ck.owner)}</span>` : ''}
+      <button class="dbtn" style="margin-left:auto" data-ckdel="${i}">Revoke</button>
+    </div>`).join('');
+  $('setbody').innerHTML = `
+    <div class="card mb">
+      <h2>${admin ? 'NIM keys' : 'My NIM keys'} <span class="note" id="pool-note">${esc(poolNote())}</span></h2>
+      <p class="shint">Keys you add join the shared pool as yours${admin ? '' : ' — only you and admins see they exist'}. Changes apply live: kept keys keep their rate windows, disabled keys re-enable warm.</p>
+      <div>${keyRows || '<div class="empty">No NIM keys yet — add one below</div>'}</div>
+      <div class="addrow">
+        <input id="nk-key" class="sin" style="flex:1;min-width:200px" type="password" placeholder="nvapi-… paste a new NIM key" autocomplete="off" spellcheck="false">
+        <span class="rpmwrap"><input id="nk-rpm" class="sin num" type="number" min="1" max="10000" value="40"><span class="unitl">rpm</span></span>
+        <button class="pbtn" id="nk-add">Validate &amp; add</button>
+        <button class="gbtn" id="nk-force" hidden>Add anyway</button>
+      </div>
+      <div class="serr" id="nk-err"></div>
+    </div>
+    <div class="card mb">
+      <h2>${admin ? 'Client API keys' : 'My API keys'} <span class="note">bearer tokens your harnesses use</span></h2>
+      <div>${ckRows || '<div class="empty">No client keys yet</div>'}</div>
+      <div class="addrow">
+        <input id="ck-name" class="sin" style="flex:1;min-width:200px" placeholder="name this key, e.g. laptop-cli" maxlength="64" autocomplete="off" spellcheck="false">
+        <button class="pbtn" id="ck-add">+ Generate key</button>
+      </div>
+      <div class="serr" id="ck-err"></div>
+    </div>
+    <div class="card">
+      <h2>Connection</h2>
+      <div class="congrid">
+        <div class="conbox">
+          <div class="slabel">Point your client's base URL at</div>
+          <div style="display:flex;align-items:center;gap:10px"><span class="kmask" style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(location.origin + '/v1')}</span><button class="gbtn" id="copy-base">copy</button></div>
+        </div>
+        <div class="conbox">
+          <div class="slabel">API access mode</div>
+          <div class="kmask" style="color:${SET.mode === 'keyed' ? 'var(--green-lt)' : 'var(--amber-lt)'}">● ${SET.mode === 'keyed' ? 'Keyed — bearer required' : 'Open — no key needed'}</div>
+          <div class="kmeta" style="margin-top:4px">${SET.mode === 'keyed' ? 'harnesses authenticate with a client API key' : 'anyone who can reach /v1 can use the pool'}</div>
+        </div>
+      </div>
+    </div>`;
+  const body = $('setbody');
+  for (const el of body.querySelectorAll('[data-rpm]')) el.addEventListener('change', async () => {
+    const k = SET.nim_keys[+el.dataset.rpm];
+    try {
+      await sPost('/api/settings/nim-keys', { set: { fingerprint: k.fingerprint, rpm: clampInt(el.value, 1, 10000, +k.rpm) } });
+      await loadSettings();
+    } catch (e) { note('nk-err', e.message); }
+  });
+  for (const el of body.querySelectorAll('[data-tog]')) el.addEventListener('click', async () => {
+    const k = SET.nim_keys[+el.dataset.tog];
+    try {
+      await sPost('/api/settings/nim-keys', { set: { fingerprint: k.fingerprint, enabled: !k.enabled } });
+      await loadSettings();
+    } catch (e) { note('nk-err', e.message); }
+  });
+  for (const el of body.querySelectorAll('[data-kdel]')) el.addEventListener('click', async () => {
+    const k = SET.nim_keys[+el.dataset.kdel];
+    if (!confirm(`Remove key nvapi-••••${k.last4} from the pool? In-flight requests finish; its rate window is lost.`)) return;
+    try { await sPost('/api/settings/nim-keys', { remove: k.fingerprint }); await loadSettings(); }
+    catch (e) { note('nk-err', e.message); }
+  });
+  /* validate first; "Add anyway" appears only after a failed probe */
+  const addKey = async () => {
+    await sPost('/api/settings/nim-keys', { add: { key: $('nk-key').value.trim(), rpm: clampInt($('nk-rpm').value, 1, 10000, 40) } });
+    await loadSettings();
+  };
+  $('nk-add').addEventListener('click', async () => {
+    const key = $('nk-key').value.trim();
+    if (!key) return note('nk-err', 'Paste a NIM key first.');
+    $('nk-add').disabled = true; $('nk-add').textContent = 'Validating…';
+    try {
+      const v = await sPost('/api/settings/validate-key', { key });
+      note('nk-err', `✓ ${Array.isArray(v.models) ? v.models.length : +v.models} models — adding…`, true);
+      await addKey();
+      return;
+    } catch (e) {
+      note('nk-err', `Validation failed: ${e.message}`);
+      $('nk-force').hidden = false;
+    }
+    $('nk-add').disabled = false; $('nk-add').textContent = 'Validate & add';
+  });
+  $('nk-force').addEventListener('click', async () => {
+    if (!$('nk-key').value.trim()) return note('nk-err', 'Paste a NIM key first.');
+    try { await addKey(); } catch (e) { note('nk-err', e.message); }
+  });
+  for (const el of body.querySelectorAll('[data-ckdel]')) el.addEventListener('click', async () => {
+    const ck = SET.client_keys[+el.dataset.ckdel];
+    if (!confirm(`Revoke "${ck.name}"? Harnesses using it stop working immediately.`)) return;
+    try { await sPost('/api/settings/clients', { remove: ck.name }); await loadSettings(); }
+    catch (e) { note('ck-err', e.message); }
+  });
+  $('ck-add').addEventListener('click', async () => {
+    const name = $('ck-name').value.trim();
+    if (!name) return note('ck-err', 'Name the key first — e.g. laptop-cli.');
+    try {
+      const j = await sPost('/api/settings/clients', { add: { name } });
+      showSecret(name, j.secret);
+      await loadSettings();
+    } catch (e) { note('ck-err', e.message); }
+  });
+  $('copy-base').addEventListener('click', () => copyText(location.origin + '/v1', $('copy-base')));
+}
+
+function renderServer() {
+  const sv = SET.server, L = sv.limits;
+  const num = (id, label, val, unit, step) => `<div><div class="slabel">${label}</div>
+    <span class="rpmwrap" style="display:flex"><input id="${id}" class="sin" style="width:100%;text-align:right" type="number" min="0"${step ? ` step="${step}"` : ''} value="${+val}">${unit ? `<span class="unitl">${unit}</span>` : ''}</span></div>`;
+  const ovr = Object.entries(sv.governor.overrides || {});
+  $('setbody').innerHTML = `
+    <div class="card mb">
+      <h2>API access mode
+        <span class="pills" style="margin-left:auto">
+          <button data-mode="open" aria-pressed="${SET.mode === 'open'}">Open</button>
+          <button data-mode="keyed" aria-pressed="${SET.mode === 'keyed'}">Keyed</button>
+        </span></h2>
+      <p class="shint">Controls <b>/v1</b> harness calls only. <b>Keyed</b> requires a bearer token; <b>Open</b> accepts anyone who can reach /v1 — trusted networks only.</p>
+      ${SET.mode === 'keyed' && !SET.client_keys.length ? '<p class="shint" style="color:var(--amber-lt)">Keyed mode with no client keys locks every harness out — generate one under Access &amp; keys.</p>' : ''}
+      <div class="serr" id="mode-err"></div>
+    </div>
+    <div class="card mb">
+      <h2>Upstream &amp; limits <button class="pbtn" id="save-limits" style="margin-left:auto">Save</button></h2>
+      <div class="slabel">Upstream base URL · saving clears the model-catalog cache</div>
+      <input id="sv-base" class="sin" style="width:100%" value="${esc(sv.base_url)}" spellcheck="false">
+      <div class="limgrid">
+        ${num('sv-maxwait', 'Max wait', L.max_wait_secs, 's')}
+        ${num('sv-heartbeat', 'Heartbeat', L.heartbeat_secs, 's')}
+        ${num('sv-idle', 'Stream idle', L.stream_idle_secs, 's')}
+        ${num('sv-timeout', 'Request timeout', L.request_timeout_secs, 's')}
+        ${num('sv-ttl', 'Models TTL', L.models_ttl_secs, 's')}
+        ${num('sv-inflight', 'Max in-flight', L.max_inflight, '')}
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:16px">
+        <button class="tog" role="switch" id="sv-strict" aria-checked="${!!L.strict_passthrough}"></button>
+        <span style="font-size:12.5px">Strict passthrough <span class="kmeta" style="display:inline">— reject params the upstream doesn't accept</span></span>
+      </div>
+      <div class="serr" id="limits-err"></div>
+    </div>
+    <div class="card mb">
+      <h2>Model-pressure governor
+        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px"><span class="kmeta">adaptive</span>
+        <button class="tog" role="switch" id="gov-tog" aria-checked="${!!sv.governor.enabled}"></button></span></h2>
+      <p class="shint">Absorbs NIM worker-exhaustion per model without benching keys. Each model self-tunes: engages on the first exhaustion, climbs while stable, dissolves after a long clean stretch. Set an override only if you know a model's ceiling.</p>
+      <div>${ovr.map(([m, cap], i) =>
+        `<span class="ochip"><span title="${esc(m)}">${esc(m)}</span><b>${+cap} max</b><button data-govdel="${i}" title="Remove override">×</button></span>`).join('')
+        || '<span class="kmeta">no overrides — fully adaptive</span>'}</div>
+      <div class="addrow">
+        <input id="gov-model" class="sin" style="flex:1;min-width:200px" placeholder="model id, e.g. moonshotai/kimi-k2.5" autocomplete="off" spellcheck="false">
+        <span class="rpmwrap"><input id="gov-cap" class="sin num" type="number" min="1" max="10000" value="8"><span class="unitl">max</span></span>
+        <button class="gbtn" id="gov-add">+ override</button>
+      </div>
+      <div class="serr" id="gov-err"></div>
+    </div>
+    <div class="card">
+      <h2>Pricing &amp; history <button class="pbtn" id="save-pricing" style="margin-left:auto">Save</button></h2>
+      <div class="limgrid" style="margin-top:6px">
+        ${num('sv-pin', 'Reference $ / 1M in', sv.pricing.ref_price_in, '', '0.01')}
+        ${num('sv-pout', 'Reference $ / 1M out', sv.pricing.ref_price_out, '', '0.01')}
+        ${num('sv-days', 'History retention · 0 = forever', sv.history.days, 'days')}
+      </div>
+      <div class="serr" id="pricing-err"></div>
+    </div>`;
+  for (const b of $('setbody').querySelectorAll('[data-mode]')) b.addEventListener('click', async () => {
+    if (b.dataset.mode === SET.mode) return;
+    try { await sPost('/api/settings/clients', { mode: b.dataset.mode }); await loadSettings(); }
+    catch (e) { note('mode-err', e.message); }
+  });
+  $('sv-strict').addEventListener('click', () =>
+    $('sv-strict').setAttribute('aria-checked', $('sv-strict').getAttribute('aria-checked') !== 'true'));
+  $('save-limits').addEventListener('click', async () => {
+    const base = $('sv-base').value.trim();
+    const nums = {
+      max_wait_secs: 'sv-maxwait', heartbeat_secs: 'sv-heartbeat', models_ttl_secs: 'sv-ttl',
+      stream_idle_secs: 'sv-idle', request_timeout_secs: 'sv-timeout', max_inflight: 'sv-inflight',
+    };
+    const limits = { strict_passthrough: $('sv-strict').getAttribute('aria-checked') === 'true' };
+    for (const [field, id] of Object.entries(nums)) {
+      const n = Math.round(+$(id).value);
+      if (!isFinite(n) || n < 0) return note('limits-err', 'Every limit needs a whole number ≥ 0.');
+      limits[field] = n;
+    }
+    try {
+      if (base !== sv.base_url) await sPost('/api/settings/upstream', { base_url: base });
+      await sPost('/api/settings/limits', limits);
+      await loadSettings();
+      note('limits-err', 'Saved.', true);
+    } catch (e) { note('limits-err', e.message); }
+  });
+  $('gov-tog').addEventListener('click', async () => {
+    try { await sPost('/api/settings/governor', { enabled: !sv.governor.enabled }); await loadSettings(); }
+    catch (e) { note('gov-err', e.message); }
+  });
+  for (const b of $('setbody').querySelectorAll('[data-govdel]')) b.addEventListener('click', async () => {
+    try { await sPost('/api/settings/governor', { remove_override: ovr[+b.dataset.govdel][0] }); await loadSettings(); }
+    catch (e) { note('gov-err', e.message); }
+  });
+  $('gov-add').addEventListener('click', async () => {
+    const model = $('gov-model').value.trim(), cap = Math.round(+$('gov-cap').value);
+    if (!model || !(cap >= 1)) return note('gov-err', 'Give a model id and a cap ≥ 1.');
+    try { await sPost('/api/settings/governor', { set_override: { model, cap } }); await loadSettings(); }
+    catch (e) { note('gov-err', e.message); }
+  });
+  $('save-pricing').addEventListener('click', async () => {
+    const pin = +$('sv-pin').value, pout = +$('sv-pout').value, days = Math.round(+$('sv-days').value);
+    if (!isFinite(pin) || !isFinite(pout) || !(days >= 0)) return note('pricing-err', 'Prices and retention need numeric values.');
+    try {
+      await sPost('/api/settings/pricing', { ref_price_in: pin, ref_price_out: pout });
+      await sPost('/api/settings/history', { days });
+      await loadSettings();
+      note('pricing-err', 'Saved.', true);
+    } catch (e) { note('pricing-err', e.message); }
+  });
+}
+
+function renderUsers() {
+  const RCLS = { superuser: 'superuser', admin: 'admin', user: 'user' };
+  const rows = SET.users.map((u, i) => `<div class="krow">
+    <span class="umono">${esc((u.username[0] || '?').toUpperCase())}</span>
+    <div style="min-width:0">
+      <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.username)}</div>
+      <div class="kmeta">${+u.nim_keys} NIM · ${+u.client_keys} client</div>
+    </div>
+    <span class="rbadge ${RCLS[u.role] || 'user'}" style="margin-left:auto">${esc(String(u.role).toUpperCase())}</span>
+    <button class="gbtn" data-urp="${i}">Reset password</button>
+    ${u.role !== 'superuser' ? `<select class="sin" data-urole="${i}" title="Role">
+        <option value="admin"${u.role === 'admin' ? ' selected' : ''}>admin</option>
+        <option value="user"${u.role === 'user' ? ' selected' : ''}>user</option>
+      </select>
+      <button class="dbtn" data-udel="${i}">Delete</button>` : ''}
+  </div>`).join('');
+  $('setbody').innerHTML = `<div class="card">
+    <h2>Users <span class="note">deleting a user pulls their NIM keys from the pool &amp; stops their harnesses</span></h2>
+    <div>${rows}</div>
+    <div class="addrow">
+      <input id="u-name" class="sin" style="flex:1;min-width:150px" placeholder="new username" autocomplete="off" spellcheck="false">
+      <input id="u-pass" class="sin" style="flex:1;min-width:150px" type="password" placeholder="initial password (10+ chars)" autocomplete="new-password">
+      <span class="pills"><button data-urolepick="user" aria-pressed="true">user</button><button data-urolepick="admin" aria-pressed="false">admin</button></span>
+      <button class="pbtn" id="u-add">Add user</button>
+    </div>
+    <div class="serr" id="u-err"></div>
+  </div>`;
+  const body = $('setbody');
+  for (const b of body.querySelectorAll('[data-urp]')) b.addEventListener('click', async () => {
+    const u = SET.users[+b.dataset.urp];
+    const pw = prompt(`New password for ${u.username} (at least 10 characters):`);
+    if (pw == null) return;
+    if (pw.length < 10) return note('u-err', 'Password must be at least 10 characters.');
+    try {
+      await sPost('/api/settings/users', { reset_password: { username: u.username, new_password: pw } });
+      note('u-err', `Password reset for ${u.username}.`, true);
+    } catch (e) { note('u-err', e.message); }
+  });
+  for (const s of body.querySelectorAll('[data-urole]')) s.addEventListener('change', async () => {
+    const u = SET.users[+s.dataset.urole];
+    try { await sPost('/api/settings/users', { set_role: { username: u.username, role: s.value } }); await loadSettings(); }
+    catch (e) { note('u-err', e.message); }
+  });
+  for (const b of body.querySelectorAll('[data-udel]')) b.addEventListener('click', async () => {
+    const u = SET.users[+b.dataset.udel];
+    if (!confirm(`Delete ${u.username}? Their NIM keys leave the pool and their API keys stop working.`)) return;
+    try { await sPost('/api/settings/users', { remove: u.username }); await loadSettings(); }
+    catch (e) { note('u-err', e.message); }
+  });
+  let newRole = 'user';
+  for (const b of body.querySelectorAll('[data-urolepick]')) b.addEventListener('click', () => {
+    newRole = b.dataset.urolepick;
+    for (const o of body.querySelectorAll('[data-urolepick]')) o.setAttribute('aria-pressed', o === b);
+  });
+  $('u-add').addEventListener('click', async () => {
+    const username = $('u-name').value.trim(), password = $('u-pass').value;
+    if (!username) return note('u-err', 'Pick a username.');
+    if (password.length < 10) return note('u-err', 'Initial password must be at least 10 characters.');
+    try { await sPost('/api/settings/users', { add: { username, password, role: newRole } }); await loadSettings(); }
+    catch (e) { note('u-err', e.message); }
+  });
+}
+
+function renderAccount() {
+  $('setbody').innerHTML = `<div class="card" style="max-width:560px">
+    <h2>Account</h2>
+    <div class="slabel">Username</div>
+    <input class="sin" style="width:100%" value="${esc(SET.username)}" disabled>
+    <div class="slabel" style="margin-top:14px">Current password</div>
+    <input id="a-cur" class="sin" style="width:100%" type="password" autocomplete="current-password">
+    <div class="slabel" style="margin-top:14px">New password · at least 10 characters</div>
+    <input id="a-new" class="sin" style="width:100%" type="password" autocomplete="new-password">
+    <div class="slabel" style="margin-top:14px">Confirm new password</div>
+    <input id="a-conf" class="sin" style="width:100%" type="password" autocomplete="new-password">
+    <p class="shint" style="margin-top:14px">Changing your password signs out your other sessions.</p>
+    <button class="pbtn" id="a-save">Update password</button>
+    <div class="serr" id="a-err"></div>
+  </div>`;
+  $('a-save').addEventListener('click', async () => {
+    const nw = $('a-new').value;
+    if (nw.length < 10) return note('a-err', 'New password must be at least 10 characters.');
+    if (nw !== $('a-conf').value) return note('a-err', 'Passwords do not match.');
+    try {
+      await sPost('/api/settings/account', { current_password: $('a-cur').value, new_password: nw });
+      for (const id of ['a-cur', 'a-new', 'a-conf']) $(id).value = '';
+      note('a-err', 'Password updated — this session was refreshed.', true);
+    } catch (e) { note('a-err', e.message); }
+  });
+}
+
+/* keep the lane-state chips honest while the page sits on Access & keys —
+   patch text in place so inputs and focus survive */
+setInterval(async () => {
+  if (activeTab !== 'settings' || setSub !== 'access' || !SET) return;
+  try {
+    const j = await (await fetch('/api/config')).json();
+    if (!j.nim_keys) return;
+    SET.pool = j.pool;
+    const byFp = new Map(j.nim_keys.map(k => [k.fingerprint, k]));
+    for (const el of document.querySelectorAll('[data-ksfp]')) {
+      const k = byFp.get(el.dataset.ksfp);
+      if (!k) continue;
+      const st = keyState(k);
+      el.textContent = st.text;
+      el.className = st.cls;
+    }
+    const pn = $('pool-note');
+    if (pn) pn.textContent = poolNote();
+  } catch {}
+}, 5000);
+
 const RENDERERS = { overview: renderOverview, models: renderModels, clients: renderClients,
-  reliability: renderReliability, capacity: renderCapacity };
+  reliability: renderReliability, capacity: renderCapacity,
+  settings: () => {} /* settings never rides the metrics poll */ };
 
 /* ---------- data sources ---------- */
 async function pollLive() {
@@ -1562,6 +2088,9 @@ for (const b of document.querySelectorAll('#side nav button')) {
     for (const s of document.querySelectorAll('main > section')) s.hidden = s.id !== 'tab-' + b.dataset.tab;
     activeTab = b.dataset.tab;
     $('pagetitle').textContent = TITLES[activeTab];
+    // Settings is config-driven: hide the metrics range picker and (re)fetch.
+    document.body.classList.toggle('on-settings', activeTab === 'settings');
+    if (activeTab === 'settings') loadSettings();
     location.hash = activeTab;
     render();
   });
