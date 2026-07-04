@@ -429,6 +429,10 @@ body.on-settings .tright, body.on-settings #custom { display: none; }
         <div id="meters-reasoning"></div>
       </div>
     </div>
+    <div class="card mb" id="card-toolcalls" hidden>
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M2 8h5M2 4h9M2 12h7"/></svg>Tool-call volume <span class="note">tool calls emitted · by model</span></h2>
+      <div id="m-toolcalls"></div>
+    </div>
     <div class="card mb">
       <h2><svg class="hic" viewBox="0 0 16 16"><path d="M8 2v12M3 5l5-3 5 3M3 11l5 3 5-3"/></svg>Model scorecard <span class="note">top models head to head · best in each column highlighted</span></h2>
       <div id="compare-scorecard"></div>
@@ -464,6 +468,10 @@ body.on-settings .tright, body.on-settings #custom { display: none; }
         <h2>Streaming share <span class="note">% streamed</span></h2>
         <div id="h-streammix"></div>
       </div>
+      <div class="card" id="h-maxtok-card" hidden>
+        <h2>Requested output cap <span class="note">avg max_tokens / request</span></h2>
+        <div id="h-maxtok"></div>
+      </div>
     </div>
     <div class="card">
       <h2><svg class="hic" viewBox="0 0 16 16"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg>Per harness <span class="note">click a column to sort</span></h2>
@@ -492,6 +500,11 @@ body.on-settings .tright, body.on-settings #custom { display: none; }
         <div id="chart-load"></div>
         <div class="legend" id="legend-load"></div>
       </div>
+    </div>
+    <div class="card mb">
+      <h2>Requests by outcome <span class="note">stacked · per minute</span></h2>
+      <div id="chart-outcome-stack"></div>
+      <div class="legend" id="legend-outcome-stack"></div>
     </div>
     <div class="grid2" style="grid-template-columns:1fr 1.4fr">
       <div class="card">
@@ -773,6 +786,76 @@ function lineChart(el, series, unitFmt, opts = {}) {
   // re-apply hover if the pointer is already over this chart (live re-render)
   const r = svg.getBoundingClientRect();
   if (mouse.x >= r.left && mouse.x <= r.right && mouse.y >= r.top && mouse.y <= r.bottom) hover(mouse.x, mouse.y);
+}
+
+/* ---------- stacked area chart over time: bands sum to a running total on a
+   shared time axis. Series carry raw (un-stacked) values at aligned sample
+   times; hover shows each band's own value plus the stacked total. Same grid,
+   axes, crosshair and tooltip idiom as lineChart. ---------- */
+function stackChart(el, series, unitFmt, opts = {}) {
+  const H = opts.height || 190;
+  el.classList.add('chart');
+  const bands = series.filter(s => s.pts.length > 1);
+  const n = bands.length ? Math.max(...bands.map(s => s.pts.length)) : 0;
+  const ts = (bands.find(s => s.pts.length === n) || { pts: [] }).pts.map(p => p.t);
+  const at = (s, i) => Math.max(0, s.pts[i] ? s.pts[i].v : 0);
+  const totals = ts.map((_, i) => bands.reduce((a, s) => a + at(s, i), 0));
+  if (ts.length < 2 || !totals.some(v => v > 0)) { el.innerHTML = '<div class="empty">No data in this window</div>'; return; }
+  const W = el.clientWidth || 500, PT = 16, PB = 16;
+  const t0 = ts[0], t1 = ts[ts.length-1];
+  let vmax = Math.max(1e-6, ...totals);
+  if (vmax >= 0.5) { const step = Math.pow(10, Math.floor(Math.log10(vmax))); vmax = Math.ceil(vmax / (step/2)) * (step/2); }
+  const X = t => W * (t - t0) / Math.max(1, t1 - t0);
+  const Y = v => PT + (H-PT-PB) * (1 - Math.min(v, vmax) / vmax);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', '100%'); svg.setAttribute('height', H);
+  let g = '';
+  for (let i = 0; i <= 3; i++) {
+    const v = vmax * i / 3, y = Y(v);
+    g += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${css('--hairline')}" stroke-width="1"/>`;
+    if (i > 0) g += `<text x="${W-3}" y="${y-4}" text-anchor="end">${unitFmt(v)}</text>`;
+  }
+  const span = t1 - t0;
+  const tlab = t => span > 36e5 * 26
+    ? new Date(t).toLocaleDateString([], {month:'short', day:'numeric'})
+    : new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  g += `<text x="0" y="${H-4}" fill="${css('--ink-4')}">${tlab(t0)}</text><text x="${W}" y="${H-4}" text-anchor="end" fill="${css('--ink-4')}">${tlab(t1)}</text>`;
+  // Cumulative bands drawn top→bottom: each fills to the baseline, painting
+  // over the shorter (lower) bands, so band k occupies [cum(k-1), cum(k)].
+  const run = ts.map(() => 0), cum = [];
+  for (const s of bands) { for (let i = 0; i < ts.length; i++) run[i] += at(s, i); cum.push(run.slice()); }
+  for (let k = bands.length - 1; k >= 0; k--) {
+    const d = cum[k].map((v, i) => `${i?'L':'M'}${X(ts[i]).toFixed(1)},${Y(v).toFixed(1)}`).join('');
+    g += `<path d="${d}L${X(t1).toFixed(1)},${H-PB}L${X(t0).toFixed(1)},${H-PB}Z" fill="${bands[k].color}" fill-opacity="0.82"/>`;
+    g += `<path d="${d}" fill="none" stroke="${bands[k].color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  g += `<g id="hoverg" visibility="hidden"><line id="xh" x1="0" y1="${PT}" x2="0" y2="${H-PB}" stroke="rgba(255,255,255,0.28)" stroke-width="1"/></g>`;
+  svg.innerHTML = g;
+  el.innerHTML = ''; el.appendChild(svg);
+  const hoverg = svg.querySelector('#hoverg'), xh = svg.querySelector('#xh');
+  const hover = (clientX, clientY) => {
+    const r = svg.getBoundingClientRect();
+    const t = t0 + (clientX - r.left) / Math.max(1, r.width) * (t1 - t0);
+    let bi = 0;
+    for (let i = 0; i < ts.length; i++) if (Math.abs(ts[i] - t) < Math.abs(ts[bi] - t)) bi = i;
+    const mx = X(ts[bi]);
+    xh.setAttribute('x1', mx); xh.setAttribute('x2', mx);
+    let dots = '';
+    for (let k = bands.length - 1; k >= 0; k--)
+      dots += `<circle cx="${mx}" cy="${Y(cum[k][bi])}" r="3" fill="${bands[k].color}" stroke="${css('--bg')}" stroke-width="1.5"/>`;
+    let html = `<div class="t">${new Date(ts[bi]).toLocaleString()}</div>`;
+    for (const s of bands)
+      html += `<div class="row"><span><i class="sw" style="background:${s.color}"></i>${esc(s.name)}</span><b>${unitFmt(at(s, bi))}</b></div>`;
+    html += `<div class="row" style="border-top:1px solid var(--hairline);margin-top:3px;padding-top:4px"><span>total</span><b>${unitFmt(totals[bi])}</b></div>`;
+    hoverg.innerHTML = xh.outerHTML + dots;
+    hoverg.setAttribute('visibility', 'visible');
+    showTip(clientX, clientY, html);
+  };
+  svg.addEventListener('mousemove', ev => hover(ev.clientX, ev.clientY));
+  svg.addEventListener('mouseleave', () => { hoverg.setAttribute('visibility', 'hidden'); hideTip(); });
+  const rr = svg.getBoundingClientRect();
+  if (mouse.x >= rr.left && mouse.x <= rr.right && mouse.y >= rr.top && mouse.y <= rr.bottom) hover(mouse.x, mouse.y);
 }
 
 function legend(el, series) {
@@ -1244,6 +1327,18 @@ function renderModels(c) {
   else barList($('meters-reasoning'),
     reasoningModels.map(m => ({ name: prettyName(m), v: reasonPct(m), color: publisher(m).color })), pct);
 
+  /* tool calls actually emitted per model (calls, not requests offering tools).
+     Hidden until a generation emits one. */
+  const toolCalls = wgroups('nimproxy_tool_calls_total', 'model');
+  const tcModels = models.filter(m => (toolCalls.get(m) || 0) > 0)
+    .sort((a, b) => (toolCalls.get(b) || 0) - (toolCalls.get(a) || 0));
+  $('card-toolcalls').hidden = !tcModels.length;
+  if (tcModels.length) barList($('m-toolcalls'), tcModels.map(m => {
+    const n = toolCalls.get(m) || 0, r = reqModels.get(m) || 0;
+    return { name: m, label: prettyName(m), v: n,
+      vtext: fmt(n) + (r ? ` · ${fmt(n / r)}/req` : ''), color: publisher(m).color };
+  }), fmt);
+
   /* scorecard (ex-Compare): best in each column highlighted, still sortable */
   const avgTtft = m => ttftMC.get(m) ? ttftMS.get(m) / ttftMC.get(m) : NaN;
   const avgTps = m => tpsMC.get(m) ? tpsMS.get(m) / tpsMC.get(m) : NaN;
@@ -1331,6 +1426,14 @@ function renderClients(c) {
   barList($('h-depth'), clients.map(cl => ({ name: cl, v: msgsAvg(cl), color: clientColor(cl) })), fmt);
   barList($('h-temp'), clients.map(cl => ({ name: cl, v: tempAvg(cl), color: clientColor(cl) })), v => v.toFixed(2));
   barList($('h-streammix'), clients.map(cl => ({ name: cl, v: streamPct(cl), color: clientColor(cl) })), v => Math.round(v) + '%', 100);
+  /* requested output budget — avg of the max_tokens the client asked for.
+     Hidden until at least one client sent a cap. */
+  const maxTokAvg = avgByKey('nimproxy_request_max_tokens_sum', 'nimproxy_request_max_tokens_count');
+  const maxTokN = wgroups('nimproxy_request_max_tokens_count', 'client');
+  const maxTokClients = clients.filter(cl => (maxTokN.get(cl) || 0) > 0);
+  $('h-maxtok-card').hidden = !maxTokClients.length;
+  if (maxTokClients.length)
+    barList($('h-maxtok'), maxTokClients.map(cl => ({ name: cl, v: maxTokAvg(cl), color: clientColor(cl) })), fmt);
   sortTable($('table-harness'), 'harness', [
     { label: 'Harness', align: 'l', str: true }, { label: 'Requests' }, { label: 'Tokens out' },
     { label: 'Tools/req' }, { label: 'Msgs/req' }, { label: 'Streaming' }, { label: 'Saved' },
@@ -1416,6 +1519,24 @@ function renderReliability(c) {
   ].map(({ name, color, f }) => ({ name, color, pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', f)) }));
   lineChart($('chart-outcomes'), outcomeSeries, fmt, { height: 150 });
   legend($('legend-outcomes'), outcomeSeries);
+  /* stacked composition over time — the same taxonomy groups as the hero
+     error breakdown above (success prepended), first match wins so each
+     status lands in exactly one band. */
+  const OUTCOMES = [
+    ['Success', css('--green'), s => /^2\d\d$/.test(s)],
+    ['Rate limited', css('--amber'), s => s === '429'],
+    ['Disconnect', css('--blue'), s => s === 'disconnect'],
+    ['Timeout / stall', css('--red'), s => s === '504' || s === 'stall'],
+    ['5xx', '#C15F3C', s => /^5\d\d$/.test(s) && s !== '504'],
+    ['Other', css('--ink-3'), () => true],
+  ];
+  const outcomeIdx = s => OUTCOMES.findIndex(([, , m]) => m(s));
+  const stackSeries = OUTCOMES
+    .map(([name, color], k) => ({ name, color,
+      pts: rateSeries(s => sum(s.rows, 'nimproxy_requests_total', l => outcomeIdx(l.status) === k)) }))
+    .filter(s => s.pts.some(p => p.v > 0));
+  stackChart($('chart-outcome-stack'), stackSeries, fmt, { height: 200 });
+  legend($('legend-outcome-stack'), stackSeries);
   const loadSeries = [
     { name: 'active', color: css('--green'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_active_requests') })) },
     { name: 'queued', color: css('--amber'), pts: samples.map(s => ({ t: s.t, v: sum(s.rows, 'nimproxy_queue_depth') })) },
