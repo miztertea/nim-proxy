@@ -195,11 +195,7 @@ pub async fn setup_validate_key(
 
 /// Probe a NIM key against an upstream: does `/v1/models` answer for it?
 /// Bypasses the pool and the models cache — this is an explicit-key check.
-pub async fn probe_key(
-    http: &reqwest::Client,
-    base_url: &str,
-    key: &str,
-) -> Result<usize, String> {
+pub async fn probe_key(http: &reqwest::Client, base_url: &str, key: &str) -> Result<usize, String> {
     match crate::proxy::fetch_models(http, base_url, key).await {
         Ok(resp) if resp.status().is_success() => {
             let body = resp

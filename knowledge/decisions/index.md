@@ -17,3 +17,4 @@ description: Lightweight ADRs — context, options, choice, consequences.
 - [auth-posture-and-dashboard-password](auth-posture-and-dashboard-password.md)
 - [input-sanitizing-and-xss](input-sanitizing-and-xss.md)
 - [dashboard-operator-console-redesign](dashboard-operator-console-redesign.md)
+- [ui-managed-config-store](ui-managed-config-store.md)

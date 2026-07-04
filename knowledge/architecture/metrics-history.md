@@ -11,7 +11,10 @@ timestamp: 2026-07-02T00:00:00Z
 **Live metrics**: a `metrics-exporter-prometheus` registry rendered at
 `GET /metrics` (series list in the README). Custom histogram buckets are set
 for TTFT, tokens/sec, queue wait, and upstream latency; the dashboard
-computes median/p95 from bucket deltas client-side.
+computes median/p95 from bucket deltas client-side. v0.6.0 adds the
+[governor](governor.md) series `nimproxy_worker_exhausted_total{model}` and the
+gauges `nimproxy_model_inflight{model}` / `nimproxy_model_limit{model}`
+(0 = ungoverned).
 
 **History**: every 5 minutes a sampler appends `(unix_ts, render())` — the
 *entire registry as Prometheus text*, ~4 KB — to memory and to
@@ -19,7 +22,8 @@ computes median/p95 from bucket deltas client-side.
 shape to a live `/metrics` poll, so the dashboard replays ranges through the
 same parser and the same rendering code paths. No second schema.
 
-- Retention: `HISTORY_DAYS` (default 30, 0 = forever) —
+- Retention: `history.days` in the [config store](../decisions/ui-managed-config-store.md)
+  (default 30, 0 = forever; tunable live from Settings via an `AtomicU64`) —
   [why days, not bytes](../decisions/history-retention-days-not-size.md).
 - `GET /api/history?from&to` filters and stride-samples to ≤288 points.
 - Unwritable `DATA_DIR` → one boot warning, memory-only operation.

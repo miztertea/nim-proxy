@@ -34,6 +34,10 @@ month's usage"). One knob, per the project's configuration philosophy
 
 - `history.jsonl` in `DATA_DIR` (Docker volume); unwritable dir degrades
   gracefully to in-memory-only with one boot-time warning.
+- Since v0.6.0 the days knob lives in the
+  [config store](ui-managed-config-store.md) (`history.days`, tunable live from
+  Settings), not the retired `HISTORY_DAYS` env var; the days-not-bytes choice
+  is unchanged.
 - Compaction rewrites the file only after a day's worth of expired snapshots
   accumulates; otherwise appends.
 - 5-minute resolution bounds range-view granularity; the Live view's 3s

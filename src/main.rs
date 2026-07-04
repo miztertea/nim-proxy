@@ -307,7 +307,10 @@ async fn main() {
              claims this proxy; finish setup immediately. /v1 stays closed until then."
         );
     }
-    tracing::info!("config store      {}", config::store_path(&data_dir).display());
+    tracing::info!(
+        "config store      {}",
+        config::store_path(&data_dir).display()
+    );
     tracing::info!("upstream          {}", cfg.base_url);
     let pool_keys = stored.pool_keys();
     tracing::info!(

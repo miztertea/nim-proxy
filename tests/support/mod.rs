@@ -221,10 +221,103 @@ fn sse(body: Body) -> Response {
         .unwrap()
 }
 
-/// The real proxy binary running as a child process.
+/// Test identity every store fixture contains: a superuser with a cheap
+/// (1000-iteration) precomputed password hash — the iteration count is
+/// encoded per hash, so the proxy verifies it with zero prod impact.
+pub const TEST_USER: &str = "root";
+pub const TEST_PASSWORD: &str = "test-password-1";
+const TEST_HASH: &str = "pbkdf2-sha256$1000$00000000000000000000000000000000$dd5fe0be04ca7f9e24642561a5d4635c52c40be82cbd7587b5eddc913ad3c7a7";
+
+pub fn sha256_hex(s: &str) -> String {
+    use sha2::Digest;
+    let d = sha2::Sha256::digest(s.as_bytes());
+    d.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A config-store fixture. Defaults mirror the old test posture: open /v1,
+/// three NIM keys at 40 rpm, short waits, 1s heartbeat.
+pub struct StoreOpts {
+    /// Open /v1 (no client keys needed). False = keyed mode.
+    pub open: bool,
+    /// (name, plaintext secret) client keys; stored as SHA-256 digests.
+    pub clients: Vec<(String, String)>,
+    /// (key, rpm) NIM keys, all enabled and owned by TEST_USER.
+    pub nim_keys: Vec<(String, usize)>,
+    /// Additional users (username, role: "admin" | "user"), all sharing
+    /// TEST_PASSWORD.
+    pub extra_users: Vec<(String, String)>,
+    pub max_wait_secs: u64,
+    pub heartbeat_secs: u64,
+    pub stream_idle_secs: u64,
+    pub request_timeout_secs: u64,
+    pub max_inflight: usize,
+    pub strict_passthrough: bool,
+}
+
+impl Default for StoreOpts {
+    fn default() -> Self {
+        Self {
+            open: true,
+            clients: Vec::new(),
+            nim_keys: vec![
+                ("test-key-0".into(), 40),
+                ("test-key-1".into(), 40),
+                ("test-key-2".into(), 40),
+            ],
+            extra_users: Vec::new(),
+            max_wait_secs: 30,
+            heartbeat_secs: 1,
+            stream_idle_secs: 300,
+            request_timeout_secs: 300,
+            max_inflight: 512,
+            strict_passthrough: false,
+        }
+    }
+}
+
+impl StoreOpts {
+    pub fn json(&self, upstream: &str) -> serde_json::Value {
+        let mut users = vec![serde_json::json!({
+            "username": TEST_USER, "password_hash": TEST_HASH, "role": "superuser"
+        })];
+        for (name, role) in &self.extra_users {
+            users.push(serde_json::json!({
+                "username": name, "password_hash": TEST_HASH, "role": role
+            }));
+        }
+        serde_json::json!({
+            "version": 1,
+            "upstream": {
+                "base_url": upstream,
+                "nim_keys": self.nim_keys.iter().map(|(k, rpm)| serde_json::json!({
+                    "key": k, "owner": TEST_USER, "enabled": true, "rpm": rpm
+                })).collect::<Vec<_>>(),
+            },
+            "client_auth": {
+                "mode": if self.open { "open" } else { "keyed" },
+                "keys": self.clients.iter().map(|(name, secret)| serde_json::json!({
+                    "name": name, "secret_sha256": sha256_hex(secret), "owner": TEST_USER
+                })).collect::<Vec<_>>(),
+            },
+            "limits": {
+                "max_wait_secs": self.max_wait_secs,
+                "heartbeat_secs": self.heartbeat_secs,
+                "stream_idle_secs": self.stream_idle_secs,
+                "request_timeout_secs": self.request_timeout_secs,
+                "max_inflight": self.max_inflight,
+                "strict_passthrough": self.strict_passthrough,
+            },
+            "users": users,
+        })
+    }
+}
+
+/// The real proxy binary running as a child process against a per-test
+/// tempdir DATA_DIR (removed on drop).
 pub struct Proxy {
     pub port: u16,
     pub child: std::process::Child,
+    pub data_dir: std::path::PathBuf,
 }
 
 impl Proxy {
@@ -263,32 +356,85 @@ impl Drop for Proxy {
                 .status();
             for _ in 0..150 {
                 if let Ok(Some(_)) = self.child.try_wait() {
-                    return;
+                    break;
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.data_dir);
     }
 }
 
-/// Start the proxy against `upstream` with sane test defaults, overridable
-/// via `envs`. History is disabled unless a test sets DATA_DIR.
+fn fresh_data_dir() -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "nimproxy-e2e-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Start the proxy with the default store fixture (open /v1, no auth
+/// boilerplate for behavior tests). `envs` still override container-level
+/// vars (PORT is set for you; HISTORY_SAMPLE_SECS etc. go here).
 pub async fn start_proxy(upstream: &str, envs: &[(&str, &str)]) -> Proxy {
+    start_proxy_with(upstream, StoreOpts::default(), envs).await
+}
+
+/// Start the proxy with a custom store fixture.
+pub async fn start_proxy_with(upstream: &str, opts: StoreOpts, envs: &[(&str, &str)]) -> Proxy {
+    let data_dir = fresh_data_dir();
+    let store = serde_json::to_string_pretty(&opts.json(upstream)).unwrap();
+    std::fs::write(data_dir.join("config.json"), store).unwrap();
+    spawn_and_wait_healthy(data_dir, envs).await
+}
+
+/// Start the proxy with NO store: it must boot healthy in setup mode
+/// (claimably closed — /v1 answers 503, browsers land on /setup).
+pub async fn start_proxy_fresh() -> Proxy {
+    spawn_and_wait_healthy(fresh_data_dir(), &[]).await
+}
+
+/// Boot the proxy against a pre-populated DATA_DIR and wait until healthy —
+/// for hand-written recovery fixtures whose exact shape `StoreOpts` can't
+/// express (e.g. orphan-owned keys with no users).
+pub async fn start_proxy_in(data_dir: std::path::PathBuf, envs: &[(&str, &str)]) -> Proxy {
+    spawn_and_wait_healthy(data_dir, envs).await
+}
+
+/// Gracefully stop the proxy but KEEP its DATA_DIR, then relaunch a fresh
+/// instance against the same store — restart round-trip tests. `terminate()`
+/// (via Drop) would delete the dir, so we repoint the doomed handle at a
+/// throwaway path first and hand the real dir to the new instance.
+pub async fn restart(mut proxy: Proxy, envs: &[(&str, &str)]) -> Proxy {
+    let data_dir = std::mem::replace(
+        &mut proxy.data_dir,
+        std::env::temp_dir().join("nimproxy-restart-placeholder"),
+    );
+    proxy.terminate();
+    spawn_and_wait_healthy(data_dir, envs).await
+}
+
+async fn spawn_and_wait_healthy(data_dir: std::path::PathBuf, envs: &[(&str, &str)]) -> Proxy {
     let port = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap().port()
     };
-    // Default to open mode so behavior tests need no auth boilerplate; auth
-    // tests override INSECURE_NO_AUTH/ADMIN_PASSWORD/PROXY_API_KEYS.
-    let mut cmd = base_cmd(port, upstream);
-    cmd.env("INSECURE_NO_AUTH", "true");
+    let mut cmd = base_cmd(port, &data_dir);
     for (k, v) in envs {
         cmd.env(k, v);
     }
     let child = cmd.spawn().expect("spawn proxy");
-    let proxy = Proxy { port, child };
+    let proxy = Proxy {
+        port,
+        child,
+        data_dir,
+    };
 
     let client = reqwest::Client::new();
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -303,16 +449,12 @@ pub async fn start_proxy(upstream: &str, envs: &[(&str, &str)]) -> Proxy {
     }
 }
 
-fn base_cmd(port: u16, upstream: &str) -> std::process::Command {
+fn base_cmd(port: u16, data_dir: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"));
     cmd.env_clear()
         .current_dir(std::env::temp_dir()) // dodge any local .env
         .env("PORT", port.to_string())
-        .env("NIM_BASE_URL", upstream)
-        .env("NIM_API_KEYS", "test-key-0,test-key-1,test-key-2")
-        .env("DATA_DIR", "")
-        .env("MAX_WAIT_SECS", "30")
-        .env("HEARTBEAT_SECS", "1")
+        .env("DATA_DIR", data_dir)
         .env("RUST_LOG", "nim_proxy=warn")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -325,18 +467,15 @@ fn base_cmd(port: u16, upstream: &str) -> std::process::Command {
     cmd
 }
 
-/// Spawn the proxy with only the given env (no INSECURE default) and assert it
-/// exits non-zero without ever becoming healthy — used for boot-posture tests.
-pub async fn expect_refuses_to_start(upstream: &str, envs: &[(&str, &str)]) {
+/// Spawn the proxy against a pre-populated DATA_DIR and assert it exits
+/// non-zero without ever becoming healthy — used for boot-posture tests
+/// (corrupt store, future version, unwritable DATA_DIR).
+pub async fn expect_refuses_to_start(data_dir: std::path::PathBuf) {
     let port = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap().port()
     };
-    let mut cmd = base_cmd(port, upstream);
-    for (k, v) in envs {
-        cmd.env(k, v);
-    }
-    let mut child = cmd.spawn().expect("spawn proxy");
+    let mut child = base_cmd(port, &data_dir).spawn().expect("spawn proxy");
     let client = reqwest::Client::new();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -345,6 +484,7 @@ pub async fn expect_refuses_to_start(upstream: &str, envs: &[(&str, &str)]) {
                 !status.success(),
                 "proxy should exit non-zero, got {status:?}"
             );
+            let _ = std::fs::remove_dir_all(&data_dir);
             return;
         }
         if let Ok(r) = client
@@ -363,6 +503,84 @@ pub async fn expect_refuses_to_start(upstream: &str, envs: &[(&str, &str)]) {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// A tempdir for boot-posture tests that pre-write store contents.
+pub fn scratch_data_dir() -> std::path::PathBuf {
+    fresh_data_dir()
+}
+
+/// Log in as `username` (TEST_PASSWORD) and return the session cookie value.
+pub async fn login_as(proxy: &Proxy, username: &str) -> String {
+    let resp = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(format!("username={username}&password={TEST_PASSWORD}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 303, "login should succeed for {username}");
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .expect("session cookie")
+        .to_str()
+        .unwrap();
+    cookie.split(';').next().unwrap().to_owned()
+}
+
+/// Session cookie for the default superuser.
+pub async fn login(proxy: &Proxy) -> String {
+    login_as(proxy, TEST_USER).await
+}
+
+/// Fetch /metrics authenticated with scraper-style header credentials.
+pub async fn metrics(proxy: &Proxy) -> String {
+    reqwest::Client::new()
+        .get(proxy.url("/metrics"))
+        .header(
+            "authorization",
+            format!("Bearer {TEST_USER}:{TEST_PASSWORD}"),
+        )
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap()
+}
+
+/// Drive the setup wizard's single POST; returns the session cookie it mints.
+pub async fn complete_setup(
+    proxy: &Proxy,
+    username: &str,
+    password: &str,
+    base_url: &str,
+    nim_keys: &[(&str, usize)],
+) -> String {
+    let body = serde_json::json!({
+        "username": username,
+        "password": password,
+        "base_url": base_url,
+        "nim_keys": nim_keys.iter().map(|(k, rpm)| serde_json::json!({"key": k, "rpm": rpm})).collect::<Vec<_>>(),
+    });
+    let resp = reqwest::Client::new()
+        .post(proxy.url("/setup"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "setup should succeed");
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .expect("setup mints a session")
+        .to_str()
+        .unwrap();
+    cookie.split(';').next().unwrap().to_owned()
 }
 
 /// Read an SSE response to completion (until [DONE], an error event, or EOF);

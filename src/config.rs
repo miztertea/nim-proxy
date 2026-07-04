@@ -416,7 +416,13 @@ pub fn validate(sc: &StoredConfig) -> Result<(), String> {
             return Err(format!("user {:?} has an empty password hash", u.username));
         }
     }
-    if sc.users.iter().filter(|u| u.role == Role::Superuser).count() > 1 {
+    if sc
+        .users
+        .iter()
+        .filter(|u| u.role == Role::Superuser)
+        .count()
+        > 1
+    {
         return Err("only one superuser may exist".into());
     }
 
@@ -565,7 +571,10 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = TestDir::new();
         save(&dir.0, &claimed()).unwrap();
-        let mode = fs::metadata(store_path(&dir.0)).unwrap().permissions().mode();
+        let mode = fs::metadata(store_path(&dir.0))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600, "credentials file must be 0600");
     }
 
@@ -602,32 +611,67 @@ mod tests {
 
     #[test]
     fn validate_rejects_bad_shapes() {
-        let cases: Vec<(&str, Box<dyn Fn(&mut StoredConfig)>)> = vec![
-            ("dup user", Box::new(|sc| sc.users.push(sc.users[0].clone()))),
-            ("two superusers", Box::new(|sc| {
-                let mut u = sc.users[0].clone();
-                u.username = "root2".into();
-                sc.users.push(u);
-            })),
-            ("bad username", Box::new(|sc| sc.users[0].username = "a b".into())),
-            ("empty hash", Box::new(|sc| sc.users[0].password_hash.clear())),
+        type Mutation = Box<dyn Fn(&mut StoredConfig)>;
+        let cases: Vec<(&str, Mutation)> = vec![
+            (
+                "dup user",
+                Box::new(|sc| sc.users.push(sc.users[0].clone())),
+            ),
+            (
+                "two superusers",
+                Box::new(|sc| {
+                    let mut u = sc.users[0].clone();
+                    u.username = "root2".into();
+                    sc.users.push(u);
+                }),
+            ),
+            (
+                "bad username",
+                Box::new(|sc| sc.users[0].username = "a b".into()),
+            ),
+            (
+                "empty hash",
+                Box::new(|sc| sc.users[0].password_hash.clear()),
+            ),
             ("rpm zero", Box::new(|sc| sc.upstream.nim_keys[0].rpm = 0)),
-            ("rpm huge", Box::new(|sc| sc.upstream.nim_keys[0].rpm = 10_001)),
-            ("dup nim key", Box::new(|sc| {
-                let k = sc.upstream.nim_keys[0].clone();
-                sc.upstream.nim_keys.push(k);
-            })),
-            ("dangling owner", Box::new(|sc| sc.upstream.nim_keys[0].owner = "ghost".into())),
-            ("superuser without enabled key", Box::new(|sc| {
-                sc.upstream.nim_keys[0].enabled = false
-            })),
-            ("heartbeat >= max_wait", Box::new(|sc| sc.limits.heartbeat_secs = 900)),
+            (
+                "rpm huge",
+                Box::new(|sc| sc.upstream.nim_keys[0].rpm = 10_001),
+            ),
+            (
+                "dup nim key",
+                Box::new(|sc| {
+                    let k = sc.upstream.nim_keys[0].clone();
+                    sc.upstream.nim_keys.push(k);
+                }),
+            ),
+            (
+                "dangling owner",
+                Box::new(|sc| sc.upstream.nim_keys[0].owner = "ghost".into()),
+            ),
+            (
+                "superuser without enabled key",
+                Box::new(|sc| sc.upstream.nim_keys[0].enabled = false),
+            ),
+            (
+                "heartbeat >= max_wait",
+                Box::new(|sc| sc.limits.heartbeat_secs = 900),
+            ),
             ("zero inflight", Box::new(|sc| sc.limits.max_inflight = 0)),
-            ("bad base_url", Box::new(|sc| sc.upstream.base_url = "ftp://x".into())),
-            ("negative price", Box::new(|sc| sc.pricing.ref_price_in = -1.0)),
-            ("bad governor cap", Box::new(|sc| {
-                sc.governor.overrides.insert("m".into(), 0);
-            })),
+            (
+                "bad base_url",
+                Box::new(|sc| sc.upstream.base_url = "ftp://x".into()),
+            ),
+            (
+                "negative price",
+                Box::new(|sc| sc.pricing.ref_price_in = -1.0),
+            ),
+            (
+                "bad governor cap",
+                Box::new(|sc| {
+                    sc.governor.overrides.insert("m".into(), 0);
+                }),
+            ),
         ];
         for (name, mutate) in cases {
             let mut sc = claimed();

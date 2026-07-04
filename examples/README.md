@@ -13,8 +13,9 @@ global use) and set the API key OpenCode sends to the proxy:
 
 ```sh
 cp examples/opencode.json ./opencode.json
-export NIM_PROXY_KEY=your-proxy-secret   # a PROXY_API_KEYS secret (secure mode),
-                                         # or any non-empty string (INSECURE_NO_AUTH=true)
+export NIM_PROXY_KEY=your-proxy-secret   # a client API key (npk_…) you minted in
+                                         # Settings when the API is in keyed mode,
+                                         # or any non-empty string in open mode
 opencode
 ```
 
@@ -34,7 +35,7 @@ hosted free API yet), change the `models` key and the `model` reference to match
 |---|---|---|
 | `options.timeout` | `false` | **The important one.** nim-proxy holds the connection open with SSE heartbeats while it waits out NIM's 40 RPM limit. With a client-side timeout, OpenCode would abort mid-wait and defeat the proxy's whole purpose. Disable it and let the proxy pace. |
 | `options.baseURL` | `http://localhost:8000/v1` | Points at the proxy, not NIM directly. Change the port if you set a non-default `PORT`. |
-| `options.apiKey` | `{env:NIM_PROXY_KEY}` | The SDK requires a key. In secure mode this is your `PROXY_API_KEYS` secret; in open mode any non-empty value works. |
+| `options.apiKey` | `{env:NIM_PROXY_KEY}` | The SDK requires a key. In keyed mode this is a client API key (`npk_…`) you generate in the dashboard Settings; in open mode any non-empty value works. |
 | `limit.context` | `131072` (128k) | GLM-5.2's card advertises a 1M-token window, but NIM's **hosted** endpoint has historically served GLM at 128k. 128k is the safe floor and is plenty for agentic coding. Because OpenCode auto-compacts *below* this number, setting it conservatively means compaction fires before NIM can reject an over-length request. Raise it toward 1M only if testing confirms the hosted window is larger. |
 | `limit.output` | `32768` | OpenCode silently caps `limit.output` at 32k ([issue #29363](https://github.com/anomalyco/opencode/issues/29363)), so this is the effective ceiling. Generous headroom for GLM-5.2's reasoning/"thinking" tokens, which count toward output. |
 | `options.temperature` | `0.6` | Balanced for agentic coding — deterministic enough to follow tool schemas, loose enough to reason. Bump toward `1.0` (Z.ai's general-purpose default) for more exploratory work. |

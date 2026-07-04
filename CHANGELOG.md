@@ -7,8 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Breaking (v0.6.0):** app-level configuration moved from env vars into a
+> UI-managed store. `NIM_API_KEYS`, `PROXY_API_KEYS`, `ADMIN_PASSWORD`,
+> `INSECURE_NO_AUTH`, `NIM_BASE_URL`, `RPM_PER_KEY`, `MAX_WAIT_SECS`,
+> `HEARTBEAT_SECS`, `MODELS_TTL_SECS`, `STREAM_IDLE_SECS`,
+> `REQUEST_TIMEOUT_SECS`, `STRICT_PASSTHROUGH`, `REF_PRICE_IN`/`REF_PRICE_OUT`,
+> `HISTORY_DAYS`, and `MAX_INFLIGHT` are **ignored** (a one-line boot warning
+> lists any still set). Configure everything in the dashboard on first run. The
+> dashboard is now multi-user (username + password), and `INSECURE_NO_AUTH` is
+> replaced by an `open|keyed` API-access mode that affects only `/v1`. There is
+> no migration (there were no deployments to migrate).
+
 ### Added
 
+- **UI-managed config store + first-run setup wizard**: app-level config lives
+  in `DATA_DIR/config.json` (version 1, atomic writes, 0600), edited from a new
+  dashboard **Settings** area (sub-nav: Access & keys · Server · Users ·
+  Account) and claimed by a 3-step wizard (create superuser → add ≥1 NIM key,
+  validated live against the upstream → finish, logged in). A corrupt/unreadable
+  or future-version store is a hard boot error, never a silent fall-through to
+  setup. JSON not SQLite — see
+  `knowledge/decisions/ui-managed-config-store.md`.
+- **Multi-user with roles & per-key ownership**: `superuser` (an admin that can
+  never be deleted), `admin` (server settings + user management), `user` (own
+  account, own client keys, own NIM keys). Dashboards are identical for every
+  role; `GET /api/config` is filtered server-side so hidden sections are absent
+  from the payload, not CSS-hidden. Sessions carry the username plus a fragment
+  of the password hash, so a password change/reset invalidates that user's
+  sessions instantly and role changes/deletion apply on the next request.
+  Passwords are PBKDF2-HMAC-SHA256 (600k iterations, RFC 7914 vectors). See the
+  v0.6.0 amendment in
+  `knowledge/decisions/auth-posture-and-dashboard-password.md`.
+- **Per-key rpm and live key management**: each NIM key has its own rpm
+  (default 40, range 1–10000), an owner, and an enable/disable toggle; the pool
+  rebuilds live on any change with rate-state carryover (kept keys keep their
+  in-window counts; disabled keys re-enable warm). The superuser always owns ≥1
+  enabled key (the pool floor). Client API keys are server-generated 128-bit
+  secrets with an `npk_` prefix, shown exactly once and stored only as SHA-256
+  digests (+ last-4 for display).
+- **Model-pressure governor**: classifies NIM's per-model worker-concurrency
+  exhaustion (`Worker local total request limit reached`) apart from plain 429s
+  and backs off the **model** (never benches the lane, since key failover can't
+  help). Adaptive and zero-config (engages at half observed in-flight, +1 per
+  stable minute, dissolves after 30 clean minutes) with optional per-model
+  pinned caps in Settings. New metrics `nimproxy_worker_exhausted_total{model}`,
+  `nimproxy_model_inflight{model}`, `nimproxy_model_limit{model}` (0 =
+  ungoverned), and a Reliability **Model pressure** card that appears only once
+  the governor has engaged. See `knowledge/architecture/governor.md`;
+  `mock_nim.py` gained `--worker-slots N` and `loadtest.py` reports worker
+  exhaustions + peak per-model concurrency.
 - **Redesigned dashboard**: a dark, NVIDIA-green "operator console" — left
   sidebar nav (collapses to an icon rail below 860px), top bar with range
   pills, Space Grotesk + Spline Sans Mono webfonts. Five persona-aligned tabs
