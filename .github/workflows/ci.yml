@@ -116,6 +116,74 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  lint-workflows:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # zizmor SARIF → code scanning
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # actionlint: schema- and shellcheck-level correctness for the workflow
+      # YAML — any finding is a real bug, so it always gates. Not in
+      # install-action's registry, so it's a pinned release binary verified
+      # against the published checksum (bump version + checksum together).
+      - name: Install actionlint
+        run: |
+          curl -fsSLO https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint_1.7.12_linux_amd64.tar.gz" | sha256sum -c -
+          tar xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+      - name: actionlint
+        run: ./actionlint -color
+      # zizmor: GitHub-Actions security lint (template injection, cache
+      # poisoning, unpinned actions, …). The action uploads SARIF so every
+      # severity is triageable in code scanning but never fails the build;
+      # the CLI step below is the gate, and only on high-severity findings so
+      # new low-noise rules can't block unrelated PRs.
+      - name: zizmor (SARIF → code scanning)
+        uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
+        with:
+          tool: zizmor
+      - name: zizmor (gate on high severity)
+        run: zizmor --min-severity high .github/workflows/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # enables the online audits (same set as the SARIF run)
+
+  dependency-review:
+    name: dependency review
+    # The action diffs the PR's dependency graph against the base via the
+    # GitHub API — it only makes sense (and only works) on pull requests.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # posts the failure summary as a PR comment
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # Blocks PRs that introduce crates with known vulnerabilities
+      # (Cargo.lock is covered by the dependency graph). License policy stays
+      # cargo-deny's job — deny.toml is the single source of license truth,
+      # and double-gating against ClearlyDefined's spottier crate data would
+      # only drift.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
+          license-check: false
+          comment-summary-in-pr: on-failure
+
   docker:
     name: docker build
     runs-on: ubuntu-latest

@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CodeQL static analysis** for the Rust source on every PR, push to main,
+  and a weekly re-scan (`build-mode: none` — no cargo build needed).
+- **Workflow lint job in CI**: `actionlint` (correctness, always gates) and
+  `zizmor` (Actions security lint; every severity is uploaded to code
+  scanning, high-severity findings fail the build).
+- **Dependency review on PRs**: introducing a crate with a known
+  vulnerability now fails the PR (licenses stay `cargo-deny`'s job).
+- **Weekly advisories audit** (`audit.yml`): the lockfile is checked against
+  the RUSTSEC database on a schedule, so a new advisory surfaces within a
+  week instead of at the next push.
+
 ### Changed
+
+- The release workflow now runs under a global concurrency group (one release
+  at a time, queued rather than cancelled), and the `prepare` script takes
+  workflow-context values via `env` instead of inline template expansion.
 
 - **Workflow hardening to the OpenSSF-recommended baseline**: every GitHub
   Actions step is pinned to a full commit SHA (Dependabot keeps the pins
