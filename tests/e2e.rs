@@ -1472,6 +1472,22 @@ async fn user_role_is_denied_server_settings_and_foreign_keys() {
             serde_json::json!({"add": {"username": "eve", "password": "long-enough-pw", "role": "user"}}),
         ),
         ("/api/settings/clients", serde_json::json!({"mode": "open"})),
+        (
+            "/api/settings/limits",
+            serde_json::json!({
+                "max_wait_secs": 60, "heartbeat_secs": 5, "models_ttl_secs": 600,
+                "stream_idle_secs": 300, "request_timeout_secs": 300,
+                "max_inflight": 512, "strict_passthrough": false
+            }),
+        ),
+        (
+            "/api/settings/pricing",
+            serde_json::json!({"ref_price_in": 1.0, "ref_price_out": 2.0}),
+        ),
+        (
+            "/api/settings/governor",
+            serde_json::json!({"enabled": false}),
+        ),
     ] {
         let (status, v) = post_json(&proxy, &alice, path, body).await;
         assert_eq!(status, 403, "{path} should be admin-only: {v}");
@@ -1914,4 +1930,349 @@ async fn setup_key_validation_rejects_link_local_base_url() {
         .unwrap();
     let v: serde_json::Value = ok.json().await.unwrap();
     assert_eq!(v["ok"], true, "loopback upstream still probes: {v}");
+}
+
+/// Streaming requests hold their in-flight slot for the stream's whole
+/// lifetime — `max_inflight` caps total concurrent work, not just the
+/// buffered path (streaming is what agent harnesses actually send).
+#[tokio::test]
+async fn streaming_requests_count_against_the_inflight_cap() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            max_inflight: 1,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    // Occupy the only slot with a stream that never ends. Reading the first
+    // body chunk proves the proxy has fully committed to the stream.
+    let mut hog = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hog", true))
+        .send()
+        .await
+        .unwrap()
+        .bytes_stream();
+    use futures_util::StreamExt;
+    let first = tokio::time::timeout(Duration::from_secs(5), hog.next())
+        .await
+        .expect("first chunk within 5s")
+        .expect("stream not ended")
+        .expect("stream chunk");
+    assert!(!first.is_empty());
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("shed-me", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        503,
+        "a live stream occupies the in-flight cap"
+    );
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "overloaded");
+    drop(hog);
+}
+
+/// The wizard can mint a first client key atomically with the claim, so a
+/// fresh keyed-mode proxy serves /v1 immediately — no Settings detour. The
+/// secret is returned exactly once and never stored in plaintext.
+#[tokio::test]
+async fn setup_can_mint_a_first_client_key() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_fresh().await;
+
+    let resp = client()
+        .post(proxy.url("/setup"))
+        .json(&serde_json::json!({
+            "username": "admin",
+            "password": "hunter2hunter2",
+            "base_url": mock.url,
+            "nim_keys": [{"key": "nvapi-key", "rpm": 40}],
+            "create_client_key": {"name": "default"},
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    let secret = v["client_key"]["secret"].as_str().expect("minted secret");
+    assert!(secret.starts_with("npk_"), "{v}");
+    assert_eq!(v["client_key"]["name"], "default");
+
+    // The store holds only the digest, never the bearer token itself.
+    let store = std::fs::read_to_string(proxy.data_dir.join("config.json")).unwrap();
+    assert!(
+        !store.contains(secret),
+        "client secret must not be persisted in plaintext"
+    );
+
+    // The minted key opens /v1 right away; keyless calls still fail closed.
+    let ok = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth(secret)
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200, "minted key serves /v1 with no detour");
+    let no_key = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_key.status(), 401, "keyed mode still fails closed");
+}
+
+// ---------- settings-endpoint coverage backfill ----------
+
+/// A DATA_DIR whose path is blocked by a regular file is a hard boot error.
+/// (The write-probe posture; a chmod-based fixture would pass vacuously when
+/// the tests run as root.)
+#[tokio::test]
+async fn boot_refuses_an_unwritable_data_dir() {
+    let dir = scratch_data_dir();
+    std::fs::write(dir.join("blocker"), b"not a directory").unwrap();
+    expect_refuses_to_start(dir.join("blocker").join("data")).await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Governor settings write through the shared pipeline: they reflect in
+/// /api/config, out-of-range overrides are refused, and the state persists
+/// across a restart.
+#[tokio::test]
+async fn governor_settings_reflect_and_persist() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"set_override": {"model": "mock/model-a", "cap": 4}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["server"]["governor"]["overrides"]["mock/model-a"], 4);
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"set_override": {"model": "mock/model-a", "cap": 0}}),
+    )
+    .await;
+    assert_eq!(status, 400, "cap 0 must fail the rulebook: {v}");
+
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"enabled": false}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/governor",
+        serde_json::json!({"remove_override": "mock/model-a"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    let proxy = restart(proxy, &[]).await;
+    let root = support::login(&proxy).await;
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(
+        cfg["server"]["governor"]["enabled"], false,
+        "master toggle persisted across restart: {cfg}"
+    );
+    assert!(
+        cfg["server"]["governor"]["overrides"]
+            .as_object()
+            .unwrap()
+            .is_empty(),
+        "removed override stays gone: {cfg}"
+    );
+}
+
+/// Pricing and history retention save through the same pipeline and reflect
+/// in /api/config; a negative reference price is refused.
+#[tokio::test]
+async fn pricing_and_history_settings_reflect_in_api_config() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/pricing",
+        serde_json::json!({"ref_price_in": 1.25, "ref_price_out": 3.5}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/history",
+        serde_json::json!({"days": 7}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["server"]["pricing"]["ref_price_in"], 1.25);
+    assert_eq!(cfg["server"]["pricing"]["ref_price_out"], 3.5);
+    assert_eq!(cfg["server"]["history"]["days"], 7);
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/pricing",
+        serde_json::json!({"ref_price_in": -1.0, "ref_price_out": 3.5}),
+    )
+    .await;
+    assert_eq!(status, 400, "negative prices must be refused: {v}");
+}
+
+/// The limits endpoint enforces the shared rulebook (heartbeat < max_wait)
+/// and rejects partial bodies outright — omitted fields are never silently
+/// reset to defaults.
+#[tokio::test]
+async fn limits_validation_rejects_bad_bounds_and_partial_bodies() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/limits",
+        serde_json::json!({
+            "max_wait_secs": 5, "heartbeat_secs": 10, "models_ttl_secs": 600,
+            "stream_idle_secs": 300, "request_timeout_secs": 300,
+            "max_inflight": 512, "strict_passthrough": false
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("max_wait_secs"),
+        "the rulebook names the offending bound: {v}"
+    );
+
+    let partial = client()
+        .post(proxy.url("/api/settings/limits"))
+        .header("cookie", &root)
+        .json(&serde_json::json!({"max_wait_secs": 60}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        partial.status(),
+        422,
+        "a partial limits body is rejected, not defaulted"
+    );
+}
+
+/// The account endpoint enforces the same 10-character password floor the
+/// wizard and user-management do.
+#[tokio::test]
+async fn account_rejects_a_short_new_password() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/account",
+        serde_json::json!({"current_password": support::TEST_PASSWORD, "new_password": "short"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    assert_eq!(v["error"]["code"], "weak_password");
+}
+
+/// A stream whose upstream hangs must release its in-flight slot promptly
+/// once the client disconnects — otherwise hung upstreams accumulate and
+/// permanently consume the cap (503s forever until restart).
+#[tokio::test]
+async fn disconnected_stream_releases_its_inflight_slot() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            max_inflight: 1,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    // Occupy the only slot with a hung stream. Read PAST the upstream's only
+    // data chunk so the relay task is parked on the upstream read with
+    // nothing left to send — the state where a disconnect used to go
+    // unnoticed until the stream_idle cutoff — then hang up.
+    let mut hog = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hog", true))
+        .send()
+        .await
+        .unwrap()
+        .bytes_stream();
+    use futures_util::StreamExt;
+    let read_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let chunk = tokio::time::timeout(
+            read_deadline.saturating_duration_since(Instant::now()),
+            hog.next(),
+        )
+        .await
+        .expect("upstream chunk within 5s")
+        .expect("stream open")
+        .expect("chunk ok");
+        if String::from_utf8_lossy(&chunk).contains("choices") {
+            break; // the mock's single pre-hang data chunk has been relayed
+        }
+    }
+    drop(hog);
+
+    // The slot must come back well before the stream_idle cutoff (300s here):
+    // the proxy notices the closed client channel, not just the stalled read.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let resp = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("after-disconnect", false))
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == 200 {
+            break;
+        }
+        assert_eq!(resp.status(), 503, "only sheds while the slot is held");
+        assert!(
+            Instant::now() < deadline,
+            "slot never released after client disconnect"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }

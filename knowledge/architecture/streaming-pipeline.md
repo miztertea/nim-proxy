@@ -25,8 +25,13 @@ For a `stream: true` chat request:
    `error` event; success → pipe.
 5. **Pipe with watchdog**: chunks forward verbatim while `SseScan` (a
    line-reassembling observer) counts data events and extracts the `usage`
-   object. A `tokio::time::timeout` of the `stream_idle` limit around each read cuts
-   stalled upstreams with an in-stream error (status label `stall`).
+   object. Each upstream read races two exits in a `select!`: the
+   `stream_idle` timeout cuts stalled upstreams with an in-stream error
+   (status label `stall`), and `tx.closed()` notices a client hang-up
+   immediately — freeing the request's `max_inflight` slot at disconnect
+   time rather than at the stall cutoff (with `stream_idle` 0 there is no
+   cutoff, so this is what prevents hung upstreams from pinning slots until
+   restart).
 6. **Account**: TTFT histogram at first chunk; tokens/sec and prompt/
    completion counters at end (`source="usage"` exact, `"estimate"` =
    one-per-event fallback); one access-log line per request.

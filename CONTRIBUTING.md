@@ -47,7 +47,7 @@ the dashboard, not env vars ([config store](knowledge/decisions/ui-managed-confi
 All three must be clean before you open a PR — CI enforces every one of them:
 
 ```sh
-cargo test                                   # 66 unit + 45 end-to-end tests
+cargo test                                   # 69 unit + 53 end-to-end tests
 cargo fmt                                     # (CI runs `cargo fmt --check`)
 cargo clippy --all-targets -- -D warnings    # zero warnings — warnings are errors
 ```

@@ -19,7 +19,8 @@ which nobody else (not even you) can read back ([why](../decisions/ui-managed-co
 ## Setup
 
 1. Bring the proxy up and finish the [first-run wizard](deploy-docker.md) — the
-   account you create is the **superuser** and its NIM key(s) anchor the pool.
+   account you create is the **superuser**, its NIM key(s) anchor the pool, and
+   the wizard mints your own first client key by default.
 2. Put it behind TLS (reverse proxy / VPN / platform edge) and set
    `TRUST_PROXY=true` — passwords and keys must not travel in cleartext.
 3. For each friend: Settings → Users → add a `user` (or `admin`) with an

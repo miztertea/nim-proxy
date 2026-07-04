@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.6.0] - 2026-07-04
+
 > **Breaking (v0.6.0):** app-level configuration moved from env vars into a
 > UI-managed store. `NIM_API_KEYS`, `PROXY_API_KEYS`, `ADMIN_PASSWORD`,
 > `INSECURE_NO_AUTH`, `NIM_BASE_URL`, `RPM_PER_KEY`, `MAX_WAIT_SECS`,
@@ -67,6 +71,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is click-to-sort with a sticky header and internal scroll — sort order and
   scroll position both survive the 3s live refresh. See
   `knowledge/decisions/dashboard-operator-console-redesign.md`.
+- **The wizard mints your first client key**: setup ends on a connect panel
+  with the client base URL and a once-only `npk_` secret, so a fresh
+  keyed-mode proxy serves `/v1` with no Settings detour. On by default;
+  opting out shows an explicit warning (keyed with zero keys rejects every
+  `/v1` call until a key exists).
+- **New dashboard charts** for signals that were collected but never drawn:
+  requests-by-outcome over time (Reliability), requested output budget per
+  harness from `nimproxy_request_max_tokens` (Clients), and tool-call volume
+  per model from `nimproxy_tool_calls_total` (Models).
+
+### Fixed
+
+- **Streaming requests now count against `max_inflight` for their whole
+  lifetime.** The in-flight guard previously dropped when the response headers
+  were returned, so the cap only bounded buffered requests — a flood of live
+  streams could exceed it unbounded.
+- **A client disconnect during a blocked upstream read is noticed
+  immediately.** The streaming relay now races each upstream read against the
+  client channel closing, so a hang-up frees the request's `max_inflight`
+  slot at disconnect time instead of at the `stream_idle` cutoff — and a hung
+  upstream can no longer pin a slot until restart when `stream_idle` is 0.
+- **Own-password change guards against a concurrent admin reset.** The change
+  commits only if the stored hash is still the one the current password was
+  verified against; a reset landing in the verify window now wins with a 409
+  instead of being silently overwritten by the stale change.
 
 ### Changed
 
@@ -270,7 +299,8 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.5.0
 [0.4.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.3.0

@@ -51,6 +51,13 @@ details input { margin-top:8px; }
 .review div { display:flex; justify-content:space-between; padding:3px 0; }
 .review .k { color:var(--dim); }
 .hint { color:var(--dim); font-size:11.5px; margin:10px 0 0; }
+.opt { display:flex; align-items:flex-start; gap:8px; font-size:12.5px; color:var(--text); margin:0 0 10px; cursor:pointer; }
+.opt input { width:auto; margin:2px 0 0; accent-color:var(--green); }
+.warn { color:#e8b04a; font-size:12px; border:1px solid #4a3a14; background:#1a1408; border-radius:8px; padding:9px 11px; margin:0 0 12px; }
+.copyrow { display:flex; align-items:center; gap:8px; margin:0 0 12px; }
+.copyrow code { flex:1; font:12px/1.4 ui-monospace, monospace; padding:8px 10px; border:1px solid var(--line);
+  border-radius:8px; background:#0d120d; overflow-x:auto; white-space:nowrap; }
+.copyrow button { padding:6px 10px; font-size:12px; white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -91,10 +98,25 @@ details input { margin-top:8px; }
 
   <section id="step3" hidden>
     <div class="review" id="review"></div>
+    <label class="opt"><input type="checkbox" id="mintkey" checked>
+      <span>Create my first client API key (<code>npk_…</code>) so harnesses can call <code>/v1</code> right away</span></label>
+    <p class="warn" id="mintwarn" hidden>Without a client key, the proxy stays in keyed mode but
+      rejects <b>every</b> /v1 request until you mint one in Settings → Access &amp; keys.
+      Skip this only if you plan to switch the API mode to open (unauthenticated /v1).</p>
     <div class="row">
       <button type="button" class="ghost" id="back2">Back</button>
       <button type="submit" class="primary" id="finish">Create &amp; open dashboard</button>
     </div>
+  </section>
+
+  <section id="step4" hidden>
+    <p class="sub">Setup complete. Point your harness at the proxy — the API key below is shown
+      <b>only this once</b> (only its digest is stored).</p>
+    <label>Client base URL</label>
+    <div class="copyrow"><code id="cbase"></code><button type="button" class="ghost" data-copy="cbase">Copy</button></div>
+    <label>Client API key</label>
+    <div class="copyrow"><code id="csecret"></code><button type="button" class="ghost" data-copy="csecret">Copy</button></div>
+    <button type="button" class="primary" id="opendash">Open dashboard</button>
   </section>
 </form>
 
@@ -149,15 +171,44 @@ $("addkey").onclick = async () => {
   $("addkey").disabled = false; $("addkey").textContent = "Validate & add";
 };
 
+function apiAccessLine() {
+  return $("mintkey").checked
+    ? 'keyed · first client key "default"'
+    : "keyed — no client key yet (/v1 rejects everything)";
+}
 $("to3").onclick = () => {
   const base = $("baseurl").value.trim();
   $("review").innerHTML =
     `<div><span class="k">Superuser</span><span>${esc($("username").value.trim())}</span></div>` +
     `<div><span class="k">NIM keys</span><span>${keys.length} validated · ${keys.reduce((a,k)=>a+k.rpm,0)} rpm total</span></div>` +
     `<div><span class="k">Upstream</span><span>${esc(base || "https://integrate.api.nvidia.com")}</span></div>` +
-    `<div><span class="k">API access</span><span>keyed (create client keys in Settings)</span></div>`;
+    `<div><span class="k">API access</span><span id="apiline">${esc(apiAccessLine())}</span></div>`;
   show(3);
 };
+$("mintkey").onchange = () => {
+  $("mintwarn").hidden = $("mintkey").checked;
+  const line = document.getElementById("apiline");
+  if (line) line.textContent = apiAccessLine();
+};
+
+// Final screen: base URL + the once-only secret, with copy buttons.
+function showConnect(secret) {
+  [1,2,3].forEach(i => { $("step"+i).hidden = true; $("s"+i).classList.add("on"); });
+  err("");
+  $("cbase").textContent = window.location.origin + "/v1";
+  $("csecret").textContent = secret;
+  $("step4").hidden = false;
+}
+document.querySelectorAll("[data-copy]").forEach(b => {
+  b.onclick = async () => {
+    // Never claim "Copied" when the write failed (no clipboard API on a
+    // plain-http remote) — this is a once-only secret.
+    try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = "Copied"; }
+    catch { b.textContent = "Select & copy"; }
+    setTimeout(() => { b.textContent = "Copy"; }, 1500);
+  };
+});
+$("opendash").onclick = () => { window.location = "/"; };
 
 $("wiz").onsubmit = async (ev) => {
   ev.preventDefault();
@@ -169,10 +220,16 @@ $("wiz").onsubmit = async (ev) => {
   };
   const base = $("baseurl").value.trim();
   if (base) body.base_url = base;
+  if ($("mintkey").checked) body.create_client_key = { name: "default" };
   try {
     const r = await fetch("/setup", { method: "POST",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (r.ok) { window.location = "/"; return; }
+    if (r.ok) {
+      const v = await r.json().catch(() => ({}));
+      if (v.client_key && v.client_key.secret) { showConnect(v.client_key.secret); return; }
+      window.location = "/";
+      return;
+    }
     const v = await r.json().catch(() => ({}));
     err((v.error && v.error.message) || ("Setup failed (" + r.status + ")"));
   } catch (e) { err("Setup request failed: " + e); }

@@ -67,6 +67,15 @@ pub struct SetupReq {
     base_url: Option<String>,
     #[serde(default)]
     nim_keys: Vec<SetupKey>,
+    /// Mint a first client key with the claim (the wizard sends this by
+    /// default) so a fresh keyed-mode proxy can serve /v1 immediately.
+    #[serde(default)]
+    create_client_key: Option<CreateClientKey>,
+}
+
+#[derive(Deserialize)]
+pub struct CreateClientKey {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +107,7 @@ pub async fn setup_submit(
         .await
         .expect("hashing task");
 
+    let mut minted: Option<(String, String)> = None; // (name, secret)
     let result = {
         let mut guard = state.store.lock().unwrap();
         if guard.superuser().is_some() {
@@ -138,6 +148,16 @@ pub async fn setup_submit(
                 rpm: k.rpm.unwrap_or(40),
             });
         }
+        if let Some(ck) = &req.create_client_key {
+            let secret = mint_client_secret();
+            cand.client_auth.keys.push(ClientKey {
+                name: ck.name.trim().to_owned(),
+                secret_sha256: auth::sha256_hex(&secret),
+                last4: last4(&secret),
+                owner: req.username.clone(),
+            });
+            minted = Some((ck.name.trim().to_owned(), secret));
+        }
         commit(&state, &mut guard, cand)
     };
     match result {
@@ -145,10 +165,15 @@ pub async fn setup_submit(
             state.setup_required.store(false, Ordering::SeqCst);
             tracing::info!(user = %req.username, "first-time setup complete; superuser created");
             let cookie = auth::mint_session_cookie(&state, &headers, &req.username, &hash);
+            let mut body = serde_json::json!({"ok": true});
+            if let Some((name, secret)) = minted {
+                // The one and only time this secret leaves the server.
+                body["client_key"] = serde_json::json!({"name": name, "secret": secret});
+            }
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, cookie)],
-                axum::Json(serde_json::json!({"ok": true})),
+                axum::Json(body),
             )
                 .into_response()
         }
@@ -232,6 +257,14 @@ use crate::config::{ClientKey, Mode};
 /// stored NIM key (the value itself is never sent back to a browser).
 fn fingerprint(key: &str) -> String {
     auth::sha256_hex(key)[..8].to_owned()
+}
+
+/// A fresh client-key secret: `npk_` + 128 bits of OS randomness. Only the
+/// SHA-256 digest is ever stored; the caller shows the secret exactly once.
+fn mint_client_secret() -> String {
+    let mut raw = [0u8; 16];
+    getrandom::getrandom(&mut raw).expect("OS RNG for client secret");
+    format!("npk_{}", auth::hex(&raw))
 }
 
 fn last4(s: &str) -> String {
@@ -477,9 +510,7 @@ pub async fn clients(
     let mut minted: Option<String> = None;
     match (req.add, req.remove, req.mode) {
         (Some(add), None, None) => {
-            let mut raw = [0u8; 16];
-            getrandom::getrandom(&mut raw).expect("OS RNG for client secret");
-            let secret = format!("npk_{}", auth::hex(&raw));
+            let secret = mint_client_secret();
             cand.client_auth.keys.push(ClientKey {
                 name: add.name.trim().to_owned(),
                 secret_sha256: auth::sha256_hex(&secret),
@@ -815,6 +846,34 @@ pub struct AccountReq {
     new_password: String,
 }
 
+/// Why an own-password change could not be applied to the candidate store.
+#[derive(Debug, PartialEq)]
+enum PasswordChangeErr {
+    UserGone,
+    HashRotated,
+}
+
+/// Apply an own-password change, refusing unless the stored hash is still
+/// the one the caller's current password was verified against. The verify
+/// runs outside the store lock (PBKDF2 is deliberately slow), so a hash
+/// rotation — an admin reset landing in that window — must win, not be
+/// silently overwritten by a change authorized against the old password.
+fn apply_password_change(
+    cand: &mut StoredConfig,
+    username: &str,
+    verified_hash: &str,
+    new_hash: &str,
+) -> Result<(), PasswordChangeErr> {
+    let Some(user) = cand.users.iter_mut().find(|u| u.username == username) else {
+        return Err(PasswordChangeErr::UserGone);
+    };
+    if user.password_hash != verified_hash {
+        return Err(PasswordChangeErr::HashRotated);
+    }
+    user.password_hash = new_hash.to_owned();
+    Ok(())
+}
+
 /// `POST /api/settings/account` — own password change; always re-verifies
 /// the current password regardless of the session. Existing sessions die
 /// (the cookie binds a password-hash fragment); the response carries a fresh
@@ -846,7 +905,8 @@ pub async fn account(
         }
     };
     let current = req.current_password.clone();
-    let ok = tokio::task::spawn_blocking(move || auth::verify_password(&current, &stored_hash))
+    let verify_hash = stored_hash.clone();
+    let ok = tokio::task::spawn_blocking(move || auth::verify_password(&current, &verify_hash))
         .await
         .expect("verify task");
     if !ok {
@@ -863,14 +923,23 @@ pub async fn account(
     let result = {
         let mut guard = state.store.lock().unwrap();
         let mut cand = guard.clone();
-        let Some(user) = cand.users.iter_mut().find(|u| u.username == username) else {
-            return json_error(
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "your user no longer exists",
-            );
-        };
-        user.password_hash = new_hash.clone();
+        match apply_password_change(&mut cand, &username, &stored_hash, &new_hash) {
+            Ok(()) => {}
+            Err(PasswordChangeErr::UserGone) => {
+                return json_error(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "your user no longer exists",
+                )
+            }
+            Err(PasswordChangeErr::HashRotated) => {
+                return json_error(
+                    StatusCode::CONFLICT,
+                    "password_changed",
+                    "your password was changed while this request was in flight; log in again",
+                )
+            }
+        }
         commit(&state, &mut guard, cand)
     };
     match result {
@@ -905,4 +974,50 @@ pub async fn validate_key(
         Err(e) => serde_json::json!({"ok": false, "error": e}),
     })
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store_with_user(username: &str, hash: &str) -> StoredConfig {
+        let mut sc = StoredConfig::default();
+        sc.users.push(User {
+            username: username.into(),
+            password_hash: hash.into(),
+            role: Role::User,
+        });
+        sc
+    }
+
+    #[test]
+    fn password_change_applies_when_the_verified_hash_is_current() {
+        let mut sc = store_with_user("alice", "old-hash");
+        assert_eq!(
+            apply_password_change(&mut sc, "alice", "old-hash", "new-hash"),
+            Ok(())
+        );
+        assert_eq!(sc.users[0].password_hash, "new-hash");
+    }
+
+    #[test]
+    fn password_change_refuses_when_the_hash_rotated_since_verify() {
+        // An admin reset landed between this caller's verify and commit: the
+        // stored hash is no longer the one the current password matched.
+        let mut sc = store_with_user("alice", "reset-by-admin");
+        assert_eq!(
+            apply_password_change(&mut sc, "alice", "old-hash", "new-hash"),
+            Err(PasswordChangeErr::HashRotated)
+        );
+        assert_eq!(sc.users[0].password_hash, "reset-by-admin", "unchanged");
+    }
+
+    #[test]
+    fn password_change_refuses_when_the_user_was_deleted() {
+        let mut sc = StoredConfig::default();
+        assert_eq!(
+            apply_password_change(&mut sc, "ghost", "h", "n"),
+            Err(PasswordChangeErr::UserGone)
+        );
+    }
 }

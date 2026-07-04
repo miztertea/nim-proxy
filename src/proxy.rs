@@ -455,12 +455,14 @@ pub async fn handle(
     let cfg = state.cfg();
 
     // Shed load past the in-flight cap so a connection flood can't grow the
-    // queue unbounded. A guard decrements on every exit path.
+    // queue unbounded. A guard decrements on every exit path; the streaming
+    // path moves it into its spawned task so a live stream keeps occupying
+    // its slot until the stream actually ends.
     let inflight = state
         .inflight
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
-    let _guard = crate::dispatch::scopeguard({
+    let inflight_guard = crate::dispatch::scopeguard({
         let state = state.clone();
         move || {
             state
@@ -565,7 +567,16 @@ pub async fn handle(
 
     if wants_stream {
         streaming(
-            state, cfg, ctx, method, path_query, headers, body, prefer, fallback,
+            state,
+            cfg,
+            ctx,
+            method,
+            path_query,
+            headers,
+            body,
+            prefer,
+            fallback,
+            inflight_guard,
         )
         .await
     } else {
@@ -680,10 +691,14 @@ async fn streaming(
     mut body: Bytes,
     prefer: Option<usize>,
     mut fallback: Option<Bytes>,
+    inflight_guard: impl Send + 'static,
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
     tokio::spawn(async move {
+        // Holds the handler's in-flight slot until this task — the request's
+        // real lifetime — exits, so max_inflight bounds live streams too.
+        let _inflight = inflight_guard;
         let _active =
             crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
         gauge!("nimproxy_active_requests").increment(1.0);
@@ -807,11 +822,25 @@ async fn streaming(
             let mut first_chunk: Option<Instant> = None;
             let mut chunks = resp.bytes_stream();
             loop {
-                // A stalled upstream would otherwise hold the client forever.
-                let next = if cfg.stream_idle.is_zero() {
-                    chunks.next().await
-                } else {
-                    match tokio::time::timeout(cfg.stream_idle, chunks.next()).await {
+                // Two ways out of a blocked upstream read: the stall cutoff
+                // (a stalled upstream would otherwise hold the client
+                // forever), and the client hanging up (`tx.closed()`) — which
+                // must free the in-flight slot promptly, not at the cutoff
+                // (and with stream_idle 0 there is no cutoff: a hung upstream
+                // would pin the slot until restart).
+                let upstream_read = async {
+                    if cfg.stream_idle.is_zero() {
+                        Ok(chunks.next().await)
+                    } else {
+                        tokio::time::timeout(cfg.stream_idle, chunks.next()).await
+                    }
+                };
+                let next = tokio::select! {
+                    _ = tx.closed() => {
+                        record_request(&ctx, "disconnect");
+                        return;
+                    }
+                    read = upstream_read => match read {
                         Ok(n) => n,
                         Err(_) => {
                             tracing::warn!(model = %ctx.model, idle = ?cfg.stream_idle, "upstream stream stalled");
