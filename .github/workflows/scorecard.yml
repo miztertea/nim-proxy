@@ -6,7 +6,7 @@ name: OpenSSF Scorecard
 # public Scorecard API.
 on:
   schedule:
-    - cron: "27 7 * * 1" # weekly, Monday 07:27 UTC
+    - cron: "28 7 * * 1" # weekly, Monday 07:27 UTC
   push:
     branches: [main]
   workflow_dispatch: {}
