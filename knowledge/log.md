@@ -6,6 +6,24 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — release automation: workflow_dispatch cuts releases (v0.6.1)
+
+Tagging by hand (`git tag` + `git push`) was the one release step that
+required a local terminal with tag-push rights — and restricted sessions
+(e.g. Claude Code remote, whose git proxy only allows the designated branch)
+cannot do it at all, which bit the v0.6.0 cut. The Release workflow gained a
+`workflow_dispatch` entry point: a new `prepare` job resolves the version
+from Cargo.toml on the default branch, refuses if the tag already exists,
+mints and pushes the tag itself, and the same run releases end-to-end.
+Design constraint that shaped it: tags pushed with `GITHUB_TOKEN` trigger no
+follow-on workflow runs (GitHub's recursion guard), so the dispatch path must
+never rely on the tag-push event — hence one workflow with two triggers, and
+image/release tags now derive from the resolved version, not the git ref.
+Full automation (release-plz/release-please) was considered and rejected:
+version choice is a scope decision and the CHANGELOG is deliberately
+hand-written. Runbook: [release](ops/release.md). v0.6.1 is the maintenance
+release that shipped and validated this path.
+
 ## [2026-07-04] ingest — v0.6.0 release cut: correctness fixes, wizard client key, outcome charts
 
 The 0.6.0 release closes the loose ends found during the config-store epic

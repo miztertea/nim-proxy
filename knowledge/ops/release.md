@@ -8,24 +8,35 @@ timestamp: 2026-07-03T00:00:00Z
 
 # Cutting a release
 
-Releases are tag-driven: pushing a `v*` tag runs `.github/workflows/release.yml`,
-which builds a multi-arch (amd64+arm64) image, pushes it to
-`ghcr.io/miztertea/nim-proxy`, signs it with keyless cosign, attests SLSA build
-provenance, generates an SPDX SBOM, and publishes a GitHub Release with the
-static binaries and the SBOM attached. SemVer + Keep a Changelog throughout.
+`.github/workflows/release.yml` builds a multi-arch (amd64+arm64) image,
+pushes it to `ghcr.io/miztertea/nim-proxy`, signs it with keyless cosign,
+attests SLSA build provenance, generates an SPDX SBOM, and publishes a GitHub
+Release with the static binaries and the SBOM attached. SemVer + Keep a
+Changelog throughout.
+
+It has two entry points: **Run workflow** in the Actions UI (the normal path
+since v0.6.1 — the workflow's `prepare` job resolves the version from
+Cargo.toml on `main`, refuses if that tag already exists, and mints/pushes the
+`v*` tag itself), or a manual `v*` tag push (the classic path, still guarded
+by tag-must-match-Cargo.toml). The dispatch-minted tag is pushed with
+`GITHUB_TOKEN`, whose ref pushes trigger no follow-on runs — by design the
+dispatch run carries the release end-to-end itself.
 
 ## 1. Prepare a release PR
 
 - Bump `version` in `Cargo.toml` and sync `Cargo.lock`
   (`cargo update --package nim-proxy`). The boot banner and dashboard status
-  report `CARGO_PKG_VERSION`, and the release workflow **fails if the tag does
-  not match Cargo.toml** (guard step in the `image` job).
+  report `CARGO_PKG_VERSION`; the workflow releases exactly this version.
 - `CHANGELOG.md`: promote `[Unreleased]` to `[X.Y.Z] - <date>`, leave a fresh
   empty `[Unreleased]`, and update the compare/tag links in the footer.
 - Update the supported-versions table in `SECURITY.md` to the new minor.
 - Open a PR, wait for all CI jobs, merge.
 
-## 2. Tag
+## 2. Release
+
+Actions → **Release** → *Run workflow* (from `main`), or ask the agent to
+trigger it (`workflow_dispatch` is an ordinary API call — unlike tag pushes,
+it works from restricted sessions). Equivalent manual path:
 
 ```sh
 git fetch origin main
@@ -33,7 +44,9 @@ git tag -a vX.Y.Z -m "nim-proxy X.Y.Z" origin/main   # tag the merge commit
 git push origin vX.Y.Z
 ```
 
-Watch the **Release** workflow (`image` job → `release` job) under Actions.
+Watch the run (`prepare` → `image` → `release`) under Actions. If the
+`prepare` job fails with "already exists", the version in Cargo.toml was
+never bumped — do step 1 first.
 
 ## 3. Verify the shipped artifacts
 
@@ -72,7 +85,13 @@ git tag -fa vX.Y.Z -m "nim-proxy X.Y.Z" origin/main
 git push origin vX.Y.Z
 ```
 
-## One-time repo settings (already done; recorded for reference)
+## One-time repo settings (recorded for reference)
+
+- **Tag ruleset (recommended, not yet applied)**: Settings → Rules → Rulesets →
+  new ruleset targeting tags `v*`: restrict creation to the repository admin
+  role (GitHub Actions' `GITHUB_TOKEN` acts as the repo and passes), block
+  deletion and non-fast-forward updates. This codifies the "never retag a
+  published release" rule below instead of relying on discipline.
 
 - **Private vulnerability reporting** enabled (Settings → Code security) —
   `SECURITY.md` lists advisories as the only reporting channel.

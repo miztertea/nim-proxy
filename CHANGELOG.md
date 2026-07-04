@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.1] - 2026-07-04
+
+Maintenance release — no proxy behavior changes; it exists to ship and
+validate the new release automation.
+
+### Changed
+
+- **Releases can be cut from the Actions UI** (`workflow_dispatch` on the
+  Release workflow): a new `prepare` job resolves the version from Cargo.toml
+  on the default branch, refuses if that tag already exists, mints and pushes
+  the `v*` tag itself, and the same run carries the release end-to-end — no
+  local `git tag`/`git push` needed. The tag-push path still works and keeps
+  its tag-must-match-Cargo.toml guard; image tags and the GitHub Release tag
+  now come from the resolved version rather than the triggering git ref.
+
 ## [0.6.0] - 2026-07-04
 
 > **Breaking (v0.6.0):** app-level configuration moved from env vars into a
@@ -299,7 +314,8 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/miztertea/nim-proxy/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.5.0
 [0.4.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.4.0
