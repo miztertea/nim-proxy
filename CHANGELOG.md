@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Upgraded the CodeQL Action from v3 to v4 (both `codeql.yml` and the
+  Scorecard SARIF upload), clearing the Node 20 deprecation and the
+  December-2026 v3 sunset warnings.
+
 ### Added
 
 - **Fuzz testing** (`fuzz/` + a weekly smoke-fuzz workflow): cargo-fuzz
