@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.6.0] - 2026-07-04
+
 > **Breaking (v0.6.0):** app-level configuration moved from env vars into a
 > UI-managed store. `NIM_API_KEYS`, `PROXY_API_KEYS`, `ADMIN_PASSWORD`,
 > `INSECURE_NO_AUTH`, `NIM_BASE_URL`, `RPM_PER_KEY`, `MAX_WAIT_SECS`,
@@ -67,7 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is click-to-sort with a sticky header and internal scroll — sort order and
   scroll position both survive the 3s live refresh. See
   `knowledge/decisions/dashboard-operator-console-redesign.md`.
-
 - **The wizard mints your first client key**: setup ends on a connect panel
   with the client base URL and a once-only `npk_` secret, so a fresh
   keyed-mode proxy serves `/v1` with no Settings detour. On by default;
@@ -291,7 +294,8 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.5.0
 [0.4.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.3.0

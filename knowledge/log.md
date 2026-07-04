@@ -6,6 +6,35 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-04] ingest — v0.6.0 release cut: correctness fixes, wizard client key, outcome charts
+
+The 0.6.0 release closes the loose ends found during the config-store epic
+and cuts the version:
+
+- **Streaming inflight accounting fixed**: the `max_inflight` guard now rides
+  into the spawned streaming task, so live streams occupy their slot until the
+  stream ends (it previously dropped at response-header time, bounding only
+  buffered requests). E2e-proven with a hang-stream + shed test.
+- **Password-change TOCTOU closed**: an own-password change commits only if
+  the stored hash is still the one the current password was verified against
+  (verify runs outside the store lock); a concurrent admin reset now wins with
+  a 409 (`settings::apply_password_change`, unit-tested).
+- **Wizard mints the first client key** (default on, explicit warning on
+  opt-out — the maintainer's rule: let users run it any way they want, warn
+  when it's unsafe): `POST /setup` takes `create_client_key`, returns the
+  `npk_` secret once, and the wizard ends on a connect panel (base URL + key +
+  copy). [client-auth](architecture/client-auth.md) and the
+  [config-store ADR](decisions/ui-managed-config-store.md) updated.
+- **Charts for the collected-but-undrawn signals**: a `stackChart` primitive +
+  requests-by-outcome-over-time on Reliability; requested output cap
+  (`request_max_tokens`) on Clients; tool-call volume per model on Models.
+- **Coverage backfill**: governor/pricing/history/limits/account endpoint e2e,
+  extended role-denial matrix, unwritable-DATA_DIR boot refusal.
+- **README rewritten** as a usage-focused snapshot (logo, live-traffic
+  screenshots in `docs/assets/`, boot banner; history/migration framing
+  dropped). CHANGELOG promoted to 0.6.0; SECURITY.md supported versions moved
+  to 0.6.x.
+
 ## [2026-07-04] ingest — UI-managed config store, multi-user, governor (v0.6.0)
 
 App-level configuration moved out of env vars and into a store the app owns,
