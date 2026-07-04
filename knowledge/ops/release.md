@@ -44,9 +44,16 @@ git tag -a vX.Y.Z -m "nim-proxy X.Y.Z" origin/main   # tag the merge commit
 git push origin vX.Y.Z
 ```
 
-Watch the run (`prepare` → `image` → `release`) under Actions. If the
-`prepare` job fails with "already exists", the version in Cargo.toml was
-never bumped — do step 1 first.
+Watch the run (`prepare` → `build amd64`/`build arm64` in parallel on native
+runners → `merge` → `release`) under Actions — a few minutes end to end
+(the arm64 leg builds natively on `ubuntu-24.04-arm`; QEMU emulation used to
+make it ~30 minutes). If the `prepare` job fails with "already exists", the
+version in Cargo.toml was never bumped — do step 1 first.
+
+The cosign signature, provenance attestation, and SBOM all target the final
+**multi-arch manifest digest** (stitched by the `merge` job from the per-arch
+digests), so `cosign verify` on any release tag resolves and verifies the
+same manifest.
 
 ## 3. Verify the shipped artifacts
 

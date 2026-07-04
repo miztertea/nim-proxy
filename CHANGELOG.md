@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.6.2] - 2026-07-04
+
+CI/release infrastructure release — no proxy behavior changes.
+
+### Changed
+
+- **Release images build on native runners in parallel**: amd64 on
+  `ubuntu-latest` and arm64 on `ubuntu-24.04-arm`, each pushed by digest and
+  stitched into one multi-arch manifest; the cosign signature, provenance
+  attestation, and SBOM now target the manifest digest. This removes the
+  QEMU-emulated arm64 Rust compile that made releases take ~30 minutes.
+  Buildx layer caching added to the release and CI image builds.
+- CI runs superseded by a newer push to the same ref are cancelled
+  (concurrency groups; main is never cancelled), and the CI image smoke test
+  no longer sets legacy env vars retired in 0.6.0.
+
 ## [0.6.1] - 2026-07-04
 
 Maintenance release — no proxy behavior changes; it exists to ship and
@@ -314,7 +330,8 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/miztertea/nim-proxy/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/miztertea/nim-proxy/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/miztertea/nim-proxy/releases/tag/v0.5.0
