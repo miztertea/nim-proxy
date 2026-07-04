@@ -1382,3 +1382,441 @@ async fn worker_exhaustion_streaming_retries_inside_the_stream() {
         "worker exhaustion must never bench a lane: {metrics}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Settings API: role filtering, ownership, invariants, live application.
+// ---------------------------------------------------------------------------
+
+async fn api_config(proxy: &support::Proxy, cookie: &str) -> serde_json::Value {
+    client()
+        .get(proxy.url("/api/config"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
+async fn post_json(
+    proxy: &support::Proxy,
+    cookie: &str,
+    path: &str,
+    body: serde_json::Value,
+) -> (reqwest::StatusCode, serde_json::Value) {
+    let resp = client()
+        .post(proxy.url(path))
+        .header("cookie", cookie)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status();
+    let v = resp.json().await.unwrap_or_default();
+    (status, v)
+}
+
+#[tokio::test]
+async fn api_config_is_filtered_by_role_before_serialization() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![("alice".into(), "user".into())],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+
+    // Admin view: server settings, users, and every key row (owner-labeled).
+    let root = support::login(&proxy).await;
+    let admin_view = api_config(&proxy, &root).await;
+    assert_eq!(admin_view["role"], "superuser");
+    assert!(admin_view["server"].is_object(), "{admin_view}");
+    assert_eq!(admin_view["users"].as_array().unwrap().len(), 2);
+    assert_eq!(admin_view["nim_keys"].as_array().unwrap().len(), 3);
+
+    // User view: the raw JSON body simply has no server/users sections and
+    // no foreign key rows — CSS tampering can reveal nothing.
+    let alice = support::login_as(&proxy, "alice").await;
+    let user_view = api_config(&proxy, &alice).await;
+    assert_eq!(user_view["role"], "user");
+    assert!(user_view.get("server").is_none(), "{user_view}");
+    assert!(user_view.get("users").is_none(), "{user_view}");
+    assert_eq!(
+        user_view["nim_keys"].as_array().unwrap().len(),
+        0,
+        "alice owns no keys and must not see root's: {user_view}"
+    );
+    // The pool aggregate stays visible to everyone.
+    assert_eq!(user_view["pool"]["enabled"], 3);
+}
+
+#[tokio::test]
+async fn user_role_is_denied_server_settings_and_foreign_keys() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![("alice".into(), "user".into())],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+    let alice = support::login_as(&proxy, "alice").await;
+
+    for (path, body) in [
+        (
+            "/api/settings/upstream",
+            serde_json::json!({"base_url": "http://x"}),
+        ),
+        ("/api/settings/history", serde_json::json!({"days": 1})),
+        (
+            "/api/settings/users",
+            serde_json::json!({"add": {"username": "eve", "password": "long-enough-pw", "role": "user"}}),
+        ),
+        ("/api/settings/clients", serde_json::json!({"mode": "open"})),
+    ] {
+        let (status, v) = post_json(&proxy, &alice, path, body).await;
+        assert_eq!(status, 403, "{path} should be admin-only: {v}");
+    }
+
+    // Removing / disabling someone else's NIM key is also forbidden.
+    let fp = api_config(&proxy, &root).await["nim_keys"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, v) = post_json(
+        &proxy,
+        &alice,
+        "/api/settings/nim-keys",
+        serde_json::json!({"remove": fp}),
+    )
+    .await;
+    assert_eq!(status, 403, "{v}");
+    let (status, _) = post_json(
+        &proxy,
+        &alice,
+        "/api/settings/nim-keys",
+        serde_json::json!({"set": {"fingerprint": fp, "enabled": false}}),
+    )
+    .await;
+    assert_eq!(status, 403);
+}
+
+#[tokio::test]
+async fn superuser_is_undeletable_and_the_pool_floor_holds() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        nim_keys: vec![("only-key".into(), 40)],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"remove": support::TEST_USER}),
+    )
+    .await;
+    assert_eq!(status, 403, "superuser must be undeletable: {v}");
+
+    // The superuser's last enabled key is the pool floor: neither removable
+    // nor disableable, and the config marks it guarded for the padlock UI.
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["nim_keys"][0]["guarded"], true, "{cfg}");
+    let fp = cfg["nim_keys"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/nim-keys",
+        serde_json::json!({"remove": &fp}),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/nim-keys",
+        serde_json::json!({"set": {"fingerprint": &fp, "enabled": false}}),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+}
+
+#[tokio::test]
+async fn deleting_a_user_pulls_their_keys_and_kills_their_session() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![("alice".into(), "user".into())],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+    let alice = support::login_as(&proxy, "alice").await;
+
+    // Any role may contribute a key to the shared pool.
+    let (status, v) = post_json(
+        &proxy,
+        &alice,
+        "/api/settings/nim-keys",
+        serde_json::json!({"add": {"key": "alice-key", "rpm": 10}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(api_config(&proxy, &root).await["pool"]["enabled"], 4);
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"remove": "alice"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(
+        cfg["pool"]["enabled"], 3,
+        "alice's key left the pool: {cfg}"
+    );
+    assert_eq!(cfg["users"].as_array().unwrap().len(), 1);
+
+    // Her session dies on the next lookup.
+    let resp = client()
+        .get(proxy.url("/api/config"))
+        .header("cookie", &alice)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
+}
+
+#[tokio::test]
+async fn client_key_lifecycle_mints_once_and_revokes() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        open: false, // keyed, no keys yet: /v1 rejects everyone
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"add": {"name": "opencode"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let secret = v["secret"].as_str().unwrap().to_owned();
+    assert!(secret.starts_with("npk_"), "{secret}");
+
+    // The minted secret works on /v1; the stored config never returns it.
+    let ok = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth(&secret)
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200);
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["client_keys"][0]["name"], "opencode");
+    assert!(
+        !serde_json::to_string(&cfg).unwrap().contains(&secret),
+        "secret must never be served back"
+    );
+
+    // Revoke: the same bearer stops working on the next request.
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"remove": "opencode"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let denied = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth(&secret)
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), 401);
+
+    // Flipping to open mode admits keyless clients again (admin-only).
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"mode": "open"}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let open = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(open.status(), 200);
+}
+
+#[tokio::test]
+async fn rpm_raise_applies_to_the_live_pool_immediately() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        nim_keys: vec![("solo".into(), 1)],
+        max_wait_secs: 2,
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+
+    let first = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let second = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 504, "rpm 1 is spent for the window");
+
+    // Raising the key's rpm rebuilds the pool with carried state — the new
+    // headroom serves requests immediately, no restart, no window reset.
+    let fp = api_config(&proxy, &root).await["nim_keys"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/nim-keys",
+        serde_json::json!({"set": {"fingerprint": fp, "rpm": 5}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let third = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(third.status(), 200, "raised rpm applies live");
+    assert_eq!(mock.state.hit_count(), 2);
+}
+
+#[tokio::test]
+async fn password_change_requires_current_and_rotates_other_sessions() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let session_a = support::login(&proxy).await;
+    let session_b = support::login(&proxy).await;
+
+    let (status, v) = post_json(
+        &proxy,
+        &session_a,
+        "/api/settings/account",
+        serde_json::json!({"current_password": "wrong", "new_password": "a-brand-new-pw"}),
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "re-auth is required regardless of session: {v}"
+    );
+
+    let resp = client()
+        .post(proxy.url("/api/settings/account"))
+        .header("cookie", &session_a)
+        .json(&serde_json::json!({
+            "current_password": support::TEST_PASSWORD,
+            "new_password": "a-brand-new-pw",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    // The change response re-mints THIS session; every other one dies.
+    let fresh = resp.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let alive = client()
+        .get(proxy.url("/api/config"))
+        .header("cookie", &fresh)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(alive.status(), 200);
+    let dead = client()
+        .get(proxy.url("/api/config"))
+        .header("cookie", &session_b)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        dead.status(),
+        401,
+        "old sessions bind the old password hash"
+    );
+}
+
+#[tokio::test]
+async fn base_url_change_flushes_the_models_cache() {
+    let mock_a = start_mock().await;
+    let mock_b = start_mock().await;
+    let proxy = start_proxy(&mock_a.url, &[]).await;
+    let root = support::login(&proxy).await;
+
+    // Prime the (10-minute-TTL) catalog cache from upstream A.
+    client()
+        .get(proxy.url("/v1/models"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    assert_eq!(
+        mock_a
+            .state
+            .models_hits
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/upstream",
+        serde_json::json!({"base_url": mock_b.url}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    client()
+        .get(proxy.url("/v1/models"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    assert_eq!(
+        mock_b
+            .state
+            .models_hits
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "catalog refetches from the new upstream, not the stale cache"
+    );
+}

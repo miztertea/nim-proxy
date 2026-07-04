@@ -312,11 +312,15 @@ async fn main() {
         config::store_path(&data_dir).display()
     );
     tracing::info!("upstream          {}", cfg.base_url);
-    let pool_keys = stored.pool_keys();
+    let pool_specs = stored.pool_specs();
     tracing::info!(
         "lanes             {} enabled key(s), {} rpm aggregate",
-        pool_keys.len(),
-        pool_keys.iter().map(|(_, rpm)| rpm).sum::<usize>()
+        pool_specs.iter().filter(|s| s.enabled).count(),
+        pool_specs
+            .iter()
+            .filter(|s| s.enabled)
+            .map(|s| s.rpm)
+            .sum::<usize>()
     );
     tracing::info!(
         "API auth          {}",
@@ -381,7 +385,7 @@ async fn main() {
         });
     }
 
-    let pool: PoolHandle = Arc::new(RwLock::new(Arc::new(Pool::new(pool_keys))));
+    let pool: PoolHandle = Arc::new(RwLock::new(Arc::new(Pool::new(pool_specs))));
     let state = Arc::new(AppState {
         dispatch: Dispatcher::new(pool.clone()),
         pool,
@@ -419,6 +423,17 @@ async fn main() {
         .route("/dash", get(dash))
         .route("/dash/config.json", get(dash_config))
         .route("/api/history", get(api_history))
+        .route("/api/config", get(settings::api_config))
+        .route("/api/settings/nim-keys", post(settings::nim_keys))
+        .route("/api/settings/clients", post(settings::clients))
+        .route("/api/settings/upstream", post(settings::upstream))
+        .route("/api/settings/limits", post(settings::limits))
+        .route("/api/settings/pricing", post(settings::pricing))
+        .route("/api/settings/history", post(settings::history))
+        .route("/api/settings/governor", post(settings::governor_cfg))
+        .route("/api/settings/users", post(settings::users))
+        .route("/api/settings/account", post(settings::account))
+        .route("/api/settings/validate-key", post(settings::validate_key))
         .route("/metrics", get(move || async move { prometheus.render() }))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

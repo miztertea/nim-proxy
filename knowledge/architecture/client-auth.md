@@ -85,4 +85,3 @@ any admin resets any password. Total lockout: the documented
 
 TLS is not built in — terminate it at a reverse proxy / platform edge and set
 `TRUST_PROXY=true` so the session cookie is marked `Secure`.
-</content>

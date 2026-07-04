@@ -24,10 +24,10 @@ Open a private report through GitHub's
 ships, and it is the only reporting channel — no email is monitored for this
 project.
 
-Please include: affected version/commit, run mode (secure vs. `INSECURE_NO_AUTH`),
-a description of the impact, and a minimal reproduction (a request body, a
-config, or a curl one-liner is ideal). If you have a suggested fix, include it —
-but a clear report is enough.
+Please include: affected version/commit, the `/v1` API mode (`keyed` vs.
+`open`) and whether setup was completed, a description of the impact, and a
+minimal reproduction (a request body, a config, or a curl one-liner is ideal).
+If you have a suggested fix, include it — but a clear report is enough.
 
 ### Response expectations
 
@@ -47,13 +47,18 @@ reasoning behind the current defenses is documented in the knowledge base:
 
 - **Auth / fail-closed posture** —
   [`knowledge/decisions/auth-posture-and-dashboard-password.md`](knowledge/decisions/auth-posture-and-dashboard-password.md).
-  The proxy **refuses to start on a network-reachable port without auth**.
-  Secure mode requires both `PROXY_API_KEYS` (gates `/v1/*`) and `ADMIN_PASSWORD`
-  (gates the dashboard, `/metrics`, `/api/history` via an HMAC-signed, HttpOnly,
-  SameSite=Strict session cookie). Open mode (`INSECURE_NO_AUTH=true`) is an
-  explicit, loudly-warned opt-in for loopback/firewalled use only. Secret
-  comparison is constant-time; there is a failed-login throttle and a
-  rejected-key delay.
+  The proxy **fails closed**: before setup the data plane is closed
+  (`/v1`→`503`, browsers→`/setup`); after setup the dashboard, `/metrics`, and
+  `/api/history` **always** require a logged-in session (HMAC-signed, HttpOnly,
+  SameSite=Strict cookie carrying a password-hash fragment so a password
+  change/reset invalidates sessions). Users, roles (superuser/admin/user), and
+  per-key ownership live in the config store; passwords are PBKDF2-HMAC-SHA256
+  (600k iterations). The `/v1` API is `keyed` (client `npk_…` bearer keys,
+  stored as SHA-256 digests) or `open` (an explicit, loudly-warned
+  loopback/firewalled opt-in that affects only `/v1`). Secret comparison is
+  constant-time; there is a failed-login throttle and a rejected-key delay. The
+  store is 0600 with atomic writes; a corrupt store refuses to boot. See also
+  [`ui-managed-config-store`](knowledge/decisions/ui-managed-config-store.md).
 - **Input sanitizing / XSS / injection** —
   [`knowledge/decisions/input-sanitizing-and-xss.md`](knowledge/decisions/input-sanitizing-and-xss.md).
   Client-controlled fields (`model`, `path`) are sanitized to a conservative
@@ -65,21 +70,29 @@ reasoning behind the current defenses is documented in the knowledge base:
 
 **In scope** (please report):
 
-- Authentication or authorization bypass (reaching `/v1/*`, the dashboard,
-  `/metrics`, or `/api/history` without valid credentials in secure mode).
+- Authentication or authorization bypass (reaching `/v1/*` in `keyed` mode, or
+  the dashboard, `/metrics`, or `/api/history` without a valid session; a role
+  or ownership bypass — e.g. a `user` reaching admin endpoints or reading
+  another user's key rows; claiming an already-configured instance via `/setup`).
 - Injection reaching the metrics exposition, logs, persisted history, or the
   dashboard (XSS), including via request bodies or the `model`/`path` fields.
 - Ways to make the proxy **exceed a key's upstream rate limit** (its core
   invariant) or otherwise misbehave against the upstream.
-- Secret leakage (API keys, `ADMIN_PASSWORD`, session cookie) via logs,
-  metrics, error responses, or history snapshots.
-- Denial of service that bypasses the in-flight cap (`MAX_INFLIGHT`) or the
+- Secret leakage (NIM keys, client-key secrets, password hashes, session
+  cookie) via logs, metrics, error responses, the config store, or history
+  snapshots — including a `/v1` client secret or NIM key value being readable
+  back through any API after creation.
+- Denial of service that bypasses the in-flight cap (`max_inflight`) or the
   failed-login throttle.
 
 **Out of scope:**
 
-- Running in `INSECURE_NO_AUTH=true` mode on a network-reachable interface — this
-  is a documented, opt-in "no auth" configuration, not a vulnerability.
+- Running the `/v1` API in `open` mode on a network-reachable interface — this
+  is a documented, opt-in "no client-key" configuration for trusted networks,
+  not a vulnerability.
+- The setup-claim window on a fresh, unconfigured instance (first visitor
+  becomes the superuser) — an accepted, documented risk (the data plane is
+  closed pre-setup; a loud boot log says to finish setup immediately).
 - Missing TLS. nim-proxy has **no built-in TLS by design**; terminate TLS at a
   reverse proxy or platform edge for any exposed deployment (see the README's
   Security & deployment section).

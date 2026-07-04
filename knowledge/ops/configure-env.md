@@ -72,4 +72,3 @@ no deployments to migrate).
   sharing keys.
 - Per-key rpm is per *rolling* minute with a built-in safety margin
   ([why](../decisions/window-jitter-margin.md)) — don't add your own headroom.
-</content>

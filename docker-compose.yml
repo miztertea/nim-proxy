@@ -6,8 +6,9 @@ services:
     restart: unless-stopped
     ports:
       # Bound to loopback by default — reachable only from this host. To expose
-      # it, set auth in .env (ADMIN_PASSWORD + PROXY_API_KEYS), put TLS in front
-      # (nginx/Caddy or your platform's edge), then change this to "8000:8000".
+      # it, complete the first-run setup wizard (creates the superuser; keep the
+      # /v1 API in keyed mode), put TLS in front (nginx/Caddy or your platform's
+      # edge) with TRUST_PROXY=true, then change this to "8000:8000".
       - "127.0.0.1:8000:8000"
     env_file: .env
     read_only: true

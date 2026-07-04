@@ -70,6 +70,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Env shrinks to 5 container-level vars** (`HOST`, `PORT`, `DATA_DIR`,
+  `RUST_LOG`, `TRUST_PROXY`); `DATA_DIR` must be writable (it now holds the
+  credential store as well as history) and an unwritable dir is a hard boot
+  error. `.env.example`, README, and the runbooks are rewritten to match; the
+  quickstart is now `docker compose up` → open the dashboard → complete the
+  wizard.
+- **Dashboard auth is now user-based.** Login takes a username and password;
+  the single `ADMIN_PASSWORD` gate is gone. Prometheus scrapers authenticate as
+  `Authorization: Bearer <username>:<password>` (or HTTP Basic). Volume backups
+  now contain credentials (`config.json`, 0600) — treat them as secrets.
 - `docker compose up` now runs the published `ghcr.io/miztertea/nim-proxy:latest`
   image instead of building from source; source builds move to an explicit dev
   override (`docker-compose.dev.yml`, tagged `nim-proxy:dev`). README,
@@ -81,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **All app-level env vars** (see the breaking note above) — they're ignored,
+  with a one-line boot warning listing any still set. No seed-from-env, no
+  migration.
+- **`INSECURE_NO_AUTH`.** Replaced by the store's `open|keyed` API-access mode,
+  which governs only `/v1`; every dashboard/observability surface always
+  requires a logged-in session post-setup.
 - **Light mode.** The dashboard is dark-only now; the light palette and
   `prefers-color-scheme` handling were deleted as a committed design choice.
 - **The Compare tab** — its head-to-head scorecard and generation-speed bar

@@ -154,5 +154,3 @@ deployments upgrading into it.
   mode, which affects **only `/v1`** — every dashboard/observability surface
   always requires a logged-in session. See the
   [auth-posture amendment](auth-posture-and-dashboard-password.md).
-</content>
-</invoke>

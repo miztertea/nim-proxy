@@ -139,7 +139,13 @@ mod tests {
 
     fn handle(lanes: usize, rpm: usize) -> PoolHandle {
         Arc::new(RwLock::new(Arc::new(Pool::new(
-            (0..lanes).map(|i| (format!("key{i}"), rpm)).collect(),
+            (0..lanes)
+                .map(|i| crate::pool::LaneSpec {
+                    key: format!("key{i}"),
+                    rpm,
+                    enabled: true,
+                })
+                .collect(),
         ))))
     }
 
@@ -177,7 +183,11 @@ mod tests {
         // spent slot, the new headroom serves the waiter.
         {
             let mut guard = h.write().unwrap();
-            let rebuilt = guard.rebuild(vec![("key0".into(), 2)]);
+            let rebuilt = guard.rebuild(vec![crate::pool::LaneSpec {
+                key: "key0".into(),
+                rpm: 2,
+                enabled: true,
+            }]);
             *guard = Arc::new(rebuilt);
         }
         let slot = pending.await.expect("slot after swap");

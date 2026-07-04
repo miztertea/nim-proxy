@@ -46,8 +46,9 @@ hosted free API yet), change the `models` key and the `model` reference to match
 ### Notes
 
 - **Rate budget**: one NIM key = 40 RPM. Long agentic runs on GLM-5.2 (which
-  emits many reasoning tokens) go faster with more keys in `NIM_API_KEYS` —
-  the proxy load-balances across them. Watch utilization on the dashboard.
+  emits many reasoning tokens) go faster with more keys added in the dashboard
+  Settings — the proxy load-balances across them. Watch utilization on the
+  dashboard.
 - **Thinking effort**: GLM-5.2 supports variable thinking effort. This example
   omits a `reasoning_effort` parameter because NIM may reject unknown fields
   with a 400; add it only after confirming your NIM endpoint accepts it.

@@ -254,13 +254,17 @@ impl StoredConfig {
         self.users.iter().find(|u| u.username == username)
     }
 
-    /// The enabled keys that feed the pool, as (key, rpm) pairs.
-    pub fn pool_keys(&self) -> Vec<(String, usize)> {
+    /// Every stored key as a pool lane spec. Disabled keys ride along as
+    /// state carriers so a disable→enable cycle can't reset their windows.
+    pub fn pool_specs(&self) -> Vec<crate::pool::LaneSpec> {
         self.upstream
             .nim_keys
             .iter()
-            .filter(|k| k.enabled)
-            .map(|k| (k.key.clone(), k.rpm))
+            .map(|k| crate::pool::LaneSpec {
+                key: k.key.clone(),
+                rpm: k.rpm,
+                enabled: k.enabled,
+            })
             .collect()
     }
 
@@ -562,7 +566,9 @@ mod tests {
         let loaded = load(&dir.0).unwrap().expect("store exists");
         assert_eq!(loaded.users[0].username, "root");
         assert_eq!(loaded.upstream.nim_keys[0].rpm, 40);
-        assert_eq!(loaded.pool_keys(), vec![("nvapi-one".to_owned(), 40)]);
+        let specs = loaded.pool_specs();
+        assert_eq!(specs.len(), 1);
+        assert!(specs[0].enabled && specs[0].key == "nvapi-one" && specs[0].rpm == 40);
     }
 
     #[cfg(unix)]

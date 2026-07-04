@@ -28,17 +28,19 @@ You need a stable Rust toolchain (`rustup`, edition 2021) and Python 3 for the
 load harness.
 
 ```sh
-# Build and run locally, open mode (loopback only — see Security below):
-NIM_API_KEYS=nvapi-xxx,nvapi-yyy INSECURE_NO_AUTH=true cargo run --release
+# Build and run locally (loopback only — see Security below):
+cargo run --release
 
 # Or via Docker, building your working tree (a plain `docker compose up`
 # pulls the published GHCR image, not your local changes):
-cp .env.example .env      # paste keys, pick an auth mode
+cp .env.example .env      # only container vars now; no keys/passwords
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 The dashboard is served at `http://localhost:8000/` and the OpenAI-compatible
-API at `http://localhost:8000/v1`.
+API at `http://localhost:8000/v1`. A fresh run opens the first-run setup wizard
+— create the superuser and add a NIM key; everything app-level is configured in
+the dashboard, not env vars ([config store](knowledge/decisions/ui-managed-config-store.md)).
 
 ## Testing, formatting, linting
 
@@ -51,19 +53,26 @@ cargo clippy --all-targets -- -D warnings    # zero warnings — warnings are er
 ```
 
 `cargo test` launches the **real binary** against a scriptable mock NIM (see
-`tests/support/mod.rs`); the e2e suite covers auth, 429 ride-out with key
-failover, Retry-After timing, pacing enforcement, conversation affinity, usage
-injection, stalled-stream recovery, label sanitizing, security headers, metrics
-accuracy, history persistence across restart, and graceful shutdown.
+`tests/support/mod.rs`) — booted with a pre-written `config.json` or by driving
+the `/setup` wizard, in a tempdir `DATA_DIR`. The e2e suite covers the setup
+posture and wizard, open/keyed `/v1`, multi-user login and role/ownership
+enforcement, the config-store round-trip, per-model worker-exhaustion
+governing, 429 ride-out with key failover, Retry-After timing, pacing
+enforcement, conversation affinity, usage injection, stalled-stream recovery,
+label sanitizing, security headers, metrics accuracy, history persistence
+across restart, and graceful shutdown.
 
 ### The fail-closed test posture
 
-nim-proxy **fails closed on purpose** — it refuses to start on a network port
-without auth. Tests assert this posture directly (boot-refusal cases, session
-flow, Bearer/Basic scraper auth, label sanitizing, security headers). If your
-change touches `src/auth.rs`, the API-key gate or label sanitizing in
-`src/proxy.rs`, or the dashboard's `innerHTML`, you **must** keep those
-invariants and the tests that guard them. Read the
+nim-proxy **fails closed on purpose** — before setup the data plane is closed
+(`/v1`→503, browsers→`/setup`), and after setup every dashboard/observability
+surface requires a logged-in session (only `/v1` can be `open`). A
+corrupt/unreadable/future-version store refuses to boot. Tests assert this
+directly (setup posture, wizard flow, session/scraper auth, role denials,
+boot-refusal cases, label sanitizing, security headers). If your change touches
+`src/auth.rs`, `src/config.rs`, `src/settings.rs`, the API-key gate or label
+sanitizing in `src/proxy.rs`, or the dashboard's `innerHTML`, you **must** keep
+those invariants and the tests that guard them. Read the
 [auth-posture](knowledge/decisions/auth-posture-and-dashboard-password.md) and
 [input-sanitizing](knowledge/decisions/input-sanitizing-and-xss.md) decision
 pages before editing.
@@ -75,8 +84,10 @@ touches pacing, the key pool, the dispatcher, or affinity, prove it against a
 mock that **strictly enforces** NIM's per-key window and counts violations:
 
 ```sh
-python3 scripts/mock_nim.py --enforce --rpm 40 --port 9999 &
-NIM_API_KEYS=k1,k2,k3 NIM_BASE_URL=http://127.0.0.1:9999 cargo run --release &
+python3 scripts/mock_nim.py --enforce --rpm 40 --worker-slots 32 --port 9999 &
+cargo run --release &     # boots into first-run setup (no app-level env vars)
+# complete the wizard at /setup — base URL http://127.0.0.1:9999, add the mock's
+# keys, set the API mode to open (or mint a client key for --proxy-keys)
 python3 scripts/loadtest.py --clients 100 --requests 3
 ```
 

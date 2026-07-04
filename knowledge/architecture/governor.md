@@ -67,4 +67,3 @@ The dashboard's Reliability tab shows a **Model pressure** card built from these
 zero noise. Test scaffolding: `mock_nim.py --worker-slots N` emits the real
 error string at a per-model in-flight cap; `loadtest.py` asserts the governor
 converges (bounded exhaustion, no thrash, no client-visible failures).
-</content>

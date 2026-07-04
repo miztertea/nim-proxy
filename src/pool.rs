@@ -8,6 +8,13 @@
 //! is the only `reserve` caller and holds the handle's read lock across each
 //! reserve, so a rebuild (under the write lock) can never interleave with a
 //! grant — a kept key's in-window timestamps carry over exactly once.
+//!
+//! Disabled keys stay in the pool as inactive *state carriers* (never
+//! granted, invisible to `len`/capacity/stats — they sit past the `active`
+//! boundary). Without them, a disable→enable cycle spans two rebuilds and
+//! the second would resurrect the key with a fresh window while the
+//! upstream's window still remembers it — load-tested to cause real
+//! upstream 429s before this existed.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, RwLock};
@@ -25,6 +32,14 @@ pub type PoolHandle = Arc<RwLock<Arc<Pool>>>;
 /// upstream window; with the pad, zero. Costs ~1.6% peak throughput.
 const WINDOW: Duration = Duration::from_secs(61);
 
+/// A lane blueprint. Disabled specs become state carriers: held for their
+/// rate state, never granted.
+pub struct LaneSpec {
+    pub key: String,
+    pub rpm: usize,
+    pub enabled: bool,
+}
+
 struct Lane {
     key: String,
     /// This key's requests-per-minute budget (keys can differ: paid tiers,
@@ -37,7 +52,18 @@ struct Lane {
 }
 
 pub struct Pool {
+    /// Enabled lanes first (indexes 0..active — the only ones ever granted,
+    /// counted, or reported), disabled state carriers after.
     lanes: Vec<Lane>,
+    active: usize,
+}
+
+/// One lane's live state (see [`Pool::lane_stats`]).
+pub struct LaneStat {
+    pub key: String,
+    pub rpm: usize,
+    pub in_window: usize,
+    pub cooldown_ms: u64,
 }
 
 pub enum Reservation {
@@ -55,61 +81,87 @@ pub enum Reservation {
 }
 
 impl Pool {
-    pub fn new(keys: Vec<(String, usize)>) -> Self {
-        let now = Instant::now();
-        let lanes = keys
-            .into_iter()
-            .map(|(key, rpm)| Lane {
-                key,
-                rpm,
-                sent: Mutex::new(VecDeque::new()),
-                cooldown_until: Mutex::new(now),
-            })
-            .collect();
-        Self { lanes }
+    pub fn new(specs: Vec<LaneSpec>) -> Self {
+        Self::assemble(specs, None)
     }
 
-    /// Build a replacement pool from `keys`, carrying over the in-window
+    /// Build a replacement pool from `specs`, carrying over the in-window
     /// timestamps and cooldown of every key kept from `self` (matched by key
-    /// string). A kept key can never be double-spent across a swap, and a
-    /// lowered rpm is honored immediately (`try_take` checks the live count);
-    /// a re-added key that sat disabled re-enters warm for the same reason.
-    pub fn rebuild(&self, keys: Vec<(String, usize)>) -> Self {
+    /// string, enabled or carrier). A kept key can never be double-spent
+    /// across a swap; a lowered rpm is honored immediately (`try_take`
+    /// checks the live count); a disabled key re-enables warm because its
+    /// carrier lane kept the window.
+    pub fn rebuild(&self, specs: Vec<LaneSpec>) -> Self {
+        Self::assemble(specs, Some(self))
+    }
+
+    fn assemble(mut specs: Vec<LaneSpec>, old: Option<&Pool>) -> Self {
+        // Enabled lanes first (stable — preserves relative order), carriers
+        // after, so index-based semantics only ever see enabled lanes.
+        specs.sort_by_key(|s| !s.enabled);
+        let active = specs.iter().filter(|s| s.enabled).count();
         let now = Instant::now();
-        let lanes = keys
+        let lanes = specs
             .into_iter()
             .map(
-                |(key, rpm)| match self.lanes.iter().find(|l| l.key == key) {
-                    Some(old) => Lane {
-                        sent: Mutex::new(old.sent.lock().unwrap().clone()),
-                        cooldown_until: Mutex::new(*old.cooldown_until.lock().unwrap()),
-                        key,
-                        rpm,
+                |s| match old.and_then(|o| o.lanes.iter().find(|l| l.key == s.key)) {
+                    Some(prev) => Lane {
+                        sent: Mutex::new(prev.sent.lock().unwrap().clone()),
+                        cooldown_until: Mutex::new(*prev.cooldown_until.lock().unwrap()),
+                        key: s.key,
+                        rpm: s.rpm,
                     },
                     None => Lane {
-                        key,
-                        rpm,
+                        key: s.key,
+                        rpm: s.rpm,
                         sent: Mutex::new(VecDeque::new()),
                         cooldown_until: Mutex::new(now),
                     },
                 },
             )
             .collect();
-        Self { lanes }
+        Self { lanes, active }
     }
 
+    /// Enabled lanes only — carriers are invisible everywhere.
     pub fn len(&self) -> usize {
-        self.lanes.len()
+        self.active
     }
 
-    /// Aggregate requests-per-minute across all lanes.
+    /// Aggregate requests-per-minute across enabled lanes.
     pub fn capacity_rpm(&self) -> usize {
-        self.lanes.iter().map(|l| l.rpm).sum()
+        self.lanes[..self.active].iter().map(|l| l.rpm).sum()
     }
 
     /// Per-lane rpm budgets, in lane order (feeds the dashboard config).
     pub fn rpms(&self) -> Vec<usize> {
-        self.lanes.iter().map(|l| l.rpm).collect()
+        self.lanes[..self.active].iter().map(|l| l.rpm).collect()
+    }
+
+    /// Point-in-time per-lane view for the Settings key rows.
+    pub fn lane_stats(&self) -> Vec<LaneStat> {
+        let now = Instant::now();
+        self.lanes[..self.active]
+            .iter()
+            .map(|l| {
+                let in_window = {
+                    let sent = l.sent.lock().unwrap();
+                    sent.iter().filter(|t| now - **t < WINDOW).count()
+                };
+                let cooldown_ms = l
+                    .cooldown_until
+                    .lock()
+                    .unwrap()
+                    .saturating_duration_since(now)
+                    .as_millis() as u64;
+                LaneStat {
+                    key: l.key.clone(),
+                    rpm: l.rpm,
+                    in_window,
+                    cooldown_ms,
+                }
+            })
+            .collect()
     }
 
     /// Take a slot on lane `i` if it has capacity right now. Reserving
@@ -144,7 +196,7 @@ impl Pool {
     /// `prefer` (computed against a pool that has since shrunk) is ignored.
     pub fn reserve(&self, prefer: Option<usize>) -> Reservation {
         let now = Instant::now();
-        if let Some(p) = prefer.filter(|&p| p < self.lanes.len()) {
+        if let Some(p) = prefer.filter(|&p| p < self.active) {
             if let Some(r) = self.try_take(p, now, true) {
                 return r;
             }
@@ -152,7 +204,7 @@ impl Pool {
 
         let mut ready: Vec<(usize, usize)> = Vec::new(); // (in-window load, lane)
         let mut best_wait = WINDOW;
-        for (i, lane) in self.lanes.iter().enumerate() {
+        for (i, lane) in self.lanes[..self.active].iter().enumerate() {
             let cooldown = *lane.cooldown_until.lock().unwrap();
             let mut sent = lane.sent.lock().unwrap();
             while sent.front().is_some_and(|t| now - *t >= WINDOW) {
@@ -206,8 +258,18 @@ impl Pool {
 mod tests {
     use super::*;
 
-    fn keys(n: usize, rpm: usize) -> Vec<(String, usize)> {
-        (0..n).map(|i| (format!("key{i}"), rpm)).collect()
+    fn spec(key: &str, rpm: usize, enabled: bool) -> LaneSpec {
+        LaneSpec {
+            key: key.into(),
+            rpm,
+            enabled,
+        }
+    }
+
+    fn keys(n: usize, rpm: usize) -> Vec<LaneSpec> {
+        (0..n)
+            .map(|i| spec(&format!("key{i}"), rpm, true))
+            .collect()
     }
 
     fn take(pool: &Pool, prefer: Option<usize>) -> usize {
@@ -242,7 +304,7 @@ mod tests {
     #[test]
     fn per_lane_rpm_budgets_are_honored() {
         // Lane 0 allows 1/min, lane 1 allows 3/min: four grants total.
-        let pool = Pool::new(vec![("small".into(), 1), ("big".into(), 3)]);
+        let pool = Pool::new(vec![spec("small", 1, true), spec("big", 3, true)]);
         let mut per_lane = [0usize; 2];
         for _ in 0..4 {
             per_lane[take(&pool, None)] += 1;
@@ -346,14 +408,47 @@ mod tests {
 
     #[test]
     fn rebuild_new_key_starts_fresh_and_removed_key_is_gone() {
-        let pool = Pool::new(vec![("old".into(), 1)]);
+        let pool = Pool::new(vec![spec("old", 1, true)]);
         take(&pool, None);
-        let rebuilt = pool.rebuild(vec![("new".into(), 1)]);
+        let rebuilt = pool.rebuild(vec![spec("new", 1, true)]);
         assert_eq!(rebuilt.len(), 1);
         match rebuilt.reserve(None) {
             Reservation::Ready { key, .. } => assert_eq!(key, "new"),
             _ => panic!("fresh key should be ready"),
         }
+    }
+
+    #[test]
+    fn disabled_lanes_are_carriers_never_granted_never_counted() {
+        let pool = Pool::new(vec![spec("on", 2, true), spec("off", 40, false)]);
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool.capacity_rpm(), 2);
+        assert_eq!(pool.rpms(), vec![2]);
+        assert_eq!(pool.lane_stats().len(), 1);
+        for _ in 0..2 {
+            match pool.reserve(None) {
+                Reservation::Ready { key, .. } => assert_eq!(key, "on"),
+                _ => panic!("enabled lane should grant"),
+            }
+        }
+        // Capacity spent: the carrier must not pick up the slack.
+        assert!(matches!(pool.reserve(None), Reservation::Wait(_)));
+    }
+
+    #[test]
+    fn disable_enable_cycle_cannot_double_spend_the_window() {
+        // The exact sequence that produced real upstream 429s in the load
+        // test: spend the key, disable it (rebuild 1), re-enable it
+        // (rebuild 2). The carrier lane keeps the window across both.
+        let pool = Pool::new(vec![spec("k", 1, true)]);
+        take(&pool, None);
+        let disabled = pool.rebuild(vec![spec("k", 1, false)]);
+        assert!(matches!(disabled.reserve(None), Reservation::Wait(_)));
+        let re_enabled = disabled.rebuild(vec![spec("k", 1, true)]);
+        assert!(
+            matches!(re_enabled.reserve(None), Reservation::Wait(_)),
+            "the pre-disable send must still count against the window"
+        );
     }
 
     #[test]
