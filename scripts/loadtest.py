@@ -8,10 +8,18 @@ saw a failure or the upstream recorded a single rate-limit violation.
 
 Typical run (three terminals or backgrounded):
   python3 scripts/mock_nim.py --enforce --rpm 40 --port 9999
-  NIM_API_KEYS=k1,k2,k3 NIM_BASE_URL=http://127.0.0.1:9999 PORT=8000 \
-      INSECURE_NO_AUTH=true cargo run --release
+  PORT=8000 DATA_DIR=/tmp/loadtest-data cargo run --release
+  # then claim it (config lives in the store, not env):
+  curl -X POST localhost:8000/setup -H 'content-type: application/json' -d \
+    '{"username":"op","password":"loadtest-pw-1","base_url":"http://127.0.0.1:9999",
+      "nim_keys":[{"key":"k1"},{"key":"k2"},{"key":"k3"}]}'
+  # open /v1 (Settings -> API access mode, or POST /api/settings/clients
+  # {"mode":"open"} with the session cookie), then:
   python3 scripts/loadtest.py --proxy http://127.0.0.1:8000 \
       --mock http://127.0.0.1:9999 --clients 100 --requests 3
+
+Add --worker-slots N to the mock to exercise the model-pressure governor
+(slow the streams with --token-ms 150+ so concurrency actually builds).
 
 The request mix includes plain, tool-offering, and JSON-mode calls with
 sampling params, so the v0.4.0 request-shape / response-quality code paths are
