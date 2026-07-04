@@ -1980,11 +1980,13 @@ function renderAccount() {
     const nw = $('a-new').value;
     if (nw.length < 10) return note('a-err', 'New password must be at least 10 characters.');
     if (nw !== $('a-conf').value) return note('a-err', 'Passwords do not match.');
+    $('a-save').disabled = true; // password hashing is deliberately slow
     try {
       await sPost('/api/settings/account', { current_password: $('a-cur').value, new_password: nw });
       for (const id of ['a-cur', 'a-new', 'a-conf']) $(id).value = '';
       note('a-err', 'Password updated — this session was refreshed.', true);
     } catch (e) { note('a-err', e.message); }
+    $('a-save').disabled = false;
   });
 }
 

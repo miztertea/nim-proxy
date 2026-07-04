@@ -15,10 +15,14 @@ body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24p
 h1 { font-size:16px; margin:0 0 2px; letter-spacing:.02em; }
 h1 .brand { color:var(--green); }
 p.sub { color:var(--dim); font-size:12.5px; margin:0 0 18px; }
-.steps { display:flex; gap:8px; margin:0 0 20px; }
-.steps span { flex:1; text-align:center; font-size:11px; color:var(--dim); padding:6px 4px;
-  border-bottom:2px solid var(--line); }
-.steps span.on { color:var(--green); border-color:var(--green); }
+.steps { display:flex; align-items:center; gap:10px; margin:0 0 20px; }
+.steps span { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--dim); white-space:nowrap; }
+.steps span::before { content:attr(data-n); display:grid; place-items:center; width:20px; height:20px;
+  border-radius:50%; background:var(--line); color:var(--dim); font-size:10px; font-weight:600; }
+.steps span:not(:first-child) { flex:1; }
+.steps span:not(:first-child)::before { margin-left:auto; }
+.steps span.on { color:var(--text); }
+.steps span.on::before { background:var(--green); color:#081008; }
 label { display:block; font-size:12px; color:var(--dim); margin:0 0 4px; }
 input { width:100%; font:inherit; padding:9px 11px; border-radius:9px; margin-bottom:12px;
   border:1px solid var(--line); background:#0d120d; color:inherit; }
@@ -53,7 +57,7 @@ details input { margin-top:8px; }
 <form class="card" id="wiz" autocomplete="off">
   <h1><span class="brand">NIM</span> PROXY — First-time setup</h1>
   <p class="sub">Claim this proxy: create the superuser account and add at least one NIM API key.</p>
-  <div class="steps"><span id="s1" class="on">1 · Account</span><span id="s2">2 · NIM keys</span><span id="s3">3 · Finish</span></div>
+  <div class="steps"><span id="s1" class="on" data-n="1">Create account</span><span id="s2" data-n="2">Add NIM keys</span><span id="s3" data-n="3">Review &amp; finish</span></div>
   <p class="err" id="err"></p>
 
   <section id="step1">
