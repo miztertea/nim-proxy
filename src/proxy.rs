@@ -455,12 +455,14 @@ pub async fn handle(
     let cfg = state.cfg();
 
     // Shed load past the in-flight cap so a connection flood can't grow the
-    // queue unbounded. A guard decrements on every exit path.
+    // queue unbounded. A guard decrements on every exit path; the streaming
+    // path moves it into its spawned task so a live stream keeps occupying
+    // its slot until the stream actually ends.
     let inflight = state
         .inflight
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
-    let _guard = crate::dispatch::scopeguard({
+    let inflight_guard = crate::dispatch::scopeguard({
         let state = state.clone();
         move || {
             state
@@ -565,7 +567,16 @@ pub async fn handle(
 
     if wants_stream {
         streaming(
-            state, cfg, ctx, method, path_query, headers, body, prefer, fallback,
+            state,
+            cfg,
+            ctx,
+            method,
+            path_query,
+            headers,
+            body,
+            prefer,
+            fallback,
+            inflight_guard,
         )
         .await
     } else {
@@ -680,10 +691,14 @@ async fn streaming(
     mut body: Bytes,
     prefer: Option<usize>,
     mut fallback: Option<Bytes>,
+    inflight_guard: impl Send + 'static,
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
     tokio::spawn(async move {
+        // Holds the handler's in-flight slot until this task — the request's
+        // real lifetime — exits, so max_inflight bounds live streams too.
+        let _inflight = inflight_guard;
         let _active =
             crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
         gauge!("nimproxy_active_requests").increment(1.0);

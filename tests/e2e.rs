@@ -1915,3 +1915,104 @@ async fn setup_key_validation_rejects_link_local_base_url() {
     let v: serde_json::Value = ok.json().await.unwrap();
     assert_eq!(v["ok"], true, "loopback upstream still probes: {v}");
 }
+
+/// Streaming requests hold their in-flight slot for the stream's whole
+/// lifetime — `max_inflight` caps total concurrent work, not just the
+/// buffered path (streaming is what agent harnesses actually send).
+#[tokio::test]
+async fn streaming_requests_count_against_the_inflight_cap() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::Hang);
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            max_inflight: 1,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    // Occupy the only slot with a stream that never ends. Reading the first
+    // body chunk proves the proxy has fully committed to the stream.
+    let mut hog = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hog", true))
+        .send()
+        .await
+        .unwrap()
+        .bytes_stream();
+    use futures_util::StreamExt;
+    let first = tokio::time::timeout(Duration::from_secs(5), hog.next())
+        .await
+        .expect("first chunk within 5s")
+        .expect("stream not ended")
+        .expect("stream chunk");
+    assert!(!first.is_empty());
+
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("shed-me", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        503,
+        "a live stream occupies the in-flight cap"
+    );
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "overloaded");
+    drop(hog);
+}
+
+/// The wizard can mint a first client key atomically with the claim, so a
+/// fresh keyed-mode proxy serves /v1 immediately — no Settings detour. The
+/// secret is returned exactly once and never stored in plaintext.
+#[tokio::test]
+async fn setup_can_mint_a_first_client_key() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_fresh().await;
+
+    let resp = client()
+        .post(proxy.url("/setup"))
+        .json(&serde_json::json!({
+            "username": "admin",
+            "password": "hunter2hunter2",
+            "base_url": mock.url,
+            "nim_keys": [{"key": "nvapi-key", "rpm": 40}],
+            "create_client_key": {"name": "default"},
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    let secret = v["client_key"]["secret"].as_str().expect("minted secret");
+    assert!(secret.starts_with("npk_"), "{v}");
+    assert_eq!(v["client_key"]["name"], "default");
+
+    // The store holds only the digest, never the bearer token itself.
+    let store = std::fs::read_to_string(proxy.data_dir.join("config.json")).unwrap();
+    assert!(
+        !store.contains(secret),
+        "client secret must not be persisted in plaintext"
+    );
+
+    // The minted key opens /v1 right away; keyless calls still fail closed.
+    let ok = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth(secret)
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200, "minted key serves /v1 with no detour");
+    let no_key = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_key.status(), 401, "keyed mode still fails closed");
+}
