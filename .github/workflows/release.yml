@@ -28,7 +28,9 @@ permissions:
 # One release at a time, never cancelled mid-flight: a cancelled run could
 # leave a signed manifest without its GitHub release, or a minted tag without
 # artifacts. A single global group (not per-ref) also serializes a dispatch
-# racing a tag push — concurrent runs queue instead.
+# racing a tag push. Note GitHub keeps at most ONE pending run per group —
+# a third trigger replaces the queued one (re-run it manually if that ever
+# happens); it never cancels the run in progress.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -203,11 +205,14 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           set -euo pipefail
+          # Each downloaded artifact file is named by its image digest hex.
+          refs=()
+          for d in *; do refs+=("${IMAGE}@sha256:${d}"); done
           docker buildx imagetools create \
             -t "${IMAGE}:${{ needs.prepare.outputs.version }}" \
             -t "${IMAGE}:${{ needs.prepare.outputs.minor }}" \
             -t "${IMAGE}:latest" \
-            $(printf "${IMAGE}@sha256:%s " *)
+            "${refs[@]}"
           digest=$(docker buildx imagetools inspect \
             "${IMAGE}:${{ needs.prepare.outputs.version }}" \
             --format '{{json .Manifest.Digest}}' | tr -d '"')
