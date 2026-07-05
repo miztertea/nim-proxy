@@ -725,6 +725,54 @@ mod tests {
                     sc.governor.overrides.insert("m".into(), 0);
                 }),
             ),
+            ("version not 1", Box::new(|sc| sc.version = 2)),
+            (
+                "heartbeat zero",
+                Box::new(|sc| sc.limits.heartbeat_secs = 0),
+            ),
+            (
+                "request timeout zero",
+                Box::new(|sc| sc.limits.request_timeout_secs = 0),
+            ),
+            (
+                "empty nim key",
+                Box::new(|sc| sc.upstream.nim_keys[0].key = "   ".into()),
+            ),
+            (
+                "bad client key name",
+                Box::new(|sc| {
+                    sc.client_auth.keys.push(ClientKey {
+                        name: "a b".into(),
+                        secret_sha256: "a".repeat(64),
+                        last4: "aaaa".into(),
+                        owner: "root".into(),
+                    })
+                }),
+            ),
+            (
+                "duplicate client key name",
+                Box::new(|sc| {
+                    for _ in 0..2 {
+                        sc.client_auth.keys.push(ClientKey {
+                            name: "dup".into(),
+                            secret_sha256: "b".repeat(64),
+                            last4: "bbbb".into(),
+                            owner: "root".into(),
+                        });
+                    }
+                }),
+            ),
+            (
+                "client key dangling owner",
+                Box::new(|sc| {
+                    sc.client_auth.keys.push(ClientKey {
+                        name: "ck".into(),
+                        secret_sha256: "c".repeat(64),
+                        last4: "cccc".into(),
+                        owner: "ghost".into(),
+                    })
+                }),
+            ),
         ];
         for (name, mutate) in cases {
             let mut sc = claimed();
