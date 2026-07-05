@@ -1,15 +1,23 @@
 ---
 type: Runbook
 title: Test strategy
-description: Unit, end-to-end, and load layers — what each catches and how to run them.
+description: Unit, end-to-end, load, and fuzz layers — what each catches and how to run them.
 tags: [testing, ci]
 timestamp: 2026-07-02T00:00:00Z
 ---
 
 # Test strategy
 
-Three layers; CI (`.github/workflows/ci.yml`) runs the first two plus fmt,
-clippy `-D warnings`, and a Docker build with a container healthcheck smoke.
+Four layers (unit, end-to-end, load, fuzz). CI (`.github/workflows/ci.yml`)
+runs the unit + e2e suites plus a full gate set on every PR: `fmt` + `clippy
+-D warnings` + tests (the `check` job), `coverage` (≥80%, `cargo-llvm-cov`),
+an `msrv` build against Rust 1.87, `cargo-deny` (advisories + bans + licenses),
+`gitleaks` secret scan, `workflow lint` (`actionlint` + `zizmor`),
+`dependency review`, and a `docker build` with a container healthcheck smoke.
+Three more workflows run outside PR CI: **CodeQL** SAST (`codeql.yml` — PR +
+push + weekly), a weekly **cargo-deny advisories** audit (`audit.yml`), a
+weekly **fuzz** smoke (`fuzz.yml`, layer 4 below), and the weekly **OpenSSF
+Scorecard** scan.
 
 ## 1. Unit — `cargo test` (in `src/`)
 
@@ -60,7 +68,25 @@ violations that unit and e2e tests structurally cannot see, leading to
 the governor's convergence and zero-violation invariant across live pool
 rebuilds.
 
-Dashboard changes get a fourth check: real-browser screenshots (headless
+## 4. Fuzz — `cargo +nightly fuzz run <target>` (in `fuzz/`)
+
+libFuzzer/cargo-fuzz harnesses over the three surfaces that parse bytes we
+don't control, asserting *never panics* plus each surface's invariant:
+`sse_scan` (upstream SSE arrives arbitrarily fragmented — fed whole and
+re-fragmented, asserting the 1 MiB pathological-line guard), `sanitize_label`
+(the metric-injection defense: output is non-empty, ≤64 chars, safe charset),
+and `config_roundtrip` (operator-edited `config.json`: parse never panics,
+serialize→parse→serialize is a fixpoint). `fuzz.yml` smoke-fuzzes each target
+60s weekly, on demand, and on PRs touching `src/proxy.rs`, `src/config.rs`, or
+`fuzz/**`; it is deliberately **not** a required merge check. Seed corpora live
+in `fuzz/seeds/` (real SSE shapes, hostile label bytes, a full store); the
+evolved working corpus in `fuzz/corpus/` is gitignored. Run one locally:
+
+```sh
+cargo +nightly fuzz run sse_scan -- -max_total_time=60
+```
+
+Dashboard changes get one more check: real-browser screenshots (headless
 Chromium) under live traffic (the UI is dark-only since the operator-console
 redesign), inspected by eye — as superuser/admin/user, confirming each role
 sees the right Settings sections.

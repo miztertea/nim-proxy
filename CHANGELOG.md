@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Supply-chain and static-analysis release — no proxy behavior changes.
 
+### Documentation
+
+- Enriched the PR template into a standard, agent-legible form (Summary / Type
+  of change / Related issues / What & why / How it was tested / Breaking
+  changes, plus a checklist grouped by concern with each conditional section
+  labeled by its trigger).
+- Documentation-consistency pass across README, CONTRIBUTING, SECURITY, the
+  test-strategy and release runbooks, and the issue templates: recorded the
+  full current CI gate set (coverage, MSRV, workflow lint, dependency review,
+  CodeQL) and the applied `main`/`v*` rulesets, added the fuzzing test layer
+  and signed-release-asset notes, and corrected a stale `cargo audit` reference
+  (it is `cargo-deny`) and an old version placeholder.
+
 ### Added
 
 - **Release assets are signed** (`cosign sign-blob`, keyless via OIDC): the

@@ -30,6 +30,19 @@ Maintenance release closing two loose ends from the rigor pass.
   globally: it must keep firing on a real hard-coded key in shipped code.
 - Fixed two off-by-a-minute cron comments (audit.yml 06:42→06:43,
   scorecard.yml 07:27→07:28) — comments now match the actual cron minute.
+- **PR template** rewritten into a standard, agent-legible form (typed
+  sections + a checklist whose conditional groups name their trigger, so an
+  agent pulling the template sees which gates apply). Requirements sourced from
+  CONTRIBUTING.md + AGENTS.md.
+- **Doc-consistency lint** (agent sweep) fixed post-rigor-pass drift: SECURITY
+  said `cargo audit` runs in CI (it's `cargo-deny`, self-contradicting the same
+  file); release.md's required-checks list and rulesets were stale (missing
+  msrv/workflow-lint/dependency-review/codeql, and marked "not yet applied"
+  when both `main` and `v*` rulesets are live); the test-strategy page had no
+  fuzz layer and an incomplete CI description; CONTRIBUTING framed the gate set
+  as "three"; README lacked a supply-chain section and called testing "three
+  layers"; bug_report.yml still placeheld `0.4.0`. Test counts (69+53) and all
+  internal doc links verified clean — no change needed.
 
 ## [2026-07-04] ingest — repo-rigor pass 3: fuzzing the untrusted-byte parsers
 

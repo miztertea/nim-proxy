@@ -44,13 +44,22 @@ the dashboard, not env vars ([config store](knowledge/decisions/ui-managed-confi
 
 ## Testing, formatting, linting
 
-All three must be clean before you open a PR — CI enforces every one of them:
+These three must be clean before you open a PR — run them locally:
 
 ```sh
 cargo test                                   # 69 unit + 53 end-to-end tests
 cargo fmt                                     # (CI runs `cargo fmt --check`)
 cargo clippy --all-targets -- -D warnings    # zero warnings — warnings are errors
 ```
+
+CI enforces more on every PR, most of it reproducible locally: line coverage
+≥80% (`cargo llvm-cov`), a build against the declared MSRV
+(`cargo +1.87 check --locked --all-targets`), `cargo deny check` (advisories,
+bans, licenses), a `gitleaks` secret scan, workflow linting (`actionlint` +
+`zizmor`, only relevant if you touch `.github/workflows/**`), dependency
+review, and a Docker build with a healthcheck smoke. Static analysis (CodeQL)
+and a weekly fuzz smoke run as separate workflows. If you edit a workflow,
+keep every Action SHA-pinned with a `# vX.Y.Z` comment.
 
 `cargo test` launches the **real binary** against a scriptable mock NIM (see
 `tests/support/mod.rs`) — booted with a pre-written `config.json` or by driving

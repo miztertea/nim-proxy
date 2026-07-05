@@ -116,7 +116,8 @@ reasoning behind the current defenses is documented in the knowledge base:
   Security & deployment section).
 - Rate-limit abuse of your own NVIDIA keys, or NVIDIA-side terms-of-service
   questions — those are between you and NVIDIA.
-- Vulnerabilities in third-party dependencies already flagged by `cargo audit`
-  (CI runs it); report those upstream, though a note is still welcome.
+- Vulnerabilities in third-party dependencies already flagged by `cargo-deny`
+  (CI runs it on every PR, plus a weekly scheduled advisories audit); report
+  those upstream, though a note is still welcome.
 
 Thank you for helping keep nim-proxy and its users safe.

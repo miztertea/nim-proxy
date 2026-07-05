@@ -57,7 +57,7 @@ body:
     attributes:
       label: Version or commit
       description: Output of `nim-proxy --version`, the image tag, or the git commit.
-      placeholder: "0.4.0"
+      placeholder: "0.6.3 / git commit / image tag"
     validations:
       required: true
   - type: input

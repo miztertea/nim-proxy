@@ -107,20 +107,23 @@ git tag -fa vX.Y.Z -m "nim-proxy X.Y.Z" origin/main
 git push origin vX.Y.Z
 ```
 
-## One-time repo settings (recorded for reference)
+## Repo settings (applied — recorded for reference)
 
-- **Tag ruleset (recommended, not yet applied)**: Settings → Rules → Rulesets →
-  new ruleset targeting tags `v*`: restrict creation to the repository admin
-  role (GitHub Actions' `GITHUB_TOKEN` acts as the repo and passes), block
-  deletion and non-fast-forward updates. This codifies the "never retag a
-  published release" rule below instead of relying on discipline.
-
+- **Tag ruleset on `v*`** (Settings → Rules → Rulesets): restrict creation to
+  the repository admin role (GitHub Actions' `GITHUB_TOKEN` acts as the repo
+  and passes), block deletion and non-fast-forward updates. This codifies the
+  "never retag a published release" rule above instead of relying on
+  discipline.
+- **Branch ruleset on `main`** (Settings → Rules → Rulesets): require a pull
+  request before merging (0 approvals — solo maintainer; the point is blocking
+  direct pushes, and 1 approval would deadlock a solo repo); require these
+  status checks, which must stay in sync with the CI job list in
+  `.github/workflows/ci.yml` (+ `codeql.yml`): `fmt, clippy, tests`,
+  `coverage`, `msrv`, `cargo-deny`, `gitleaks`, `workflow lint`,
+  `dependency review`, `docker build`, `codeql (rust)`; block force pushes and
+  deletions. Do **not** require signed commits — session commits are unsigned
+  and would be blocked. Leave "require branches up to date" off so Dependabot
+  PRs don't need a rebase per merge.
 - **Private vulnerability reporting** enabled (Settings → Code security) —
   `SECURITY.md` lists advisories as the only reporting channel.
 - **Auto-delete head branches** enabled.
-- **Branch protection / ruleset on `main`** (Settings → Rules → Rulesets):
-  require a pull request before merging (0 approvals acceptable solo — the
-  point is blocking direct pushes); require status checks
-  `fmt, clippy, tests`, `coverage`, `cargo-deny`, `gitleaks`, `docker build`
-  (strict/up-to-date); block force pushes and deletions. Do **not** require
-  signed commits — session commits are unsigned and would be blocked.
