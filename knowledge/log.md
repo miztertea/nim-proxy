@@ -6,6 +6,31 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-05] v0.6.3 — release-asset signing + CodeQL fixture-noise triage
+
+Maintenance release closing two loose ends from the rigor pass.
+
+- **Release assets are signed** (`cosign sign-blob`, keyless): the `release`
+  job now signs each downloadable tarball and the SBOM, attaching a `.sig` +
+  `.pem` per asset (needed `id-token: write` on the job). The container
+  manifest was already cosign-signed; this extends verifiability to a binary
+  pulled straight from the Releases page. Feeds Scorecard's Signed-Releases
+  lever. Release notes carry the `cosign verify-blob` command.
+- **CodeQL hard-coded-secret triage**: the 5 Critical `rust/hardcoded-
+  cryptographic-value` alerts were all false positives — test fixtures (fake
+  passwords, RFC-7914 vector salts) plus one scratch buffer (`let mut salt =
+  [0u8; 16]` in `hash_password`, immediately overwritten by `getrandom`, but
+  the extractor doesn't model the `&mut` overwrite). Added
+  `.github/codeql/codeql-config.yml` with `paths-ignore: [tests/**, fuzz/**]`
+  (verified: honored for Rust under `build-mode: none`) to kill the separate
+  test-crate alert and prevent future fixture noise. The 4 alerts inside
+  `#[cfg(test)]` modules in scanned `src/` can't be path-excluded without
+  dropping the whole file — dismissed in the code-scanning UI as "used in
+  tests" / false-positive. Deliberately did NOT `query-filter` the rule
+  globally: it must keep firing on a real hard-coded key in shipped code.
+- Fixed two off-by-a-minute cron comments (audit.yml 06:42→06:43,
+  scorecard.yml 07:27→07:28) — comments now match the actual cron minute.
+
 ## [2026-07-04] ingest — repo-rigor pass 3: fuzzing the untrusted-byte parsers
 
 - **cargo-fuzz harnesses** for the three surfaces that parse bytes we don't

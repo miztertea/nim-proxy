@@ -11,8 +11,9 @@ timestamp: 2026-07-03T00:00:00Z
 `.github/workflows/release.yml` builds a multi-arch (amd64+arm64) image,
 pushes it to `ghcr.io/miztertea/nim-proxy`, signs it with keyless cosign,
 attests SLSA build provenance, generates an SPDX SBOM, and publishes a GitHub
-Release with the static binaries and the SBOM attached. SemVer + Keep a
-Changelog throughout.
+Release with the static binaries and the SBOM attached. The downloadable
+assets (tarballs + SBOM) are themselves signed with `cosign sign-blob`, each
+getting a `.sig` + `.pem` alongside it. SemVer + Keep a Changelog throughout.
 
 It has two entry points: **Run workflow** in the Actions UI (the normal path
 since v0.6.1 — the workflow's `prepare` job resolves the version from
@@ -50,10 +51,12 @@ runners → `merge` → `release`) under Actions — a few minutes end to end
 make it ~30 minutes). If the `prepare` job fails with "already exists", the
 version in Cargo.toml was never bumped — do step 1 first.
 
-The cosign signature, provenance attestation, and SBOM all target the final
-**multi-arch manifest digest** (stitched by the `merge` job from the per-arch
-digests), so `cosign verify` on any release tag resolves and verifies the
-same manifest.
+The cosign image signature, provenance attestation, and SBOM all target the
+final **multi-arch manifest digest** (stitched by the `merge` job from the
+per-arch digests), so `cosign verify` on any release tag resolves and verifies
+the same manifest. The `release` job additionally signs each downloadable
+asset (`cosign sign-blob`, same keyless workflow identity) so a tarball or the
+SBOM pulled from the Releases page is verifiable without the registry.
 
 ## 3. Verify the shipped artifacts
 
@@ -68,10 +71,18 @@ docker rm -f rel-smoke
 cosign verify ghcr.io/miztertea/nim-proxy:X.Y.Z \
   --certificate-identity-regexp 'https://github.com/miztertea/nim-proxy/.github/workflows/release.yml@.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# and a downloaded asset against its detached .sig + .pem:
+cosign verify-blob nim-proxy-X.Y.Z-linux-amd64.tar.gz \
+  --signature nim-proxy-X.Y.Z-linux-amd64.tar.gz.sig \
+  --certificate nim-proxy-X.Y.Z-linux-amd64.tar.gz.pem \
+  --certificate-identity-regexp 'https://github.com/miztertea/nim-proxy/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 Also check the GitHub Release page: two `nim-proxy-X.Y.Z-linux-*.tar.gz` assets
-plus `nim-proxy-sbom.spdx.json`, and generated release notes. The notes are
+plus `nim-proxy-sbom.spdx.json`, each with its `.sig` + `.pem`, and generated
+release notes. The notes are
 grouped by PR label via `.github/release.yml` (Security / Breaking changes /
 Features=`enhancement` / Fixes=`bug` / Documentation / Dependencies —
 Dependabot's default label / Other; `skip-changelog` excludes a PR) — so

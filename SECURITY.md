@@ -79,7 +79,10 @@ reasoning behind the current defenses is documented in the knowledge base:
   advisories run catches new RUSTSEC advisories between pushes. Release images are
   built on native runners from the repo Dockerfile, signed with keyless cosign,
   and published with SLSA build provenance and an SPDX SBOM — all anchored to
-  the multi-arch manifest digest. `v*` release tags are protected by a ruleset
+  the multi-arch manifest digest; the downloadable release assets (tarballs and
+  SBOM) carry their own cosign `sign-blob` signatures, so a binary from the
+  Releases page is verifiable without pulling the image. `v*` release tags are
+  protected by a ruleset
   (no updates, deletions, or force pushes), so a published tag can never be
   silently moved.
 

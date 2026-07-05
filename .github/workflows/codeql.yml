@@ -48,6 +48,10 @@ jobs:
         with:
           languages: rust
           build-mode: none
+          # Keeps the hard-coded-secret queries on src/** while excluding the
+          # fixture-credential noise in the test/fuzz trees (paths-ignore is
+          # honored for Rust under build-mode: none).
+          config-file: ./.github/codeql/codeql-config.yml
       - uses: github/codeql-action/analyze@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         with:
           category: "/language:rust"

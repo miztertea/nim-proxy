@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.6.3] - 2026-07-05
 
-- Upgraded the CodeQL Action from v3 to v4 (both `codeql.yml` and the
-  Scorecard SARIF upload), clearing the Node 20 deprecation and the
-  December-2026 v3 sunset warnings.
+Supply-chain and static-analysis release — no proxy behavior changes.
 
 ### Added
+
+- **Release assets are signed** (`cosign sign-blob`, keyless via OIDC): the
+  downloadable per-arch tarballs and the SBOM now ship with a detached
+  signature (`.sig`) and the signing certificate (`.pem`), so a binary pulled
+  from the Releases page is verifiable with `cosign verify-blob` — previously
+  only the container image was signed. The release notes carry the exact
+  verification command.
 
 - **Fuzz testing** (`fuzz/` + a weekly smoke-fuzz workflow): cargo-fuzz
   targets for the three untrusted-byte parsers — the upstream SSE scanner
@@ -45,6 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   week instead of at the next push.
 
 ### Changed
+
+- Upgraded the CodeQL Action from v3 to v4 (both `codeql.yml` and the
+  Scorecard SARIF upload), clearing the Node 20 deprecation and the
+  December-2026 v3 sunset warnings.
+
+- **CodeQL scope**: a config file (`.github/codeql/codeql-config.yml`) now
+  excludes the `tests/**` and `fuzz/**` trees, so the hard-coded-secret
+  queries fire on the operator-facing source but not on intentional test
+  fixtures (throwaway passwords, RFC-vector salts). The handful of fixture
+  alerts inside `#[cfg(test)]` modules in scanned source are dismissed as
+  "used in tests".
 
 - The release workflow now runs under a global concurrency group (one release
   at a time, queued rather than cancelled), and the `prepare` script takes

@@ -245,6 +245,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release
+      id-token: write # keyless cosign sign-blob over the downloadable assets
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -254,6 +255,23 @@ jobs:
         with:
           pattern: "{binary-*,sbom}"
           merge-multiple: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+      # The container manifest is already signed in the merge job; this signs
+      # the *downloadable* assets (the per-arch tarballs and the SBOM) so a
+      # binary pulled from the Releases page is verifiable too, not just the
+      # image. Keyless: the OIDC identity is this workflow, verified below.
+      # Each blob gets a detached signature (.sig) + the signing certificate
+      # (.pem); both are attached to the release next to the artifact.
+      - name: Sign release assets (keyless)
+        run: |
+          set -euo pipefail
+          for f in nim-proxy-*.tar.gz nim-proxy-sbom.spdx.json; do
+            cosign sign-blob --yes \
+              --output-signature "$f.sig" \
+              --output-certificate "$f.pem" \
+              "$f"
+          done
       - name: Publish release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
@@ -263,7 +281,11 @@ jobs:
           generate_release_notes: true
           files: |
             nim-proxy-*.tar.gz
+            nim-proxy-*.tar.gz.sig
+            nim-proxy-*.tar.gz.pem
             nim-proxy-sbom.spdx.json
+            nim-proxy-sbom.spdx.json.sig
+            nim-proxy-sbom.spdx.json.pem
           body: |
             Container image (multi-arch, signed, with SBOM + provenance):
 
@@ -271,10 +293,20 @@ jobs:
             docker pull ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }}
             ```
 
-            Verify the signature:
+            Verify the image signature:
 
             ```sh
             cosign verify ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }} \
+              --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            ```
+
+            Verify a downloaded asset (tarball or SBOM) against its `.sig` + `.pem`:
+
+            ```sh
+            cosign verify-blob nim-proxy-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz \
+              --signature nim-proxy-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz.sig \
+              --certificate nim-proxy-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz.pem \
               --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*' \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com
             ```
