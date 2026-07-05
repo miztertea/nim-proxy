@@ -991,6 +991,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_role_maps_admin_and_user_but_never_superuser() {
+        assert_eq!(parse_role("admin"), Some(Role::Admin));
+        assert_eq!(parse_role("user"), Some(Role::User));
+        // Superuser is intentionally NOT assignable through the users API.
+        assert_eq!(parse_role("superuser"), None);
+        assert_eq!(parse_role("root"), None);
+        assert_eq!(parse_role(""), None);
+    }
+
+    #[test]
     fn password_change_applies_when_the_verified_hash_is_current() {
         let mut sc = store_with_user("alice", "old-hash");
         assert_eq!(

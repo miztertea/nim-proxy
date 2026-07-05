@@ -11,8 +11,9 @@ timestamp: 2026-07-03T00:00:00Z
 `.github/workflows/release.yml` builds a multi-arch (amd64+arm64) image,
 pushes it to `ghcr.io/miztertea/nim-proxy`, signs it with keyless cosign,
 attests SLSA build provenance, generates an SPDX SBOM, and publishes a GitHub
-Release with the static binaries and the SBOM attached. SemVer + Keep a
-Changelog throughout.
+Release with the static binaries and the SBOM attached. The downloadable
+assets (tarballs + SBOM) are themselves signed with `cosign sign-blob`, each
+getting a `.sig` + `.pem` alongside it. SemVer + Keep a Changelog throughout.
 
 It has two entry points: **Run workflow** in the Actions UI (the normal path
 since v0.6.1 — the workflow's `prepare` job resolves the version from
@@ -50,10 +51,12 @@ runners → `merge` → `release`) under Actions — a few minutes end to end
 make it ~30 minutes). If the `prepare` job fails with "already exists", the
 version in Cargo.toml was never bumped — do step 1 first.
 
-The cosign signature, provenance attestation, and SBOM all target the final
-**multi-arch manifest digest** (stitched by the `merge` job from the per-arch
-digests), so `cosign verify` on any release tag resolves and verifies the
-same manifest.
+The cosign image signature, provenance attestation, and SBOM all target the
+final **multi-arch manifest digest** (stitched by the `merge` job from the
+per-arch digests), so `cosign verify` on any release tag resolves and verifies
+the same manifest. The `release` job additionally signs each downloadable
+asset (`cosign sign-blob`, same keyless workflow identity) so a tarball or the
+SBOM pulled from the Releases page is verifiable without the registry.
 
 ## 3. Verify the shipped artifacts
 
@@ -68,10 +71,18 @@ docker rm -f rel-smoke
 cosign verify ghcr.io/miztertea/nim-proxy:X.Y.Z \
   --certificate-identity-regexp 'https://github.com/miztertea/nim-proxy/.github/workflows/release.yml@.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# and a downloaded asset against its detached .sig + .pem:
+cosign verify-blob nim-proxy-X.Y.Z-linux-amd64.tar.gz \
+  --signature nim-proxy-X.Y.Z-linux-amd64.tar.gz.sig \
+  --certificate nim-proxy-X.Y.Z-linux-amd64.tar.gz.pem \
+  --certificate-identity-regexp 'https://github.com/miztertea/nim-proxy/.github/workflows/release.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 Also check the GitHub Release page: two `nim-proxy-X.Y.Z-linux-*.tar.gz` assets
-plus `nim-proxy-sbom.spdx.json`, and generated release notes. The notes are
+plus `nim-proxy-sbom.spdx.json`, each with its `.sig` + `.pem`, and generated
+release notes. The notes are
 grouped by PR label via `.github/release.yml` (Security / Breaking changes /
 Features=`enhancement` / Fixes=`bug` / Documentation / Dependencies —
 Dependabot's default label / Other; `skip-changelog` excludes a PR) — so
@@ -96,20 +107,23 @@ git tag -fa vX.Y.Z -m "nim-proxy X.Y.Z" origin/main
 git push origin vX.Y.Z
 ```
 
-## One-time repo settings (recorded for reference)
+## Repo settings (applied — recorded for reference)
 
-- **Tag ruleset (recommended, not yet applied)**: Settings → Rules → Rulesets →
-  new ruleset targeting tags `v*`: restrict creation to the repository admin
-  role (GitHub Actions' `GITHUB_TOKEN` acts as the repo and passes), block
-  deletion and non-fast-forward updates. This codifies the "never retag a
-  published release" rule below instead of relying on discipline.
-
+- **Tag ruleset on `v*`** (Settings → Rules → Rulesets): restrict creation to
+  the repository admin role (GitHub Actions' `GITHUB_TOKEN` acts as the repo
+  and passes), block deletion and non-fast-forward updates. This codifies the
+  "never retag a published release" rule above instead of relying on
+  discipline.
+- **Branch ruleset on `main`** (Settings → Rules → Rulesets): require a pull
+  request before merging (0 approvals — solo maintainer; the point is blocking
+  direct pushes, and 1 approval would deadlock a solo repo); require these
+  status checks, which must stay in sync with the CI job list in
+  `.github/workflows/ci.yml` (+ `codeql.yml`): `fmt, clippy, tests`,
+  `coverage`, `msrv`, `cargo-deny`, `gitleaks`, `workflow lint`,
+  `dependency review`, `docker build`, `codeql (rust)`; block force pushes and
+  deletions. Do **not** require signed commits — session commits are unsigned
+  and would be blocked. Leave "require branches up to date" off so Dependabot
+  PRs don't need a rebase per merge.
 - **Private vulnerability reporting** enabled (Settings → Code security) —
   `SECURITY.md` lists advisories as the only reporting channel.
 - **Auto-delete head branches** enabled.
-- **Branch protection / ruleset on `main`** (Settings → Rules → Rulesets):
-  require a pull request before merging (0 approvals acceptable solo — the
-  point is blocking direct pushes); require status checks
-  `fmt, clippy, tests`, `coverage`, `cargo-deny`, `gitleaks`, `docker build`
-  (strict/up-to-date); block force pushes and deletions. Do **not** require
-  signed commits — session commits are unsigned and would be blocked.

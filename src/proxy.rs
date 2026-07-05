@@ -1137,6 +1137,31 @@ mod tests {
     }
 
     #[test]
+    fn tool_choice_mode_maps_unknown_strings_to_other() {
+        // auto / none / required / named are covered elsewhere; an unrecognized
+        // string must collapse to the bounded "other" label, not pass through.
+        assert_eq!(
+            tool_choice_mode(&serde_json::json!({"tool_choice": "banana"})),
+            "other"
+        );
+    }
+
+    #[test]
+    fn sse_scan_clears_a_pathological_unterminated_line() {
+        let mut scan = SseScan::default();
+        // >1 MiB with no newline: the guard clears the buffer instead of letting
+        // an abusive upstream grow it without bound.
+        scan.feed(&vec![b'x'; 1_048_577]);
+        assert!(scan.buf.is_empty(), "oversized line buffer must be dropped");
+        assert_eq!(scan.events, 0);
+        // The guard drops the runaway buffer without wedging the scanner: a
+        // normal event still parses immediately afterward.
+        scan.feed(b"data: {\"choices\":[],\"usage\":{\"completion_tokens\":3}}\n\n");
+        assert_eq!(scan.events, 1);
+        assert_eq!(scan.completion, Some(3));
+    }
+
+    #[test]
     fn scan_counts_events_and_finds_usage() {
         let mut scan = SseScan::default();
         // Feed in awkwardly split chunks to exercise line reassembly.

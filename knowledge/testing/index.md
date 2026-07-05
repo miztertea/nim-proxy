@@ -1,7 +1,7 @@
 ---
 type: Index
 title: Testing
-description: The three verification layers.
+description: The four verification layers (unit, e2e, load, fuzz).
 ---
 
 # Testing

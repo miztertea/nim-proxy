@@ -669,6 +669,74 @@ mod tests {
     }
 
     #[test]
+    fn base64_decode_handles_alphabet_padding_and_rejects_garbage() {
+        // Round-trips a real Basic credential (letters, digits, ':').
+        assert_eq!(
+            base64_decode("dXNlcjpwYXNz").unwrap(),
+            b"user:pass".to_vec()
+        );
+        // The '+' (62) and '/' (63) alphabet slots.
+        assert_eq!(base64_decode("+AAA").unwrap(), vec![248u8, 0, 0]);
+        assert_eq!(base64_decode("/AAA").unwrap(), vec![252u8, 0, 0]);
+        assert_eq!(base64_decode("+/AA").unwrap(), vec![251u8, 240, 0]);
+        // A 2-byte tail (3-char chunk + one '=' pad).
+        assert_eq!(base64_decode("TWE=").unwrap(), b"Ma".to_vec());
+        // An illegal character and a lone 1-char chunk both fail closed.
+        assert!(base64_decode("ab*c").is_none());
+        assert!(base64_decode("A").is_none());
+    }
+
+    #[test]
+    fn unhex_rejects_odd_length() {
+        assert!(unhex("abc").is_none());
+        assert_eq!(unhex("0a0b").unwrap(), vec![0x0au8, 0x0b]);
+    }
+
+    #[test]
+    fn verify_session_rejects_malformed_token_shape() {
+        let a = admin();
+        let sc = store_with("alice", "hash-v1");
+        // A token that isn't exactly 5 dotted parts fails closed before any crypto.
+        assert!(a.verify_session("a.b.c", &sc).is_none());
+        assert!(a
+            .verify_session("too.many.dots.here.and.more", &sc)
+            .is_none());
+    }
+
+    #[test]
+    fn cookie_marks_secure_only_behind_a_trusted_https_proxy() {
+        let mut https = HeaderMap::new();
+        https.insert("x-forwarded-proto", "https".parse().unwrap());
+        // trust_proxy = true AND forwarded https -> Secure attribute set.
+        assert!(Admin::new(true)
+            .cookie(&https, "tok", 3600)
+            .contains("; Secure"));
+        // The same header is untrusted when trust_proxy = false (can't believe it).
+        assert!(!Admin::new(false)
+            .cookie(&https, "tok", 3600)
+            .contains("; Secure"));
+        // Trusted proxy but plain http -> no Secure.
+        let mut http = HeaderMap::new();
+        http.insert("x-forwarded-proto", "http".parse().unwrap());
+        assert!(!Admin::new(true)
+            .cookie(&http, "tok", 3600)
+            .contains("; Secure"));
+    }
+
+    #[test]
+    fn note_failure_resets_after_the_throttle_window_rolls_over() {
+        let a = admin();
+        {
+            let mut t = a.throttle.lock().unwrap();
+            t.window_start = now() - THROTTLE_WINDOW_SECS - 1;
+            t.failures = 10_000; // would be throttled if the window hadn't rolled
+        }
+        // The rolled-over window resets the counter, so one fresh failure is
+        // well under the limit.
+        assert!(!a.note_failure());
+    }
+
+    #[test]
     fn malformed_hash_strings_fail_closed() {
         for bad in [
             "",

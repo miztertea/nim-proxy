@@ -2276,3 +2276,573 @@ async fn disconnected_stream_releases_its_inflight_slot() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
 }
+
+// ===========================================================================
+// Coverage wave 2: setup edge cases, settings error/ownership legs, and the
+// auth handler surface (Basic scrape creds, login redirects, logout). These
+// drive previously-uncovered branches through the real HTTP surface.
+// ===========================================================================
+
+/// Two wizard claims race; the store mutex admits exactly one.
+#[tokio::test]
+async fn setup_double_claim_is_rejected_with_409() {
+    let proxy = start_proxy_fresh().await;
+    let body = serde_json::json!({
+        "username": "admin",
+        "password": "hunter2hunter2",
+        "base_url": "http://127.0.0.1:9999",
+        "nim_keys": [{"key": "nvapi-x", "rpm": 40}],
+    });
+    // Both requests pass the setup_required check before either finishes the
+    // 600k-iteration PBKDF2 hash, so the mutex arbitrates one winner.
+    let (a, b) = tokio::join!(
+        client().post(proxy.url("/setup")).json(&body).send(),
+        client().post(proxy.url("/setup")).json(&body).send(),
+    );
+    let mut statuses = [a.unwrap().status().as_u16(), b.unwrap().status().as_u16()];
+    statuses.sort_unstable();
+    assert_eq!(
+        statuses,
+        [200, 409],
+        "exactly one claim wins, the other 409s"
+    );
+}
+
+/// A lockout-recovery store (users hand-emptied) keeps orphan-owned client
+/// keys; claiming the proxy re-owns them to the new superuser.
+#[tokio::test]
+async fn setup_adopts_orphan_client_keys_on_claim() {
+    let mock = start_mock().await;
+    let dir = scratch_data_dir();
+    let fixture = serde_json::json!({
+        "version": 1,
+        "upstream": {
+            "base_url": mock.url,
+            "nim_keys": [{"key": "orphan-key", "owner": "ghost", "enabled": true, "rpm": 40}],
+        },
+        "client_auth": {
+            "mode": "keyed",
+            "keys": [{
+                "name": "orphan-client",
+                "secret_sha256": support::sha256_hex("orphan-secret"),
+                "owner": "ghost",
+            }],
+        },
+        "users": [],
+    });
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string_pretty(&fixture).unwrap(),
+    )
+    .unwrap();
+
+    let proxy = start_proxy_in(dir, &[]).await;
+    let root = complete_setup(&proxy, "admin", support::TEST_PASSWORD, &mock.url, &[]).await;
+
+    // The orphan client key is re-owned by the new superuser...
+    let cfg = api_config(&proxy, &root).await;
+    assert_eq!(cfg["client_keys"][0]["owner"], "admin", "{cfg}");
+    // ...and its secret still authenticates on keyed /v1.
+    let r = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth("orphan-secret")
+        .json(&chat_body("hi", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "adopted client key authenticates");
+}
+
+/// The pre-auth key probe shares the login throttle; hammering it trips 429.
+#[tokio::test]
+async fn setup_validate_key_throttles_after_repeated_probes() {
+    let proxy = start_proxy_fresh().await;
+    // A dead loopback fails fast (no real egress) but still burns throttle
+    // budget on each probe.
+    let body = serde_json::json!({"key": "x", "base_url": "http://127.0.0.1:1"});
+    let mut last = 0u16;
+    for _ in 0..12 {
+        last = client()
+            .post(proxy.url("/setup/validate-key"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16();
+    }
+    assert_eq!(last, 429, "the throttle trips after repeated failed probes");
+}
+
+/// A reachable upstream that 404s the models route is a key rejection, not a
+/// connection failure (probe_key's non-success branch).
+#[tokio::test]
+async fn key_probe_reports_upstream_rejection() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_fresh().await;
+    let resp = client()
+        .post(proxy.url("/setup/validate-key"))
+        // A bogus path prefix 404s on the mock's own router.
+        .json(&serde_json::json!({"key": "x", "base_url": format!("{}/bogus", mock.url)}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["ok"], false, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("rejected"), "{v}");
+}
+
+/// The authenticated key validator reports an unreachable upstream (probe_key's
+/// connect-error branch, via /api/settings/validate-key).
+#[tokio::test]
+async fn authenticated_key_validation_reports_unreachable_upstream() {
+    let proxy = start_proxy_with("http://127.0.0.1:1", support::StoreOpts::default(), &[]).await;
+    let root = support::login(&proxy).await;
+    let (status, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/validate-key",
+        serde_json::json!({"key": "x"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["ok"], false, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("reach"), "{v}");
+}
+
+/// Removing or reconfiguring a NIM key that doesn't exist is a 400, and the
+/// action selector requires exactly one of add/remove/set.
+#[tokio::test]
+async fn nim_keys_reject_unknown_fingerprint_and_empty_action() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_with(&mock.url, support::StoreOpts::default(), &[]).await;
+    let root = support::login(&proxy).await;
+    for body in [
+        serde_json::json!({"remove": "deadbeef"}),
+        serde_json::json!({"set": {"fingerprint": "deadbeef", "enabled": true}}),
+    ] {
+        let (status, v) = post_json(&proxy, &root, "/api/settings/nim-keys", body).await;
+        assert_eq!(status, 400, "{v}");
+        assert!(
+            v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("no such key"),
+            "{v}"
+        );
+    }
+    let (status, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/nim-keys",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, 400, "empty action rejected");
+}
+
+/// Client-key endpoint: unknown name, bad mode, empty oneof, empty name on
+/// commit, and cross-owner revoke are all rejected with the right status.
+#[tokio::test]
+async fn clients_reject_unknown_bad_input_and_cross_owner_revoke() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![("alice".into(), "user".into())],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+    let alice = support::login_as(&proxy, "alice").await;
+
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"remove": "nope"}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no such client key"),
+        "{v}"
+    );
+
+    let (s, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"mode": "bogus"}),
+    )
+    .await;
+    assert_eq!(s, 400, "bad mode rejected");
+    let (s, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(s, 400, "empty action rejected");
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"add": {"name": ""}}),
+    )
+    .await;
+    assert_eq!(s, 400, "empty name rejected on commit: {v}");
+
+    // Root mints a key; alice may not revoke someone else's.
+    let (s, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/clients",
+        serde_json::json!({"add": {"name": "root-key"}}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let (s, v) = post_json(
+        &proxy,
+        &alice,
+        "/api/settings/clients",
+        serde_json::json!({"remove": "root-key"}),
+    )
+    .await;
+    assert_eq!(s, 403, "{v}");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("your own"),
+        "{v}"
+    );
+}
+
+/// The upstream base_url is re-validated on write: a link-local target (SSRF /
+/// cloud-metadata) is refused.
+#[tokio::test]
+async fn upstream_rejects_link_local_base_url() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_with(&mock.url, support::StoreOpts::default(), &[]).await;
+    let root = support::login(&proxy).await;
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/upstream",
+        serde_json::json!({"base_url": "http://169.254.169.254"}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("link-local"),
+        "{v}"
+    );
+}
+
+/// User management: weak-password rejection on add and reset, commit-error on a
+/// blank username, the add+hashing happy path, reset of an unknown user, and
+/// role changes (promote a user; the superuser's role is immutable).
+#[tokio::test]
+async fn users_add_reset_and_set_role_paths() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![
+            ("adm".into(), "admin".into()),
+            ("bob".into(), "user".into()),
+        ],
+        ..Default::default()
+    };
+    let proxy = start_proxy_with(&mock.url, opts, &[]).await;
+    let root = support::login(&proxy).await;
+
+    // Add: weak password rejected.
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"add": {"username": "eve", "password": "short", "role": "user"}}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["error"]["code"], "weak_password", "{v}");
+    // Add: a username that trims to empty fails on commit.
+    let (s, _) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"add": {"username": "   ", "password": "long-enough-pw", "role": "user"}}),
+    )
+    .await;
+    assert_eq!(s, 400, "blank username rejected");
+    // Add: valid -> the new user can log in (exercises the hashing path).
+    // login_as always uses TEST_PASSWORD, so create eve with it.
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"add": {"username": "eve", "password": support::TEST_PASSWORD, "role": "user"}}),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let _ = support::login_as(&proxy, "eve").await;
+
+    // Reset: weak password and unknown user both rejected.
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"reset_password": {"username": "adm", "new_password": "short"}}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["error"]["code"], "weak_password", "{v}");
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"reset_password": {"username": "ghost", "new_password": "long-enough-pw"}}),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no such user"),
+        "{v}"
+    );
+
+    // set_role: promote bob to admin (verified functionally), then confirm the
+    // superuser's role can't be changed.
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"set_role": {"username": "bob", "role": "admin"}}),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    let bob = support::login_as(&proxy, "bob").await;
+    let (s, _) = post_json(
+        &proxy,
+        &bob,
+        "/api/settings/governor",
+        serde_json::json!({"enabled": true}),
+    )
+    .await;
+    assert_eq!(s, 200, "bob now has admin rights");
+    let (s, v) = post_json(
+        &proxy,
+        &root,
+        "/api/settings/users",
+        serde_json::json!({"set_role": {"username": support::TEST_USER, "role": "user"}}),
+    )
+    .await;
+    assert_eq!(s, 403, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("immutable"),
+        "{v}"
+    );
+}
+
+/// User-management input validation: invalid role and unknown-target legs on
+/// add / set_role / remove, plus the exactly-one-action rule.
+#[tokio::test]
+async fn users_reject_invalid_role_unknown_target_and_bad_action() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_with(&mock.url, support::StoreOpts::default(), &[]).await;
+    let root = support::login(&proxy).await;
+    for body in [
+        serde_json::json!({"add": {"username": "x", "password": "long-enough-pw", "role": "wizard"}}),
+        serde_json::json!({"remove": "ghost"}),
+        serde_json::json!({"set_role": {"username": "x", "role": "wizard"}}),
+        serde_json::json!({"set_role": {"username": "ghost", "role": "user"}}),
+        serde_json::json!({}),
+    ] {
+        let (s, v) = post_json(&proxy, &root, "/api/settings/users", body).await;
+        assert_eq!(s, 400, "{v}");
+    }
+}
+
+/// Scraper header auth: HTTP Basic works (a second identical call also drives
+/// the credential-memo fast path), while an unknown scheme, a wrong password,
+/// and a foreign cookie all 401.
+#[tokio::test]
+async fn scraper_header_auth_variants() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    for _ in 0..2 {
+        let r = client()
+            .get(proxy.url("/api/config"))
+            .basic_auth(support::TEST_USER, Some(support::TEST_PASSWORD))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "HTTP Basic scrape credential");
+    }
+    let r = client()
+        .get(proxy.url("/api/config"))
+        .header("authorization", "Digest x")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401, "unknown auth scheme");
+    let r = client()
+        .get(proxy.url("/api/config"))
+        .bearer_auth(format!("{}:wrong", support::TEST_USER))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401, "wrong password");
+    let r = client()
+        .get(proxy.url("/api/config"))
+        .header("cookie", "foo=bar")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401, "a foreign cookie is ignored");
+}
+
+/// Pre-setup, a non-HTML request to the operator surface answers 503
+/// setup_required rather than redirecting.
+#[tokio::test]
+async fn require_session_pre_setup_answers_setup_required_json() {
+    let proxy = start_proxy_fresh().await;
+    let r = client()
+        .get(proxy.url("/api/config"))
+        .header("accept", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 503);
+    let v: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "setup_required", "{v}");
+}
+
+/// GET /login redirects an already-authenticated user to the dashboard.
+#[tokio::test]
+async fn login_page_redirects_when_already_authenticated() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+    let r = no_redirect_client()
+        .get(proxy.url("/login"))
+        .header("cookie", &root)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 302);
+    assert_eq!(r.headers()["location"], "/");
+}
+
+/// POST /login before setup bounces to the wizard.
+#[tokio::test]
+async fn login_pre_setup_redirects_to_wizard() {
+    let proxy = start_proxy_fresh().await;
+    let r = no_redirect_client()
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("username=x&password=yyyyyyyyyy")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 302);
+    assert_eq!(r.headers()["location"], "/setup");
+}
+
+/// An empty login body (both form fields absent) falls to the burner-hash path
+/// and still fails closed.
+#[tokio::test]
+async fn login_with_empty_body_fails_closed() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let r = no_redirect_client()
+        .post(proxy.url("/login"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body("")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+}
+
+/// POST /logout clears the session cookie and redirects to the login page.
+#[tokio::test]
+async fn logout_clears_the_session_cookie() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let root = support::login(&proxy).await;
+    let r = no_redirect_client()
+        .post(proxy.url("/logout"))
+        .header("cookie", &root)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 303);
+    assert_eq!(r.headers()["location"], "/login");
+    let set = r.headers()["set-cookie"].to_str().unwrap();
+    assert!(set.contains("nimproxy_session="), "{set}");
+    assert!(set.contains("Max-Age=0"), "{set}");
+}
+
+/// The wizard's strong-password gate passes, but a candidate that fails
+/// `validate()` at commit surfaces as `invalid_config` (not a panic/500).
+#[tokio::test]
+async fn setup_rejects_an_invalid_config_on_commit() {
+    let proxy = start_proxy_fresh().await;
+    let resp = client()
+        .post(proxy.url("/setup"))
+        .json(&serde_json::json!({
+            "username": "bad user!", // fails the username charset check in validate()
+            "password": "hunter2hunter2",
+            "base_url": "http://127.0.0.1:9999",
+            "nim_keys": [{"key": "k", "rpm": 40}],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "invalid_config", "{v}");
+}
+
+/// An empty DATA_DIR is a fatal misconfiguration — the store home must be a
+/// real writable directory.
+#[tokio::test]
+async fn boot_refuses_an_empty_data_dir() {
+    support::expect_refuses_to_start(std::path::PathBuf::from("")).await;
+}
+
+/// `nim-proxy --health` probes /health on $PORT and exits 0 (healthy) or 1
+/// (unreachable) — the scratch image's shell-less HEALTHCHECK.
+#[tokio::test]
+async fn health_probe_flag_reports_liveness() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let run_health = |port: String| {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"));
+        cmd.arg("--health").env("PORT", port);
+        // Forward the coverage profile path so the probe subprocess is counted
+        // under `cargo llvm-cov` (a no-op in a normal test run).
+        if let Ok(v) = std::env::var("LLVM_PROFILE_FILE") {
+            cmd.env("LLVM_PROFILE_FILE", v);
+        }
+        cmd.status().unwrap()
+    };
+    assert!(
+        run_health(proxy.port.to_string()).success(),
+        "--health exits 0 against a healthy proxy"
+    );
+    assert!(
+        !run_health("1".into()).success(),
+        "--health exits non-zero against a dead port"
+    );
+}

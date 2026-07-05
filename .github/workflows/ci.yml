@@ -73,12 +73,12 @@ jobs:
           tool: cargo-llvm-cov
       # The e2e suite spawns the real binary; the test harness forwards the
       # coverage profile path to the child and shuts it down gracefully under
-      # llvm-cov, so subprocess coverage is captured. Gate at 80% lines.
-      - name: Coverage (gate >= 80% lines)
+      # llvm-cov, so subprocess coverage is captured. Gate at 90% lines.
+      - name: Coverage (gate >= 90% lines)
         run: |
           {
             echo '```'
-            cargo llvm-cov --summary-only --fail-under-lines 80
+            cargo llvm-cov --summary-only --fail-under-lines 90
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

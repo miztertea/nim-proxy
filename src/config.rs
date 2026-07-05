@@ -646,6 +646,27 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_store_is_a_hard_error() {
+        let dir = TestDir::new();
+        // Invalid UTF-8 is a read error (not the corrupt-but-valid-UTF-8 JSON
+        // path) — it must still fail closed, never fall through to setup mode.
+        fs::write(store_path(&dir.0), [0xff, 0xfe, 0xfd]).unwrap();
+        let err = load(&dir.0).unwrap_err();
+        assert!(err.contains("cannot read"), "{err}");
+    }
+
+    #[test]
+    fn serde_defaults_fill_omitted_fields() {
+        // A NIM key missing enabled/rpm inherits the documented defaults
+        // (backward compat for stores written before those fields existed).
+        let k: NimKey = serde_json::from_str(r#"{"key":"k","owner":"o"}"#).unwrap();
+        assert!(k.enabled);
+        assert_eq!(k.rpm, 40);
+        let g: GovernorCfg = serde_json::from_str("{}").unwrap();
+        assert!(g.enabled);
+    }
+
+    #[test]
     fn future_version_refuses_to_load() {
         let dir = TestDir::new();
         fs::write(store_path(&dir.0), r#"{"version": 2}"#).unwrap();
@@ -723,6 +744,54 @@ mod tests {
                 "bad governor cap",
                 Box::new(|sc| {
                     sc.governor.overrides.insert("m".into(), 0);
+                }),
+            ),
+            ("version not 1", Box::new(|sc| sc.version = 2)),
+            (
+                "heartbeat zero",
+                Box::new(|sc| sc.limits.heartbeat_secs = 0),
+            ),
+            (
+                "request timeout zero",
+                Box::new(|sc| sc.limits.request_timeout_secs = 0),
+            ),
+            (
+                "empty nim key",
+                Box::new(|sc| sc.upstream.nim_keys[0].key = "   ".into()),
+            ),
+            (
+                "bad client key name",
+                Box::new(|sc| {
+                    sc.client_auth.keys.push(ClientKey {
+                        name: "a b".into(),
+                        secret_sha256: "a".repeat(64),
+                        last4: "aaaa".into(),
+                        owner: "root".into(),
+                    })
+                }),
+            ),
+            (
+                "duplicate client key name",
+                Box::new(|sc| {
+                    for _ in 0..2 {
+                        sc.client_auth.keys.push(ClientKey {
+                            name: "dup".into(),
+                            secret_sha256: "b".repeat(64),
+                            last4: "bbbb".into(),
+                            owner: "root".into(),
+                        });
+                    }
+                }),
+            ),
+            (
+                "client key dangling owner",
+                Box::new(|sc| {
+                    sc.client_auth.keys.push(ClientKey {
+                        name: "ck".into(),
+                        secret_sha256: "c".repeat(64),
+                        last4: "cccc".into(),
+                        owner: "ghost".into(),
+                    })
                 }),
             ),
         ];

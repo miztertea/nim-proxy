@@ -79,7 +79,10 @@ reasoning behind the current defenses is documented in the knowledge base:
   advisories run catches new RUSTSEC advisories between pushes. Release images are
   built on native runners from the repo Dockerfile, signed with keyless cosign,
   and published with SLSA build provenance and an SPDX SBOM — all anchored to
-  the multi-arch manifest digest. `v*` release tags are protected by a ruleset
+  the multi-arch manifest digest; the downloadable release assets (tarballs and
+  SBOM) carry their own cosign `sign-blob` signatures, so a binary from the
+  Releases page is verifiable without pulling the image. `v*` release tags are
+  protected by a ruleset
   (no updates, deletions, or force pushes), so a published tag can never be
   silently moved.
 
@@ -113,7 +116,8 @@ reasoning behind the current defenses is documented in the knowledge base:
   Security & deployment section).
 - Rate-limit abuse of your own NVIDIA keys, or NVIDIA-side terms-of-service
   questions — those are between you and NVIDIA.
-- Vulnerabilities in third-party dependencies already flagged by `cargo audit`
-  (CI runs it); report those upstream, though a note is still welcome.
+- Vulnerabilities in third-party dependencies already flagged by `cargo-deny`
+  (CI runs it on every PR, plus a weekly scheduled advisories audit); report
+  those upstream, though a note is still welcome.
 
 Thank you for helping keep nim-proxy and its users safe.

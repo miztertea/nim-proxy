@@ -1,0 +1,14 @@
+name: nim-proxy CodeQL config
+
+# The hard-coded-secret queries are exactly what we want on the operator-facing
+# surface (src/**), but test crates and the fuzz harness are *built* out of
+# intentional fixture credentials — throwaway passwords, hand-rolled low-cost
+# salts, RFC test vectors. Those are signal in shipped code and pure noise in
+# test-only code, so exclude those trees. Supported for Rust under
+# `build-mode: none` (source extraction), same as the interpreted languages.
+# Note: this cannot reach the `#[cfg(test)]` modules that live *inside* a
+# scanned src/ file — those few fixture alerts are dismissed in the code
+# scanning UI as "used in tests" instead.
+paths-ignore:
+  - tests/**
+  - fuzz/**

@@ -213,6 +213,10 @@ scrape_configs:
 
 **TLS is not built in** — passwords and keys must travel over HTTPS, so terminate TLS at a reverse proxy or platform edge for any exposed deployment. Additional hardening in place: a strict `Content-Security-Policy` and anti-framing/sniffing headers on all responses, a failed-login throttle, and an in-flight cap (`max_inflight`) that sheds floods with a 503.
 
+### Supply chain
+
+The build and release path is hardened to the OpenSSF baseline (scored weekly by the [Scorecard badge](https://scorecard.dev/viewer/?uri=github.com/miztertea/nim-proxy) above): every GitHub Actions step is SHA-pinned, CI runs **CodeQL** static analysis, workflow linting (`actionlint` + `zizmor`), dependency review, and `cargo-deny` (advisories on every PR plus a weekly audit), and the untrusted-byte parsers are **fuzzed** weekly. Releases are signed with keyless [cosign](https://docs.sigstore.dev/): the multi-arch image carries a signature, SLSA build provenance, and an SPDX SBOM, and the downloadable tarballs + SBOM each ship a `.sig` + `.pem` you can check with `cosign verify-blob` (the exact command is in every release's notes). Published `v*` tags are protected against retagging.
+
 ## Operations
 
 - **Image**: built `FROM scratch` — a ~5 MB static musl binary with TLS roots compiled in. No shell, no libc, no CA bundle. Runs as a non-root UID with `read_only`, `cap_drop: ALL`, `no-new-privileges`; rootless Docker/Podman compatible.
@@ -261,7 +265,7 @@ Request shape (messages, tools, sampling params) is captured as **counts and siz
 
 ## Testing
 
-Three layers, all runnable locally:
+Four layers (unit, end-to-end, load, fuzz), all runnable locally:
 
 ```sh
 cargo test          # unit + end-to-end tests (real binary vs a scripted mock NIM)

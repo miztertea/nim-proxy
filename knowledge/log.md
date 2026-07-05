@@ -6,6 +6,71 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-05] v0.6.3 — release-asset signing + CodeQL fixture-noise triage
+
+Maintenance release closing two loose ends from the rigor pass.
+
+- **Release assets are signed** (`cosign sign-blob`, keyless): the `release`
+  job now signs each downloadable tarball and the SBOM, attaching a `.sig` +
+  `.pem` per asset (needed `id-token: write` on the job). The container
+  manifest was already cosign-signed; this extends verifiability to a binary
+  pulled straight from the Releases page. Feeds Scorecard's Signed-Releases
+  lever. Release notes carry the `cosign verify-blob` command.
+- **CodeQL hard-coded-secret triage**: the 5 Critical `rust/hardcoded-
+  cryptographic-value` alerts were all false positives — test fixtures (fake
+  passwords, RFC-7914 vector salts) plus one scratch buffer (`let mut salt =
+  [0u8; 16]` in `hash_password`, immediately overwritten by `getrandom`, but
+  the extractor doesn't model the `&mut` overwrite). Added
+  `.github/codeql/codeql-config.yml` with `paths-ignore: [tests/**, fuzz/**]`
+  (verified: honored for Rust under `build-mode: none`) to kill the separate
+  test-crate alert and prevent future fixture noise. The 4 alerts inside
+  `#[cfg(test)]` modules in scanned `src/` can't be path-excluded without
+  dropping the whole file — dismissed in the code-scanning UI as "used in
+  tests" / false-positive. Deliberately did NOT `query-filter` the rule
+  globally: it must keep firing on a real hard-coded key in shipped code.
+- Fixed two off-by-a-minute cron comments (audit.yml 06:42→06:43,
+  scorecard.yml 07:27→07:28) — comments now match the actual cron minute.
+- **Coverage expansion 91.4%→96.1% lines** (gate raised 80→90). Applied the
+  YAGNI gates to eliminate a planned clock/injection seam: the throttle
+  window-rollover branch is reachable by setting `Throttle.window_start`
+  directly from an in-module test, and the password-change HashRotated/UserGone
+  logic was *already* unit-tested — so no production code changed. Wave 1: pure
+  in-module unit tests (auth primitives → `auth.rs` 100%; `config::validate`
+  branches; `parse_role`; SSE 1 MiB guard; history load + compaction). Wave 2:
+  e2e legs via the existing harness (setup double-claim/orphan-adoption/throttle,
+  key-probe non-success + unreachable, client/nim-key/user validation +
+  ownership, auth Basic/logout/login redirects). A second blind auditor then
+  showed several "excluded" filesystem/boot paths were in fact cheaply and
+  deterministically reachable with tricks already used in the harness, so those
+  WERE added (round 2): `config` serde-defaults + unreadable-store (invalid
+  UTF-8), `history` dir-create/file-open/write failures (dir-as-file trick),
+  `lib` empty-`DATA_DIR` and the `--health` probe (subprocess exit codes), and
+  the `setup` commit `invalid_config` leg. Genuinely left uncovered (documented
+  residual): every handler's `role_of==None` stale-session arm and account's
+  own None/commit arms — a REAL TOCTOU race (the auth middleware validates the
+  session under one store-lock and releases it; each handler re-locks
+  separately, and a concurrent user-deletion must land in that window), not
+  deterministically triggerable through the black-box harness without a
+  test-only sync hook (the pure logic — `apply_password_change`'s
+  UserGone/HashRotated — is already unit-tested); `lib.rs` banner/`tracing`
+  logging, `warn_legacy_env`, and the unused `GovernorSettings::default`;
+  `tracing!` argument lines the test subscriber never evaluates; and the proxy
+  request-flow branches (streaming/models/relay/buffered — Wave 3, out of
+  scope this release).
+- **PR template** rewritten into a standard, agent-legible form (typed
+  sections + a checklist whose conditional groups name their trigger, so an
+  agent pulling the template sees which gates apply). Requirements sourced from
+  CONTRIBUTING.md + AGENTS.md.
+- **Doc-consistency lint** (agent sweep) fixed post-rigor-pass drift: SECURITY
+  said `cargo audit` runs in CI (it's `cargo-deny`, self-contradicting the same
+  file); release.md's required-checks list and rulesets were stale (missing
+  msrv/workflow-lint/dependency-review/codeql, and marked "not yet applied"
+  when both `main` and `v*` rulesets are live); the test-strategy page had no
+  fuzz layer and an incomplete CI description; CONTRIBUTING framed the gate set
+  as "three"; README lacked a supply-chain section and called testing "three
+  layers"; bug_report.yml still placeheld `0.4.0`. Test counts (69+53) and all
+  internal doc links verified clean — no change needed.
+
 ## [2026-07-04] ingest — repo-rigor pass 3: fuzzing the untrusted-byte parsers
 
 - **cargo-fuzz harnesses** for the three surfaces that parse bytes we don't

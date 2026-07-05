@@ -7,13 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.6.3] - 2026-07-05
 
-- Upgraded the CodeQL Action from v3 to v4 (both `codeql.yml` and the
-  Scorecard SARIF upload), clearing the Node 20 deprecation and the
-  December-2026 v3 sunset warnings.
+Supply-chain and static-analysis release — no proxy behavior changes.
+
+### Documentation
+
+- Enriched the PR template into a standard, agent-legible form (Summary / Type
+  of change / Related issues / What & why / How it was tested / Breaking
+  changes, plus a checklist grouped by concern with each conditional section
+  labeled by its trigger).
+- Documentation-consistency pass across README, CONTRIBUTING, SECURITY, the
+  test-strategy and release runbooks, and the issue templates: recorded the
+  full current CI gate set (coverage, MSRV, workflow lint, dependency review,
+  CodeQL) and the applied `main`/`v*` rulesets, added the fuzzing test layer
+  and signed-release-asset notes, and corrected a stale `cargo audit` reference
+  (it is `cargo-deny`) and an old version placeholder.
+
+### Testing
+
+- **Coverage expansion** (91.4% → 96.1% lines): new unit tests for the auth
+  primitives (base64/unhex/session-shape/cookie-Secure/throttle-rollover —
+  `auth.rs` is now 100%), `config::validate` rejection branches, `parse_role`
+  (superuser is never assignable), the SSE 1 MiB guard, and history load +
+  daily-compaction; plus e2e tests for setup double-claim, orphan client-key
+  adoption, throttled/failed key probes, client/nim-key/user validation and
+  ownership legs, and the auth handler surface (HTTP Basic scrape creds, login
+  redirects, logout). The CI coverage gate is raised from 80% to 90%.
 
 ### Added
+
+- **Release assets are signed** (`cosign sign-blob`, keyless via OIDC): the
+  downloadable per-arch tarballs and the SBOM now ship with a detached
+  signature (`.sig`) and the signing certificate (`.pem`), so a binary pulled
+  from the Releases page is verifiable with `cosign verify-blob` — previously
+  only the container image was signed. The release notes carry the exact
+  verification command.
 
 - **Fuzz testing** (`fuzz/` + a weekly smoke-fuzz workflow): cargo-fuzz
   targets for the three untrusted-byte parsers — the upstream SSE scanner
@@ -45,6 +74,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   week instead of at the next push.
 
 ### Changed
+
+- Upgraded the CodeQL Action from v3 to v4 (both `codeql.yml` and the
+  Scorecard SARIF upload), clearing the Node 20 deprecation and the
+  December-2026 v3 sunset warnings.
+
+- **CodeQL scope**: a config file (`.github/codeql/codeql-config.yml`) now
+  excludes the `tests/**` and `fuzz/**` trees, so the hard-coded-secret
+  queries fire on the operator-facing source but not on intentional test
+  fixtures (throwaway passwords, RFC-vector salts). The handful of fixture
+  alerts inside `#[cfg(test)]` modules in scanned source are dismissed as
+  "used in tests".
 
 - The release workflow now runs under a global concurrency group (one release
   at a time, queued rather than cancelled), and the `prepare` script takes
