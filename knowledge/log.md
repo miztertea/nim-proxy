@@ -30,6 +30,22 @@ Maintenance release closing two loose ends from the rigor pass.
   globally: it must keep firing on a real hard-coded key in shipped code.
 - Fixed two off-by-a-minute cron comments (audit.yml 06:42→06:43,
   scorecard.yml 07:27→07:28) — comments now match the actual cron minute.
+- **Coverage expansion 91.4%→94.8% lines** (gate raised 80→90). Applied the
+  YAGNI gates to eliminate a planned clock/injection seam: the throttle
+  window-rollover branch is reachable by setting `Throttle.window_start`
+  directly from an in-module test, and the password-change HashRotated/UserGone
+  logic was *already* unit-tested — so no production code changed. Wave 1: pure
+  in-module unit tests (auth primitives → `auth.rs` 100%; `config::validate`
+  branches; `parse_role`; SSE 1 MiB guard; history load + compaction). Wave 2:
+  e2e legs via the existing harness (setup double-claim/orphan-adoption/throttle,
+  key-probe non-success + unreachable, client/nim-key/user validation +
+  ownership, auth Basic/logout/login redirects). Deliberately left uncovered
+  (documented residual): every handler's `role_of==None` stale-session arm and
+  the account first-read/commit-error arms (only reachable by a TOCTOU race
+  that `verify_session` already precludes — would need an invasive test hook);
+  `lib.rs` boot/`health_probe`/`process::exit`/startup logging; OS-error paths
+  (unreadable/unwritable files); and the proxy request-flow branches (Wave 3,
+  out of scope for this release).
 - **PR template** rewritten into a standard, agent-legible form (typed
   sections + a checklist whose conditional groups name their trigger, so an
   agent pulling the template sees which gates apply). Requirements sourced from

@@ -24,6 +24,17 @@ Supply-chain and static-analysis release — no proxy behavior changes.
   and signed-release-asset notes, and corrected a stale `cargo audit` reference
   (it is `cargo-deny`) and an old version placeholder.
 
+### Testing
+
+- **Coverage expansion** (91.4% → 94.8% lines): new unit tests for the auth
+  primitives (base64/unhex/session-shape/cookie-Secure/throttle-rollover —
+  `auth.rs` is now 100%), `config::validate` rejection branches, `parse_role`
+  (superuser is never assignable), the SSE 1 MiB guard, and history load +
+  daily-compaction; plus e2e tests for setup double-claim, orphan client-key
+  adoption, throttled/failed key probes, client/nim-key/user validation and
+  ownership legs, and the auth handler surface (HTTP Basic scrape creds, login
+  redirects, logout). The CI coverage gate is raised from 80% to 90%.
+
 ### Added
 
 - **Release assets are signed** (`cosign sign-blob`, keyless via OIDC): the

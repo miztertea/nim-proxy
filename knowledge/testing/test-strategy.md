@@ -10,7 +10,7 @@ timestamp: 2026-07-02T00:00:00Z
 
 Four layers (unit, end-to-end, load, fuzz). CI (`.github/workflows/ci.yml`)
 runs the unit + e2e suites plus a full gate set on every PR: `fmt` + `clippy
--D warnings` + tests (the `check` job), `coverage` (≥80%, `cargo-llvm-cov`),
+-D warnings` + tests (the `check` job), `coverage` (≥90%, `cargo-llvm-cov`),
 an `msrv` build against Rust 1.87, `cargo-deny` (advisories + bans + licenses),
 `gitleaks` secret scan, `workflow lint` (`actionlint` + `zizmor`),
 `dependency review`, and a `docker build` with a container healthcheck smoke.

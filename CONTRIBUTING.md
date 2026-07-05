@@ -53,7 +53,7 @@ cargo clippy --all-targets -- -D warnings    # zero warnings — warnings are er
 ```
 
 CI enforces more on every PR, most of it reproducible locally: line coverage
-≥80% (`cargo llvm-cov`), a build against the declared MSRV
+≥90% (`cargo llvm-cov`), a build against the declared MSRV
 (`cargo +1.87 check --locked --all-targets`), `cargo deny check` (advisories,
 bans, licenses), a `gitleaks` secret scan, workflow linting (`actionlint` +
 `zizmor`, only relevant if you touch `.github/workflows/**`), dependency
