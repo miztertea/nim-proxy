@@ -646,6 +646,27 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_store_is_a_hard_error() {
+        let dir = TestDir::new();
+        // Invalid UTF-8 is a read error (not the corrupt-but-valid-UTF-8 JSON
+        // path) — it must still fail closed, never fall through to setup mode.
+        fs::write(store_path(&dir.0), [0xff, 0xfe, 0xfd]).unwrap();
+        let err = load(&dir.0).unwrap_err();
+        assert!(err.contains("cannot read"), "{err}");
+    }
+
+    #[test]
+    fn serde_defaults_fill_omitted_fields() {
+        // A NIM key missing enabled/rpm inherits the documented defaults
+        // (backward compat for stores written before those fields existed).
+        let k: NimKey = serde_json::from_str(r#"{"key":"k","owner":"o"}"#).unwrap();
+        assert!(k.enabled);
+        assert_eq!(k.rpm, 40);
+        let g: GovernorCfg = serde_json::from_str("{}").unwrap();
+        assert!(g.enabled);
+    }
+
+    #[test]
     fn future_version_refuses_to_load() {
         let dir = TestDir::new();
         fs::write(store_path(&dir.0), r#"{"version": 2}"#).unwrap();

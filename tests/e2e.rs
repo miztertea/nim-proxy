@@ -2792,3 +2792,57 @@ async fn logout_clears_the_session_cookie() {
     assert!(set.contains("nimproxy_session="), "{set}");
     assert!(set.contains("Max-Age=0"), "{set}");
 }
+
+/// The wizard's strong-password gate passes, but a candidate that fails
+/// `validate()` at commit surfaces as `invalid_config` (not a panic/500).
+#[tokio::test]
+async fn setup_rejects_an_invalid_config_on_commit() {
+    let proxy = start_proxy_fresh().await;
+    let resp = client()
+        .post(proxy.url("/setup"))
+        .json(&serde_json::json!({
+            "username": "bad user!", // fails the username charset check in validate()
+            "password": "hunter2hunter2",
+            "base_url": "http://127.0.0.1:9999",
+            "nim_keys": [{"key": "k", "rpm": 40}],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(v["error"]["code"], "invalid_config", "{v}");
+}
+
+/// An empty DATA_DIR is a fatal misconfiguration — the store home must be a
+/// real writable directory.
+#[tokio::test]
+async fn boot_refuses_an_empty_data_dir() {
+    support::expect_refuses_to_start(std::path::PathBuf::from("")).await;
+}
+
+/// `nim-proxy --health` probes /health on $PORT and exits 0 (healthy) or 1
+/// (unreachable) — the scratch image's shell-less HEALTHCHECK.
+#[tokio::test]
+async fn health_probe_flag_reports_liveness() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let run_health = |port: String| {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"));
+        cmd.arg("--health").env("PORT", port);
+        // Forward the coverage profile path so the probe subprocess is counted
+        // under `cargo llvm-cov` (a no-op in a normal test run).
+        if let Ok(v) = std::env::var("LLVM_PROFILE_FILE") {
+            cmd.env("LLVM_PROFILE_FILE", v);
+        }
+        cmd.status().unwrap()
+    };
+    assert!(
+        run_health(proxy.port.to_string()).success(),
+        "--health exits 0 against a healthy proxy"
+    );
+    assert!(
+        !run_health("1".into()).success(),
+        "--health exits non-zero against a dead port"
+    );
+}

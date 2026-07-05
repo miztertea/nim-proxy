@@ -30,7 +30,7 @@ Maintenance release closing two loose ends from the rigor pass.
   globally: it must keep firing on a real hard-coded key in shipped code.
 - Fixed two off-by-a-minute cron comments (audit.yml 06:42→06:43,
   scorecard.yml 07:27→07:28) — comments now match the actual cron minute.
-- **Coverage expansion 91.4%→94.8% lines** (gate raised 80→90). Applied the
+- **Coverage expansion 91.4%→96.1% lines** (gate raised 80→90). Applied the
   YAGNI gates to eliminate a planned clock/injection seam: the throttle
   window-rollover branch is reachable by setting `Throttle.window_start`
   directly from an in-module test, and the password-change HashRotated/UserGone
@@ -39,13 +39,24 @@ Maintenance release closing two loose ends from the rigor pass.
   branches; `parse_role`; SSE 1 MiB guard; history load + compaction). Wave 2:
   e2e legs via the existing harness (setup double-claim/orphan-adoption/throttle,
   key-probe non-success + unreachable, client/nim-key/user validation +
-  ownership, auth Basic/logout/login redirects). Deliberately left uncovered
-  (documented residual): every handler's `role_of==None` stale-session arm and
-  the account first-read/commit-error arms (only reachable by a TOCTOU race
-  that `verify_session` already precludes — would need an invasive test hook);
-  `lib.rs` boot/`health_probe`/`process::exit`/startup logging; OS-error paths
-  (unreadable/unwritable files); and the proxy request-flow branches (Wave 3,
-  out of scope for this release).
+  ownership, auth Basic/logout/login redirects). A second blind auditor then
+  showed several "excluded" filesystem/boot paths were in fact cheaply and
+  deterministically reachable with tricks already used in the harness, so those
+  WERE added (round 2): `config` serde-defaults + unreadable-store (invalid
+  UTF-8), `history` dir-create/file-open/write failures (dir-as-file trick),
+  `lib` empty-`DATA_DIR` and the `--health` probe (subprocess exit codes), and
+  the `setup` commit `invalid_config` leg. Genuinely left uncovered (documented
+  residual): every handler's `role_of==None` stale-session arm and account's
+  own None/commit arms — a REAL TOCTOU race (the auth middleware validates the
+  session under one store-lock and releases it; each handler re-locks
+  separately, and a concurrent user-deletion must land in that window), not
+  deterministically triggerable through the black-box harness without a
+  test-only sync hook (the pure logic — `apply_password_change`'s
+  UserGone/HashRotated — is already unit-tested); `lib.rs` banner/`tracing`
+  logging, `warn_legacy_env`, and the unused `GovernorSettings::default`;
+  `tracing!` argument lines the test subscriber never evaluates; and the proxy
+  request-flow branches (streaming/models/relay/buffered — Wave 3, out of
+  scope this release).
 - **PR template** rewritten into a standard, agent-legible form (typed
   sections + a checklist whose conditional groups name their trigger, so an
   agent pulling the template sees which gates apply). Requirements sourced from

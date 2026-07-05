@@ -225,4 +225,50 @@ mod tests {
             "expired snapshot compacted out of the file"
         );
     }
+
+    #[test]
+    fn load_disables_persistence_when_the_dir_cant_be_created() {
+        let dir = TestDir::new();
+        // A file sits where the history directory should be, so create_dir_all
+        // fails and persistence falls back to in-memory only.
+        let blocker = dir.0.join("blocker");
+        fs::write(&blocker, b"x").unwrap();
+        let h = History::load(Some(blocker.join("sub")), 1);
+        assert!(
+            h.file.is_none(),
+            "persistence disabled on dir-create failure"
+        );
+    }
+
+    #[test]
+    fn load_disables_persistence_when_the_path_isnt_a_writable_file() {
+        let dir = TestDir::new();
+        // A directory sits where history.jsonl should be, so opening it for
+        // append fails (EISDIR) and persistence stays in-memory.
+        fs::create_dir_all(dir.0.join("history.jsonl")).unwrap();
+        let h = History::load(Some(dir.0.clone()), 1);
+        assert!(
+            h.file.is_none(),
+            "persistence disabled when the path isn't a file"
+        );
+    }
+
+    #[test]
+    fn append_survives_a_write_failure_without_panicking() {
+        let dir = TestDir::new();
+        // `file` points at a directory: the append write errors and is logged,
+        // but the in-memory record still updates and nothing panics.
+        let h = History {
+            points: Mutex::new(Vec::new()),
+            file: Some(dir.0.clone()),
+            days: AtomicU64::new(0),
+            dropped_since_compact: Mutex::new(0),
+        };
+        h.append(1, "snap".into());
+        assert_eq!(
+            h.range(0, u64::MAX, 10).len(),
+            1,
+            "in-memory append still works"
+        );
+    }
 }

@@ -26,7 +26,7 @@ Supply-chain and static-analysis release — no proxy behavior changes.
 
 ### Testing
 
-- **Coverage expansion** (91.4% → 94.8% lines): new unit tests for the auth
+- **Coverage expansion** (91.4% → 96.1% lines): new unit tests for the auth
   primitives (base64/unhex/session-shape/cookie-Secure/throttle-rollover —
   `auth.rs` is now 100%), `config::validate` rejection branches, `parse_role`
   (superuser is never assignable), the SSE 1 MiB guard, and history load +
