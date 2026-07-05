@@ -2671,8 +2671,9 @@ async fn users_reject_invalid_role_unknown_target_and_bad_action() {
     }
 }
 
-/// Scraper header auth: HTTP Basic works (and repeats hit the credential memo),
-/// while an unknown scheme, a wrong password, and a foreign cookie all 401.
+/// Scraper header auth: HTTP Basic works (a second identical call also drives
+/// the credential-memo fast path), while an unknown scheme, a wrong password,
+/// and a foreign cookie all 401.
 #[tokio::test]
 async fn scraper_header_auth_variants() {
     let mock = start_mock().await;

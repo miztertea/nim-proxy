@@ -1154,6 +1154,11 @@ mod tests {
         scan.feed(&vec![b'x'; 1_048_577]);
         assert!(scan.buf.is_empty(), "oversized line buffer must be dropped");
         assert_eq!(scan.events, 0);
+        // The guard drops the runaway buffer without wedging the scanner: a
+        // normal event still parses immediately afterward.
+        scan.feed(b"data: {\"choices\":[],\"usage\":{\"completion_tokens\":3}}\n\n");
+        assert_eq!(scan.events, 1);
+        assert_eq!(scan.completion, Some(3));
     }
 
     #[test]
