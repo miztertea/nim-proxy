@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bumped `crossbeam-epoch` to 0.9.20 in `Cargo.lock` to resolve
+  [RUSTSEC-2026-0204](https://rustsec.org/advisories/RUSTSEC-2026-0204)
+  (invalid pointer dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`).
+  It reaches us transitively via `metrics-util` →
+  `metrics-exporter-prometheus`. Lockfile-only change; no dependency versions
+  in `Cargo.toml` changed. Clears the `cargo-deny` advisories failure that was
+  red on `main` and every open Dependabot PR.
+
 ## [0.6.3] - 2026-07-05
 
 Supply-chain and static-analysis release — no proxy behavior changes.

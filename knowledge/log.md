@@ -6,6 +6,18 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-16] lint — crossbeam-epoch advisory fix (RUSTSEC-2026-0204)
+
+`cargo-deny`'s advisories check went red on `main` — and therefore on every
+open Dependabot PR (#47 bytes, #48 actions group, #49 cosign-installer) — after
+RUSTSEC-2026-0204 was published against `crossbeam-epoch` < 0.9.20 (invalid
+pointer dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`). It is a
+transitive dep via `metrics-util` → `metrics-exporter-prometheus`, not a direct
+one. Bumped the `Cargo.lock` entry to 0.9.20 (the advisory's recommended fix) —
+a single-package lockfile change, no `Cargo.toml` edits. Staged on the
+`claude/dependabot-pull-requests-2z8240` integration branch pending a decision
+on batching further fixes vs. cutting a release.
+
 ## [2026-07-05] v0.6.3 — release-asset signing + CodeQL fixture-noise triage
 
 Maintenance release closing two loose ends from the rigor pass.
