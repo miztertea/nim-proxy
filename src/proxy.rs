@@ -34,6 +34,37 @@ struct Ctx {
 /// Cap on distinct `model` label values tracked, past which new models are
 /// bucketed to "other" so an attacker can't explode metric cardinality.
 const MODEL_LABEL_CAP: usize = 256;
+const DEADLINE_HEADER: &str = "x-nim-proxy-deadline-ms";
+
+#[derive(Clone, Copy)]
+struct RequestDeadline(Instant);
+
+fn parse_request_deadline(
+    headers: &HeaderMap,
+    accepted: Instant,
+) -> Result<Option<RequestDeadline>, ()> {
+    let mut values = headers.get_all(DEADLINE_HEADER).iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(());
+    }
+    let raw = value.to_str().map_err(|_| ())?;
+    if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(());
+    }
+    let millis = raw.parse::<u64>().map_err(|_| ())?;
+    accepted
+        .checked_add(Duration::from_millis(millis))
+        .map(RequestDeadline)
+        .map(Some)
+        .ok_or(())
+}
+
+fn wait_deadline(cfg: &Config) -> Instant {
+    Instant::now() + cfg.max_wait
+}
 
 /// Reduce an arbitrary client-supplied string to a safe metric-label / log
 /// value: keep a conservative charset (which model ids use), drop everything
@@ -199,6 +230,17 @@ fn record_request(ctx: &Ctx, status: &str) {
         ctx.path,
         ctx.started.elapsed().as_millis()
     );
+}
+
+fn record_deadline(ctx: &Ctx) {
+    counter!(
+        "nimproxy_deadline_exceeded_total",
+        "client" => ctx.client.clone(),
+        "model" => ctx.model.clone(),
+        "path" => ctx.path.clone(),
+    )
+    .increment(1);
+    record_request(ctx, "deadline");
 }
 
 fn record_tokens(ctx: &Ctx, prompt: Option<u64>, completion: Option<u64>, source: &str) {
@@ -441,6 +483,7 @@ pub async fn handle(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let accepted = Instant::now();
     // Fail closed until first-time setup completes: nothing proxies, and the
     // error tells the operator exactly why.
     if state
@@ -504,6 +547,11 @@ pub async fn handle(
         }
     };
 
+    let request_deadline = match parse_request_deadline(&headers, accepted) {
+        Ok(deadline) => deadline,
+        Err(()) => return invalid_deadline(),
+    };
+
     let path_query = uri
         .path_and_query()
         .map(|pq| pq.as_str().to_owned())
@@ -524,6 +572,18 @@ pub async fn handle(
     // Answer the model-catalog probe from cache: harnesses poll it and it
     // shouldn't burn rate-limit budget on every poll.
     if method == Method::GET && uri.path() == "/v1/models" {
+        if let Some(deadline) = request_deadline {
+            return match tokio::time::timeout_at(deadline.0.into(), models(state, cfg)).await {
+                Ok(resp) => {
+                    record_request(&ctx, resp.status().as_str());
+                    resp
+                }
+                Err(_) => {
+                    record_deadline(&ctx);
+                    deadline_exceeded()
+                }
+            };
+        }
         let resp = models(state, cfg).await;
         record_request(&ctx, resp.status().as_str());
         return resp;
@@ -566,6 +626,7 @@ pub async fn handle(
     }
 
     if wants_stream {
+        let wait_deadline = wait_deadline(&cfg);
         streaming(
             state,
             cfg,
@@ -577,9 +638,34 @@ pub async fn handle(
             prefer,
             fallback,
             inflight_guard,
+            request_deadline,
+            wait_deadline,
         )
     } else {
-        buffered(state, cfg, ctx, method, path_query, headers, body, prefer).await
+        let wait_deadline = wait_deadline(&cfg);
+        let deadline_ctx = ctx.clone();
+        let work = buffered(
+            state,
+            cfg,
+            ctx,
+            method,
+            path_query,
+            headers,
+            body,
+            prefer,
+            wait_deadline,
+        );
+        if let Some(deadline) = request_deadline {
+            match tokio::time::timeout_at(deadline.0.into(), work).await {
+                Ok(response) => response,
+                Err(_) => {
+                    record_deadline(&deadline_ctx);
+                    deadline_exceeded()
+                }
+            }
+        } else {
+            work.await
+        }
     }
 }
 
@@ -612,10 +698,10 @@ async fn buffered(
     headers: HeaderMap,
     body: Bytes,
     prefer: Option<usize>,
+    deadline: Instant,
 ) -> Response {
     let _active = crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
     gauge!("nimproxy_active_requests").increment(1.0);
-    let deadline = Instant::now() + cfg.max_wait;
     loop {
         // Two admission gates: a model-pressure permit (worker concurrency,
         // held through the whole upstream exchange — dropped on every exit
@@ -691,6 +777,8 @@ fn streaming(
     prefer: Option<usize>,
     mut fallback: Option<Bytes>,
     inflight_guard: impl Send + 'static,
+    request_deadline: Option<RequestDeadline>,
+    deadline: Instant,
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
@@ -701,208 +789,226 @@ fn streaming(
         let _active =
             crate::dispatch::scopeguard(|| gauge!("nimproxy_active_requests").decrement(1.0));
         gauge!("nimproxy_active_requests").increment(1.0);
-        let send = |b: &'static str| {
-            let tx = tx.clone();
-            // Static control frames — no per-send alloc/copy.
-            async move { tx.send(Ok(Bytes::from_static(b.as_bytes()))).await.is_ok() }
-        };
-        if !send(": connected\n\n").await {
-            record_request(&ctx, "disconnect");
-            return;
-        }
-        let deadline = Instant::now() + cfg.max_wait;
-        loop {
-            // Model-pressure permit first (worker concurrency), then an RPM
-            // slot — both heartbeating so the harness doesn't hang up. The
-            // permit spans the whole upstream exchange and drops on every
-            // exit from this iteration.
-            let Ok(_permit) = acquire_model_permit(&state, &cfg, &ctx, deadline, || {
-                tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
-                    .is_ok()
-            })
-            .await
-            else {
-                record_request(&ctx, "504");
-                let _ = tx
-                    .send(Ok(sse_error(
-                        "proxy timed out waiting for an upstream slot",
-                    )))
-                    .await;
+        let deadline_tx = tx.clone();
+        let deadline_ctx = ctx.clone();
+        let work = async move {
+            let send = |b: &'static str| {
+                let tx = tx.clone();
+                // Static control frames — no per-send alloc/copy.
+                async move { tx.send(Ok(Bytes::from_static(b.as_bytes()))).await.is_ok() }
+            };
+            if !send(": connected\n\n").await {
+                record_request(&ctx, "disconnect");
                 return;
-            };
-            let slot = reserve_slot(&state, cfg.heartbeat, deadline, prefer, || {
-                tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
-                    .is_ok()
-            })
-            .await;
-            let Some(slot) = slot else {
-                record_request(&ctx, "504");
-                let _ = tx
-                    .send(Ok(sse_error(
-                        "proxy timed out waiting for an upstream slot",
-                    )))
-                    .await;
-                return;
-            };
-
-            let sent_at = Instant::now();
-            let resp = match upstream_request(
-                &state.http,
-                &cfg.base_url,
-                &method,
-                &path_query,
-                &headers,
-                &slot.key,
-                &body,
-            )
-            .send()
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(lane = slot.lane, error = %e, "upstream connection error, retrying");
-                    bench(&slot, "connect", Duration::from_secs(5));
-                    continue;
-                }
-            };
-
-            // A 400 right after we injected stream_options usually means this
-            // model rejects the field: remember that and retry untouched.
-            if resp.status() == reqwest::StatusCode::BAD_REQUEST && fallback.is_some() {
-                tracing::info!(model = %ctx.model, "model rejected stream_options; retrying without injection");
-                state.no_inject.lock().unwrap().insert(ctx.model.clone());
-                body = fallback.take().unwrap();
-                continue;
             }
-
-            if retryable(resp.status()) {
-                if Instant::now() >= deadline {
+            loop {
+                // Model-pressure permit first (worker concurrency), then an RPM
+                // slot — both heartbeating so the harness doesn't hang up. The
+                // permit spans the whole upstream exchange and drops on every
+                // exit from this iteration.
+                let Ok(_permit) = acquire_model_permit(&state, &cfg, &ctx, deadline, || {
+                    tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
+                        .is_ok()
+                })
+                .await
+                else {
                     record_request(&ctx, "504");
                     let _ = tx
-                        .send(Ok(sse_error("upstream unavailable, retries exhausted")))
+                        .send(Ok(sse_error(
+                            "proxy timed out waiting for an upstream slot",
+                        )))
                         .await;
                     return;
-                }
-                let status = resp.status();
-                let backoff = backoff_for(&resp);
-                // Worker exhaustion is model-scoped: back off the model via
-                // the governor, never the lane (see `buffered`).
-                let detail = resp.text().await.unwrap_or_default();
-                if governor::is_worker_exhausted(&detail) {
-                    state.governor.note_exhausted(
-                        &ctx.model,
-                        cfg.governor.overrides.get(&ctx.model).copied(),
-                    );
-                } else {
-                    tracing::info!(lane = slot.lane, %status, ?backoff, "lane benched, retrying");
-                    bench(&slot, status.as_str(), backoff);
-                }
-                if !send(": retrying\n\n").await {
-                    record_request(&ctx, "disconnect");
+                };
+                let slot = reserve_slot(&state, cfg.heartbeat, deadline, prefer, || {
+                    tx.try_send(Ok(Bytes::from_static(b": heartbeat\n\n")))
+                        .is_ok()
+                })
+                .await;
+                let Some(slot) = slot else {
+                    record_request(&ctx, "504");
+                    let _ = tx
+                        .send(Ok(sse_error(
+                            "proxy timed out waiting for an upstream slot",
+                        )))
+                        .await;
                     return;
-                }
-                continue;
-            }
+                };
 
-            if !resp.status().is_success() {
-                // Non-retryable upstream error after we already committed to
-                // SSE: surface it as an in-stream error event.
-                let status = resp.status();
-                let detail = resp.text().await.unwrap_or_default();
-                tracing::warn!(%status, "upstream rejected request");
-                record_request(&ctx, status.as_str());
-                let _ = tx
-                    .send(Ok(sse_error(&format!("upstream error {status}: {detail}"))))
-                    .await;
-                return;
-            }
-
-            let mut scan = SseScan::default();
-            let mut first_chunk: Option<Instant> = None;
-            let mut chunks = resp.bytes_stream();
-            loop {
-                // Two ways out of a blocked upstream read: the stall cutoff
-                // (a stalled upstream would otherwise hold the client
-                // forever), and the client hanging up (`tx.closed()`) — which
-                // must free the in-flight slot promptly, not at the cutoff
-                // (and with stream_idle 0 there is no cutoff: a hung upstream
-                // would pin the slot until restart).
-                let upstream_read = async {
-                    if cfg.stream_idle.is_zero() {
-                        Ok(chunks.next().await)
-                    } else {
-                        tokio::time::timeout(cfg.stream_idle, chunks.next()).await
+                let sent_at = Instant::now();
+                let resp = match upstream_request(
+                    &state.http,
+                    &cfg.base_url,
+                    &method,
+                    &path_query,
+                    &headers,
+                    &slot.key,
+                    &body,
+                )
+                .send()
+                .await
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(lane = slot.lane, error = %e, "upstream connection error, retrying");
+                        bench(&slot, "connect", Duration::from_secs(5));
+                        continue;
                     }
                 };
-                let next = tokio::select! {
-                    _ = tx.closed() => {
+
+                // A 400 right after we injected stream_options usually means this
+                // model rejects the field: remember that and retry untouched.
+                if resp.status() == reqwest::StatusCode::BAD_REQUEST && fallback.is_some() {
+                    tracing::info!(model = %ctx.model, "model rejected stream_options; retrying without injection");
+                    state.no_inject.lock().unwrap().insert(ctx.model.clone());
+                    body = fallback.take().unwrap();
+                    continue;
+                }
+
+                if retryable(resp.status()) {
+                    if Instant::now() >= deadline {
+                        record_request(&ctx, "504");
+                        let _ = tx
+                            .send(Ok(sse_error("upstream unavailable, retries exhausted")))
+                            .await;
+                        return;
+                    }
+                    let status = resp.status();
+                    let backoff = backoff_for(&resp);
+                    // Worker exhaustion is model-scoped: back off the model via
+                    // the governor, never the lane (see `buffered`).
+                    let detail = resp.text().await.unwrap_or_default();
+                    if governor::is_worker_exhausted(&detail) {
+                        state.governor.note_exhausted(
+                            &ctx.model,
+                            cfg.governor.overrides.get(&ctx.model).copied(),
+                        );
+                    } else {
+                        tracing::info!(lane = slot.lane, %status, ?backoff, "lane benched, retrying");
+                        bench(&slot, status.as_str(), backoff);
+                    }
+                    if !send(": retrying\n\n").await {
                         record_request(&ctx, "disconnect");
                         return;
                     }
-                    read = upstream_read => match read {
-                        Ok(n) => n,
-                        Err(_) => {
-                            tracing::warn!(model = %ctx.model, idle = ?cfg.stream_idle, "upstream stream stalled");
-                            record_request(&ctx, "stall");
-                            let _ = tx.send(Ok(sse_error("upstream stream stalled"))).await;
+                    continue;
+                }
+
+                if !resp.status().is_success() {
+                    // Non-retryable upstream error after we already committed to
+                    // SSE: surface it as an in-stream error event.
+                    let status = resp.status();
+                    let detail = resp.text().await.unwrap_or_default();
+                    tracing::warn!(%status, "upstream rejected request");
+                    record_request(&ctx, status.as_str());
+                    let _ = tx
+                        .send(Ok(sse_error(&format!("upstream error {status}: {detail}"))))
+                        .await;
+                    return;
+                }
+
+                let mut scan = SseScan::default();
+                let mut first_chunk: Option<Instant> = None;
+                let mut chunks = resp.bytes_stream();
+                loop {
+                    // Two ways out of a blocked upstream read: the stall cutoff
+                    // (a stalled upstream would otherwise hold the client
+                    // forever), and the client hanging up (`tx.closed()`) — which
+                    // must free the in-flight slot promptly, not at the cutoff
+                    // (and with stream_idle 0 there is no cutoff: a hung upstream
+                    // would pin the slot until restart).
+                    let upstream_read = async {
+                        if cfg.stream_idle.is_zero() {
+                            Ok(chunks.next().await)
+                        } else {
+                            tokio::time::timeout(cfg.stream_idle, chunks.next()).await
+                        }
+                    };
+                    let next = tokio::select! {
+                        _ = tx.closed() => {
+                            record_request(&ctx, "disconnect");
+                            return;
+                        }
+                        read = upstream_read => match read {
+                            Ok(n) => n,
+                            Err(_) => {
+                                tracing::warn!(model = %ctx.model, idle = ?cfg.stream_idle, "upstream stream stalled");
+                                record_request(&ctx, "stall");
+                                let _ = tx.send(Ok(sse_error("upstream stream stalled"))).await;
+                                return;
+                            }
+                        }
+                    };
+                    let Some(chunk) = next else { break };
+                    match chunk {
+                        Ok(b) => {
+                            if first_chunk.is_none() {
+                                first_chunk = Some(Instant::now());
+                                histogram!("nimproxy_ttft_seconds", "model" => ctx.model.clone())
+                                    .record(sent_at.elapsed().as_secs_f64());
+                            }
+                            scan.feed(&b);
+                            if tx.send(Ok(b)).await.is_err() {
+                                record_request(&ctx, "disconnect");
+                                return; // client hung up
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "upstream stream broke mid-response");
+                            record_request(&ctx, "stream_error");
+                            let _ = tx.send(Ok(sse_error("upstream stream interrupted"))).await;
                             return;
                         }
                     }
-                };
-                let Some(chunk) = next else { break };
-                match chunk {
-                    Ok(b) => {
-                        if first_chunk.is_none() {
-                            first_chunk = Some(Instant::now());
-                            histogram!("nimproxy_ttft_seconds", "model" => ctx.model.clone())
-                                .record(sent_at.elapsed().as_secs_f64());
-                        }
-                        scan.feed(&b);
-                        if tx.send(Ok(b)).await.is_err() {
-                            record_request(&ctx, "disconnect");
-                            return; // client hung up
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "upstream stream broke mid-response");
-                        record_request(&ctx, "stream_error");
-                        let _ = tx.send(Ok(sse_error("upstream stream interrupted"))).await;
-                        return;
-                    }
                 }
-            }
 
-            // Token accounting: exact when the upstream reported usage,
-            // otherwise estimate ~1 token per SSE event.
-            let source = if scan.completion.is_some() {
-                "usage"
-            } else {
-                "estimate"
-            };
-            let completion = scan.completion.or(Some(scan.events));
-            record_tokens(&ctx, scan.prompt, completion, source);
-            record_quality(
-                &ctx,
-                scan.finish_reason.as_deref(),
-                scan.reasoning,
-                scan.tool_call_max.map(|m| m + 1),
-            );
-            if let (Some(first), Some(c)) = (first_chunk, completion) {
-                let gen_secs = first.elapsed().as_secs_f64();
-                if gen_secs > 0.1 && c > 0 {
-                    histogram!("nimproxy_tokens_per_second", "model" => ctx.model.clone(), "source" => source.to_owned())
+                // Token accounting: exact when the upstream reported usage,
+                // otherwise estimate ~1 token per SSE event.
+                let source = if scan.completion.is_some() {
+                    "usage"
+                } else {
+                    "estimate"
+                };
+                let completion = scan.completion.or(Some(scan.events));
+                record_tokens(&ctx, scan.prompt, completion, source);
+                record_quality(
+                    &ctx,
+                    scan.finish_reason.as_deref(),
+                    scan.reasoning,
+                    scan.tool_call_max.map(|m| m + 1),
+                );
+                if let (Some(first), Some(c)) = (first_chunk, completion) {
+                    let gen_secs = first.elapsed().as_secs_f64();
+                    if gen_secs > 0.1 && c > 0 {
+                        histogram!("nimproxy_tokens_per_second", "model" => ctx.model.clone(), "source" => source.to_owned())
                         .record(c as f64 / gen_secs);
-                    // Mean inter-token latency (time-per-output-token).
-                    histogram!("nimproxy_tpot_seconds", "model" => ctx.model.clone())
-                        .record(gen_secs / c as f64);
+                        // Mean inter-token latency (time-per-output-token).
+                        histogram!("nimproxy_tpot_seconds", "model" => ctx.model.clone())
+                            .record(gen_secs / c as f64);
+                    }
                 }
+                // Total upstream time for streaming, for parity with the buffered
+                // path (which records upstream_seconds directly).
+                histogram!("nimproxy_upstream_seconds", "model" => ctx.model.clone())
+                    .record(sent_at.elapsed().as_secs_f64());
+                record_request(&ctx, "200");
+                return;
             }
-            // Total upstream time for streaming, for parity with the buffered
-            // path (which records upstream_seconds directly).
-            histogram!("nimproxy_upstream_seconds", "model" => ctx.model.clone())
-                .record(sent_at.elapsed().as_secs_f64());
-            record_request(&ctx, "200");
-            return;
+        };
+        if let Some(request_deadline) = request_deadline {
+            tokio::select! {
+                _ = tokio::time::sleep_until(request_deadline.0.into()) => {
+                    record_deadline(&deadline_ctx);
+                    let _ = deadline_tx
+                        .try_send(Ok(sse_error_with_code(
+                            "deadline_exceeded",
+                            "proxy request deadline exceeded",
+                        )));
+                }
+                _ = work => {}
+            }
+        } else {
+            work.await;
         }
     });
 
@@ -1031,9 +1137,13 @@ fn proxy_error_json(code: &str, message: impl Into<String>) -> serde_json::Value
     })
 }
 
-fn sse_error(message: &str) -> Bytes {
-    let event = proxy_error_json("upstream_unavailable", message);
+fn sse_error_with_code(code: &str, message: &str) -> Bytes {
+    let event = proxy_error_json(code, message);
     Bytes::from(format!("data: {event}\n\ndata: [DONE]\n\n"))
+}
+
+fn sse_error(message: &str) -> Bytes {
+    sse_error_with_code("upstream_unavailable", message)
 }
 
 fn json_response(status: StatusCode, body: Bytes) -> Response {
@@ -1055,6 +1165,19 @@ fn unauthorized() -> Response {
         axum::Json(body),
     )
         .into_response()
+}
+
+fn invalid_deadline() -> Response {
+    let body = proxy_error_json(
+        "invalid_deadline",
+        "X-Nim-Proxy-Deadline-Ms must be one unsigned decimal millisecond value",
+    );
+    (StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
+}
+
+fn deadline_exceeded() -> Response {
+    let body = proxy_error_json("deadline_exceeded", "proxy request deadline exceeded");
+    (StatusCode::GATEWAY_TIMEOUT, axum::Json(body)).into_response()
 }
 
 fn overloaded(max_inflight: usize) -> Response {

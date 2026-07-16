@@ -59,9 +59,10 @@ shorten that caller's own request.
 - The deadline begins when `proxy::handle` accepts the request, before auth
   delay, parsing, queueing, or upstream work.
 - `0` is valid and means immediate expiry.
-- Leading or trailing whitespace, signs, decimal points, non-ASCII digits,
-  duplicate header values, values that do not fit `u64`, and durations that
-  cannot be added to the request start instant are invalid.
+- Signs, decimal points, non-ASCII digits, duplicate header values, values that
+  do not fit `u64`, and durations that cannot be added to the request start
+  instant are invalid. HTTP's ordinary optional-whitespace normalization
+  happens before application parsing.
 - Invalid values return HTTP 400 with OpenAI-style error code
   `invalid_deadline` before acquiring a model permit or RPM slot.
 - Normal authentication still runs before the invalid-header response, so the
@@ -102,11 +103,9 @@ absolute `std::time::Instant`. Parse the header once in `handle`, using
 instant with `checked_add` from the request start captured at the beginning of
 the handler.
 
-The value provides:
-
-- its absolute instant for Tokio timeout conversion;
-- an effective wait deadline equal to the earlier of the request deadline and
-  `Instant::now() + cfg.max_wait`.
+The value provides its absolute instant for Tokio timeout conversion. Existing
+admission code retains its `max_wait` deadline; the outer absolute timer owns
+explicit-deadline classification and cancels that admission future if it wins.
 
 No new dependency is required.
 
@@ -124,8 +123,8 @@ If the timeout wins:
 3. the proxy records `deadline` and increments the dedicated counter;
 4. the caller receives the 504 error contract above.
 
-The buffered loop also receives the effective wait deadline so queue/retry
-logic cannot outlive a shorter explicit deadline.
+The buffered loop retains its existing `max_wait` deadline. It cannot outlive a
+shorter explicit deadline because the outer timer drops the whole loop.
 
 ### Streaming path
 
@@ -150,11 +149,13 @@ queue heartbeats and body relay.
 - The explicit deadline is absolute and never resets on heartbeats, response
   bytes, retries, or worker-governor activity.
 - `max_wait` continues to classify ordinary admission/retry exhaustion as
-  status `504`; if the explicit deadline is earlier, expiry is classified as
-  `deadline`.
+  status `504`. A shorter explicit deadline is enforced by the outer timer and
+  classified as `deadline`, without triggering the dispatcher's predictive
+  fast-fail path.
 - `request_timeout` and `stream_idle` may fire first and retain their existing
   `502`/`stall` classifications.
-- A retry cannot start after the effective wait deadline.
+- A retry cannot start after the absolute deadline because the enclosing
+  workflow has been dropped.
 - The header cannot extend any existing limit.
 
 ## Security and Input Handling
@@ -224,4 +225,3 @@ the same secondary scan used in diagnosis:
 Secondary findings remain separately tracked unless evidence connects them to
 the deadline defect. In particular, the July 5 three-lane 429 retry storm is
 not part of this change.
-

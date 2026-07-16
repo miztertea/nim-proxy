@@ -120,6 +120,14 @@ curl http://localhost:8000/v1/chat/completions \
        "messages":[{"role":"user","content":"hello"}]}'
 ```
 
+For benchmarks or bounded jobs, add
+`X-Nim-Proxy-Deadline-Ms: <milliseconds>`. This is an absolute wall-clock
+deadline across proxy queueing, retries, and generation; heartbeats and output
+chunks do not reset it. Buffered requests expire with HTTP 504 and error code
+`deadline_exceeded`. Streaming requests have already committed HTTP 200, so
+they receive the same code in a terminal SSE error event. Requests without the
+header retain the proxy's normal patient behavior.
+
 ## The dashboard
 
 Served at `GET /` — a single embedded HTML file, no Grafana, no config. Because the proxy sits in the request path for every harness and model, it doubles as a **benchmarking and agent-observability tool**: it sees how tool-heavy each harness is, how deep its conversations run, how it tunes sampling, where models truncate, and how much "thinking" a reasoning model burns — all from counts and sizes, never message content.
@@ -150,6 +158,7 @@ Every line chart has a hover crosshair with a per-series tooltip; every table is
 - **One queue for all clients.** Any number of harnesses share the lane pool through a global FIFO dispatcher: slots are granted strictly in arrival order, no client can starve another, and a client that disconnects while queued returns its slot.
 - **Sticky conversations, spread bursts.** Each conversation prefers the same lane every turn, keeping any server-side [prefix cache](https://docs.nvidia.com/nim/large-language-models/latest/kv-cache-reuse.html) warm on one key. When that lane is full the request spills to the least-loaded ready lane — the API is stateless, so crossing keys is always safe, just potentially a cold cache.
 - **Heartbeats instead of failures.** For streaming requests the proxy commits to `200 text/event-stream` immediately and emits SSE comment lines (`: heartbeat` — ignored by every OpenAI client) while it waits for a slot or rides out upstream 429/500/502/503/504 with `Retry-After` honored and instant failover between keys. Streams that stall mid-generation are cut after the `stream_idle` limit.
+- **Optional absolute deadlines.** `X-Nim-Proxy-Deadline-Ms` bounds the whole request independently of heartbeats or socket activity. Expiry cancels queue/retry/upstream work and releases its lane, model, and in-flight ownership.
 - **Model-pressure aware.** NIM caps per-model worker concurrency independently of the 40 RPM key limit; the proxy detects that specific exhaustion, backs off the affected *model* adaptively (never wasting healthy key capacity on failover), and surfaces it on the dashboard — see [architecture: governor](knowledge/architecture/governor.md).
 - **Pass-through with one exception.** Bodies are forwarded untouched, except: streaming chat requests get `stream_options: {"include_usage": true}` injected so token accounting is exact rather than estimated. If a model rejects the field, the proxy retries untouched and never injects for that model again. `strict_passthrough` in Settings disables injection entirely.
 - **Local answers where possible.** `GET /v1/models` is cached (10 min default, single-flight refresh), so harness catalog polls don't burn rate budget.
@@ -230,7 +239,8 @@ The build and release path is hardened to the OpenSSF baseline (scored weekly by
 
 | Metric | Labels | Meaning |
 |---|---|---|
-| `nimproxy_requests_total` | client, model, path, status | Every request (`status` includes `disconnect`, `stall`, `stream_error`) |
+| `nimproxy_requests_total` | client, model, path, status | Every request (`status` includes `disconnect`, `stall`, `stream_error`, `deadline`) |
+| `nimproxy_deadline_exceeded_total` | client, model, path | Requests stopped by `X-Nim-Proxy-Deadline-Ms` |
 | `nimproxy_prompt_tokens_total` | client, model | Prompt tokens, from upstream `usage` |
 | `nimproxy_completion_tokens_total` | client, model, source | Completion tokens; `usage` = exact, `estimate` = per-SSE-event fallback |
 | `nimproxy_ttft_seconds` | model | Upstream send → first streamed byte |

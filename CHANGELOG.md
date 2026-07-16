@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added the opt-in `X-Nim-Proxy-Deadline-Ms` request header: an absolute
+  wall-clock deadline enforced across queueing, worker admission, retries, and
+  generation. Buffered expiry returns `504 deadline_exceeded`; streaming
+  expiry emits the same error inside the committed SSE response. Expiry drops
+  upstream work and all request-owned permits, and is exposed as request status
+  `deadline` plus `nimproxy_deadline_exceeded_total`.
+
 ### Security
 
 - Bumped `crossbeam-epoch` to 0.9.20 in `Cargo.lock` to resolve
