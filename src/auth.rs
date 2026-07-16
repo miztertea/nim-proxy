@@ -295,10 +295,9 @@ pub async fn identify(state: &Arc<AppState>, headers: &HeaderMap) -> Option<Stri
     let auth = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let cred = if let Some(bearer) = auth.strip_prefix("Bearer ") {
         bearer.trim().to_owned()
-    } else if let Some(basic) = auth.strip_prefix("Basic ") {
-        String::from_utf8(base64_decode(basic.trim())?).ok()?
     } else {
-        return None;
+        let basic = auth.strip_prefix("Basic ")?;
+        String::from_utf8(base64_decode(basic.trim())?).ok()?
     };
     if let Some(user) = state.admin.memo_hit(&cred) {
         return Some(user);

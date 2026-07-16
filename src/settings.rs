@@ -129,12 +129,12 @@ pub async fn setup_submit(
         // ownership rule and the pool-floor invariant.
         for k in &mut cand.upstream.nim_keys {
             if k.owner != req.username {
-                k.owner = req.username.clone();
+                k.owner.clone_from(&req.username);
             }
         }
         for c in &mut cand.client_auth.keys {
             if c.owner != req.username {
-                c.owner = req.username.clone();
+                c.owner.clone_from(&req.username);
             }
         }
         if let Some(b) = &req.base_url {
@@ -436,7 +436,7 @@ pub async fn nim_keys(
         (Some(add), None, None) => {
             cand.upstream.nim_keys.push(NimKey {
                 key: add.key.trim().to_owned(),
-                owner: username.clone(),
+                owner: username,
                 enabled: true,
                 rpm: add.rpm.unwrap_or(40),
             });
@@ -515,7 +515,7 @@ pub async fn clients(
                 name: add.name.trim().to_owned(),
                 secret_sha256: auth::sha256_hex(&secret),
                 last4: last4(&secret),
-                owner: username.clone(),
+                owner: username,
             });
             minted = Some(secret);
         }
