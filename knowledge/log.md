@@ -25,6 +25,18 @@ superuser claim. Deliberately excluded as churn/net-negative: the 13
 false-positives). Verified: fmt clean, `clippy --all-targets -D warnings`
 clean, lib 84 + e2e 72 tests green.
 
+Follow-up (same PR): CI's `fmt, clippy, tests` job went red — not on the
+cleanup, but on pre-existing code. Rust stable rolled 1.94 → 1.97 on
+2026-07-14, and 1.97's improved `clippy::question_mark` now flags the
+`else if let Some(basic) = … else { return None }` shape in `auth::identify`
+under `-D warnings`. The Dependabot PRs (#47–49) had passed this job because
+they ran on 2026-07-09, before the toolchain bump; this PR was the first to
+run CI afterward, so it surfaced here. Applied clippy's own `?`-operator
+rewrite (behavior identical, auth tests cover it). Reproduced locally by
+`rustup update stable` to 1.97.1 before and after the fix. Because #52's head
+is the integration branch, merging this PR into it also clears the same
+failure for #52.
+
 ## [2026-07-16] lint — crossbeam-epoch advisory fix (RUSTSEC-2026-0204)
 
 `cargo-deny`'s advisories check went red on `main` — and therefore on every

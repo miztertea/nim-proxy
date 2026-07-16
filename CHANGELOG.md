@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reused the destination buffer via `clone_from` when re-owning keys during
   superuser claim. `cargo clippy --all-targets -- -D warnings`, `cargo fmt`,
   and the full test suite (lib + e2e) stay green.
+- Rewrote the `Basic`-auth credential branch in `auth::identify` with the `?`
+  operator (behavior identical). Rust stable rolled to 1.97 on 2026-07-14 and
+  its improved `clippy::question_mark` lint flagged the old
+  `else if let … else { return None }` shape, breaking the `-D warnings` CI
+  job on code untouched by any open PR. Covered by the existing auth tests.
 
 ## [0.6.3] - 2026-07-05
 
