@@ -6,6 +6,25 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-16] lint — low-risk cleanup batch (dead async, redundant clones)
+
+Staged a tight, YAGNI-scoped cleanup batch on a sub-branch off the
+`claude/dependabot-pull-requests-2z8240` integration branch (PR into it, not
+into `main`). Scope was chosen for highest signal / least risk: (1) removed a
+redundant `async` on `proxy::streaming` — every `.await` lives inside its
+`tokio::spawn`ed task, so the function body only spawns and returns a
+`Response`; dropping `async` avoids a pointless future wrapper and the single
+caller drops its `.await`; (2) removed two redundant `String` clones on the
+nim-key / client-key add paths (the value was moved into the struct, not
+reused); (3) `clone_from` buffer reuse when re-owning orphan keys during
+superuser claim. Deliberately excluded as churn/net-negative: the 13
+`redundant_closure_for_method_calls` rewrites (`|x| x.as_u64()` →
+`serde_json::Value::as_u64`) which are longer and less readable, the
+`clone_into` inversions on cold config-write paths, and adding a new
+`[lints.clippy]` gate (not requested; nursery lints risk future CI
+false-positives). Verified: fmt clean, `clippy --all-targets -D warnings`
+clean, lib 84 + e2e 72 tests green.
+
 ## [2026-07-16] lint — crossbeam-epoch advisory fix (RUSTSEC-2026-0204)
 
 `cargo-deny`'s advisories check went red on `main` — and therefore on every

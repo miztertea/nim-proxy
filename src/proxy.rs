@@ -578,7 +578,6 @@ pub async fn handle(
             fallback,
             inflight_guard,
         )
-        .await
     } else {
         buffered(state, cfg, ctx, method, path_query, headers, body, prefer).await
     }
@@ -681,7 +680,7 @@ async fn buffered(
 /// comment lines (ignored by every OpenAI SSE client) while we wait for a
 /// slot or ride out 429/5xx, then pipe the upstream stream through.
 #[allow(clippy::too_many_arguments)]
-async fn streaming(
+fn streaming(
     state: Arc<AppState>,
     cfg: Arc<Config>,
     ctx: Ctx,
