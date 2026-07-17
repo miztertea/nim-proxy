@@ -6,6 +6,13 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-17] ingest — prepare v0.6.4 release metadata
+
+Promoted the accumulated deadline, security, cleanup, and dependency entries
+from Unreleased into v0.6.4; bumped the crate and lockfile package version; and
+repaired the stale changelog comparison links so v0.6.3 and v0.6.4 each have a
+complete release range.
+
 ## [2026-07-16] lint — low-risk cleanup batch (dead async, redundant clones)
 
 Staged a tight, YAGNI-scoped cleanup batch on a sub-branch off the

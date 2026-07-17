@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "nim-proxy"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "axum",
  "bytes",
