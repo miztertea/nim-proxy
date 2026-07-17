@@ -2,7 +2,7 @@
 //! and a launcher that runs the real proxy binary against it.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +33,15 @@ pub enum Behavior {
     BadRequestIfInjected,
     /// Send headers + one chunk, then stall forever.
     Hang,
+    /// Wait before sending response headers, simulating an upstream that has
+    /// accepted work but has not started its response.
+    DelayHeaders(u64),
+    /// Stream a data event at this interval forever. Unlike `Hang`, this stays
+    /// active often enough that an idle timeout must not be what stops it.
+    ActiveStream(u64),
+    /// Write large chunks without pause until downstream backpressure fills
+    /// the proxy's response channel.
+    FloodStream,
     /// Buffered response with an unknown `finish_reason` — exercises the
     /// server-side clamp that collapses odd values to `other`.
     OddFinish,
@@ -49,6 +58,7 @@ pub struct MockState {
     pub hits: Mutex<Vec<Hit>>,
     pub script: Mutex<VecDeque<Behavior>>,
     pub models_hits: AtomicUsize,
+    pub models_delay_ms: AtomicU64,
 }
 
 impl MockState {
@@ -93,6 +103,10 @@ pub async fn start_mock() -> MockNim {
 
 async fn mock_models(State(state): State<Arc<MockState>>) -> Response {
     state.models_hits.fetch_add(1, Ordering::SeqCst);
+    let delay = state.models_delay_ms.load(Ordering::SeqCst);
+    if delay > 0 {
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+    }
     axum::Json(serde_json::json!({
         "object": "list",
         "data": [{"id": "mock/model-a", "object": "model", "created": 0, "owned_by": "mock"}]
@@ -155,6 +169,34 @@ async fn mock_chat(
                 Ok::<_, std::io::Error>(Bytes::from("data: {\"choices\":[]}\n\n"))
             })
             .chain(futures_util::stream::pending());
+            sse(Body::from_stream(stream))
+        }
+        Behavior::DelayHeaders(ms) => {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            axum::Json(serde_json::json!({
+                "id": "mock-delayed", "object": "chat.completion",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "delayed"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+            }))
+            .into_response()
+        }
+        Behavior::ActiveStream(ms) => {
+            let stream = futures_util::stream::unfold((), move |()| async move {
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+                Some((
+                    Ok::<_, std::io::Error>(Bytes::from(
+                        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\n",
+                    )),
+                    (),
+                ))
+            });
+            sse(Body::from_stream(stream))
+        }
+        Behavior::FloodStream => {
+            let chunk = Bytes::from(vec![b'x'; 1024 * 1024]);
+            let stream = futures_util::stream::unfold(chunk, |chunk| async move {
+                Some((Ok::<_, std::io::Error>(chunk.clone()), chunk))
+            });
             sse(Body::from_stream(stream))
         }
         Behavior::Ok | Behavior::BadRequestIfInjected => {

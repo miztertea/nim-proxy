@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added the opt-in `X-Nim-Proxy-Deadline-Ms` request header: an absolute
+  wall-clock deadline enforced across queueing, worker admission, retries, and
+  generation. Buffered expiry returns `504 deadline_exceeded`; streaming
+  expiry emits the same error inside the committed SSE response. Expiry drops
+  upstream work and all request-owned permits, and is exposed as request status
+  `deadline` plus `nimproxy_deadline_exceeded_total`.
+
+### Security
+
+- Bumped `crossbeam-epoch` to 0.9.20 in `Cargo.lock` to resolve
+  [RUSTSEC-2026-0204](https://rustsec.org/advisories/RUSTSEC-2026-0204)
+  (invalid pointer dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`).
+  It reaches us transitively via `metrics-util` →
+  `metrics-exporter-prometheus`. Lockfile-only change; no dependency versions
+  in `Cargo.toml` changed. Clears the `cargo-deny` advisories failure that was
+  red on `main` and every open Dependabot PR.
+
+### Changed
+
+- Internal cleanup (no behavior change): dropped a redundant `async` on the
+  streaming handler (all `.await`s live inside its spawned task, so the
+  function itself never awaited — this avoids wrapping it in a needless
+  future), removed two redundant `String` clones on the key-add paths, and
+  reused the destination buffer via `clone_from` when re-owning keys during
+  superuser claim. `cargo clippy --all-targets -- -D warnings`, `cargo fmt`,
+  and the full test suite (lib + e2e) stay green.
+- Rewrote the `Basic`-auth credential branch in `auth::identify` with the `?`
+  operator (behavior identical). Rust stable rolled to 1.97 on 2026-07-14 and
+  its improved `clippy::question_mark` lint flagged the old
+  `else if let … else { return None }` shape, breaking the `-D warnings` CI
+  job on code untouched by any open PR. Covered by the existing auth tests.
+
 ## [0.6.3] - 2026-07-05
 
 Supply-chain and static-analysis release — no proxy behavior changes.

@@ -18,3 +18,4 @@ description: Lightweight ADRs — context, options, choice, consequences.
 - [input-sanitizing-and-xss](input-sanitizing-and-xss.md)
 - [dashboard-operator-console-redesign](dashboard-operator-console-redesign.md)
 - [ui-managed-config-store](ui-managed-config-store.md)
+- [explicit-request-deadline](explicit-request-deadline.md)

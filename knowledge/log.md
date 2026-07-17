@@ -6,6 +6,61 @@ description: Append-only record of ingests, decisions, and maintenance passes.
 
 # Log
 
+## [2026-07-16] lint — low-risk cleanup batch (dead async, redundant clones)
+
+Staged a tight, YAGNI-scoped cleanup batch on a sub-branch off the
+`claude/dependabot-pull-requests-2z8240` integration branch (PR into it, not
+into `main`). Scope was chosen for highest signal / least risk: (1) removed a
+redundant `async` on `proxy::streaming` — every `.await` lives inside its
+`tokio::spawn`ed task, so the function body only spawns and returns a
+`Response`; dropping `async` avoids a pointless future wrapper and the single
+caller drops its `.await`; (2) removed two redundant `String` clones on the
+nim-key / client-key add paths (the value was moved into the struct, not
+reused); (3) `clone_from` buffer reuse when re-owning orphan keys during
+superuser claim. Deliberately excluded as churn/net-negative: the 13
+`redundant_closure_for_method_calls` rewrites (`|x| x.as_u64()` →
+`serde_json::Value::as_u64`) which are longer and less readable, the
+`clone_into` inversions on cold config-write paths, and adding a new
+`[lints.clippy]` gate (not requested; nursery lints risk future CI
+false-positives). Verified: fmt clean, `clippy --all-targets -D warnings`
+clean, lib 84 + e2e 72 tests green.
+
+Follow-up (same PR): CI's `fmt, clippy, tests` job went red — not on the
+cleanup, but on pre-existing code. Rust stable rolled 1.94 → 1.97 on
+2026-07-14, and 1.97's improved `clippy::question_mark` now flags the
+`else if let Some(basic) = … else { return None }` shape in `auth::identify`
+under `-D warnings`. The Dependabot PRs (#47–49) had passed this job because
+they ran on 2026-07-09, before the toolchain bump; this PR was the first to
+run CI afterward, so it surfaced here. Applied clippy's own `?`-operator
+rewrite (behavior identical, auth tests cover it). Reproduced locally by
+`rustup update stable` to 1.97.1 before and after the fix. Because #52's head
+is the integration branch, merging this PR into it also clears the same
+failure for #52.
+
+## [2026-07-16] decision — opt-in absolute request deadlines
+
+Rambler's model tournament showed a buffered request continuing inside the
+proxy for 825 seconds after its client timed out. Root cause: `max_wait`,
+`request_timeout`, and `stream_idle` bound individual phases, while buffered
+handlers cannot reliably observe a downstream disconnect before producing a
+response. Added `X-Nim-Proxy-Deadline-Ms` as an opt-in absolute clock across
+admission, retries, and generation. Expiry drops the request workflow and its
+RAII-owned resources; buffered callers receive `504 deadline_exceeded`, while
+streams receive a best-effort terminal SSE error. Status `deadline` and
+`nimproxy_deadline_exceeded_total` make the outcome independently visible.
+
+## [2026-07-16] lint — crossbeam-epoch advisory fix (RUSTSEC-2026-0204)
+
+`cargo-deny`'s advisories check went red on `main` — and therefore on every
+open Dependabot PR (#47 bytes, #48 actions group, #49 cosign-installer) — after
+RUSTSEC-2026-0204 was published against `crossbeam-epoch` < 0.9.20 (invalid
+pointer dereference in the `fmt::Pointer` impl for `Atomic`/`Shared`). It is a
+transitive dep via `metrics-util` → `metrics-exporter-prometheus`, not a direct
+one. Bumped the `Cargo.lock` entry to 0.9.20 (the advisory's recommended fix) —
+a single-package lockfile change, no `Cargo.toml` edits. Staged on the
+`claude/dependabot-pull-requests-2z8240` integration branch pending a decision
+on batching further fixes vs. cutting a release.
+
 ## [2026-07-05] v0.6.3 — release-asset signing + CodeQL fixture-noise triage
 
 Maintenance release closing two loose ends from the rigor pass.
