@@ -91,6 +91,217 @@ async fn keyed_mode_rejects_bad_tokens_and_accepts_good_ones() {
 }
 
 #[tokio::test]
+async fn deadline_header_validation_runs_after_auth_and_before_upstream() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_with(&mock.url, keyed("alice", "sekrit"), &[]).await;
+
+    let unauthorized = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .header("x-nim-proxy-deadline-ms", "not-a-number")
+        .json(&chat_body("unauthorized", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), 401, "auth fails before validation");
+
+    let malformed = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth("sekrit")
+        .header("x-nim-proxy-deadline-ms", "10.0")
+        .json(&chat_body("malformed", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), 400);
+    let body: serde_json::Value = malformed.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "invalid_deadline");
+
+    let duplicate = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .bearer_auth("sekrit")
+        .header("x-nim-proxy-deadline-ms", "100")
+        .header("x-nim-proxy-deadline-ms", "200")
+        .json(&chat_body("duplicate", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), 400);
+    let body: serde_json::Value = duplicate.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "invalid_deadline");
+    assert_eq!(mock.state.hit_count(), 0, "invalid input never reaches NIM");
+}
+
+#[tokio::test]
+async fn deadline_applies_to_models_cache_refresh() {
+    use std::sync::atomic::Ordering;
+
+    let mock = start_mock().await;
+    mock.state.models_delay_ms.store(10_000, Ordering::SeqCst);
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    let started = Instant::now();
+    let resp = client()
+        .get(proxy.url("/v1/models"))
+        .header("x-nim-proxy-deadline-ms", "100")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 504);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "deadline_exceeded");
+}
+
+#[tokio::test]
+async fn buffered_deadline_cancels_header_wait_and_releases_inflight_slot() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::DelayHeaders(10_000));
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            max_inflight: 1,
+            request_timeout_secs: 30,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    let started = Instant::now();
+    let expired = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .header("x-nim-proxy-deadline-ms", "150")
+        .json(&chat_body("deadline", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(expired.status(), 504);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let body: serde_json::Value = expired.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "deadline_exceeded");
+
+    let after = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("after-deadline", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), 200, "deadline released max_inflight slot");
+
+    let metrics = metrics(&proxy).await;
+    assert!(metrics.contains(
+        r#"nimproxy_requests_total{client="local",model="mock/model-a",path="/v1/chat/completions",status="deadline"} 1"#
+    ));
+    assert!(metrics.contains(
+        r#"nimproxy_deadline_exceeded_total{client="local",model="mock/model-a",path="/v1/chat/completions"} 1"#
+    ));
+}
+
+#[tokio::test]
+async fn streaming_deadline_stops_retry_wait() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::RateLimited(2));
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            nim_keys: vec![("only-key".into(), 40)],
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    let started = Instant::now();
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .header("x-nim-proxy-deadline-ms", "150")
+        .json(&chat_body("retry-deadline", true))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "stream was already committed");
+    let body = read_sse(resp).await;
+    assert!(body.contains(": retrying"), "retry was observed: {body}");
+    assert!(
+        body.contains("deadline_exceeded"),
+        "deadline surfaced: {body}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn streaming_deadline_stops_an_active_non_idle_stream() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::ActiveStream(25));
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            stream_idle_secs: 5,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    let started = Instant::now();
+    let resp = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .header("x-nim-proxy-deadline-ms", "175")
+        .json(&chat_body("active-deadline", true))
+        .send()
+        .await
+        .unwrap();
+    let body = read_sse(resp).await;
+    assert!(
+        body.matches("delta").count() >= 2,
+        "stream stayed active: {body}"
+    );
+    assert!(
+        body.contains("deadline_exceeded"),
+        "deadline surfaced: {body}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn streaming_deadline_releases_inflight_when_downstream_is_not_reading() {
+    let mock = start_mock().await;
+    mock.state.push(Behavior::FloodStream);
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            max_inflight: 1,
+            stream_idle_secs: 5,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+
+    let unread = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .header("x-nim-proxy-deadline-ms", "75")
+        .json(&chat_body("unread-deadline", true))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unread.status(), 200);
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let after = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("after-unread-deadline", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        after.status(),
+        200,
+        "deadline cleanup cannot block on SSE send"
+    );
+}
+
+#[tokio::test]
 async fn streaming_rides_out_429s_with_lane_failover() {
     let mock = start_mock().await;
     mock.state.push(Behavior::RateLimited(1));

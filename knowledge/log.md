@@ -37,6 +37,18 @@ rewrite (behavior identical, auth tests cover it). Reproduced locally by
 is the integration branch, merging this PR into it also clears the same
 failure for #52.
 
+## [2026-07-16] decision — opt-in absolute request deadlines
+
+Rambler's model tournament showed a buffered request continuing inside the
+proxy for 825 seconds after its client timed out. Root cause: `max_wait`,
+`request_timeout`, and `stream_idle` bound individual phases, while buffered
+handlers cannot reliably observe a downstream disconnect before producing a
+response. Added `X-Nim-Proxy-Deadline-Ms` as an opt-in absolute clock across
+admission, retries, and generation. Expiry drops the request workflow and its
+RAII-owned resources; buffered callers receive `504 deadline_exceeded`, while
+streams receive a best-effort terminal SSE error. Status `deadline` and
+`nimproxy_deadline_exceeded_total` make the outcome independently visible.
+
 ## [2026-07-16] lint — crossbeam-epoch advisory fix (RUSTSEC-2026-0204)
 
 `cargo-deny`'s advisories check went red on `main` — and therefore on every

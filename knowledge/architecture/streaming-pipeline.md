@@ -1,9 +1,9 @@
 ---
 type: Component
 title: Streaming pipeline (src/proxy.rs)
-description: SSE commitment, heartbeats, retry/failover, usage injection, idle cutoff, and token scanning.
-tags: [streaming, sse, retries, metrics]
-timestamp: 2026-07-02T00:00:00Z
+description: SSE commitment, heartbeats, retry/failover, absolute deadlines, idle cutoff, and token scanning.
+tags: [streaming, sse, retries, deadlines, metrics]
+timestamp: 2026-07-16T00:00:00Z
 ---
 
 # Streaming pipeline — `src/proxy.rs`
@@ -23,7 +23,13 @@ For a `stream: true` chat request:
    model; 429/500/502/503/504 → bench the lane, `: retrying` comment, loop
    (instant failover to other lanes); other non-2xx → relay as an in-stream
    `error` event; success → pipe.
-5. **Pipe with watchdog**: chunks forward verbatim while `SseScan` (a
+5. **Race the absolute deadline**: when the caller supplies
+   `X-Nim-Proxy-Deadline-Ms`, the spawned workflow races one absolute timer
+   that never resets on heartbeats, retries, or data. Expiry drops the whole
+   workflow (reqwest work + model/queue ownership), records status `deadline`,
+   and best-effort sends a terminal `deadline_exceeded` SSE error. See the
+   [deadline decision](../decisions/explicit-request-deadline.md).
+6. **Pipe with watchdog**: chunks forward verbatim while `SseScan` (a
    line-reassembling observer) counts data events and extracts the `usage`
    object. Each upstream read races two exits in a `select!`: the
    `stream_idle` timeout cuts stalled upstreams with an in-stream error
@@ -32,10 +38,12 @@ For a `stream: true` chat request:
    time rather than at the stall cutoff (with `stream_idle` 0 there is no
    cutoff, so this is what prevents hung upstreams from pinning slots until
    restart).
-6. **Account**: TTFT histogram at first chunk; tokens/sec and prompt/
+7. **Account**: TTFT histogram at first chunk; tokens/sec and prompt/
    completion counters at end (`source="usage"` exact, `"estimate"` =
    one-per-event fallback); one access-log line per request.
 
-Non-streaming requests use the same wait/retry loop minus heartbeats, and
-harvest `usage` from the buffered JSON. `/v1/models` GETs short-circuit to a
-TTL cache with single-flight refresh.
+Non-streaming requests use the same wait/retry loop minus heartbeats and
+harvest `usage` from the buffered JSON. An explicit deadline races the whole
+buffered future, which is also how the proxy bounds upstream work after an
+otherwise-unobservable buffered client disconnect. `/v1/models` GETs
+short-circuit to a TTL cache with single-flight refresh.
