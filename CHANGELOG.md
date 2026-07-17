@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-07-17
+
 ### Added
 
 - Added the opt-in `X-Nim-Proxy-Deadline-Ms` request header: an absolute
@@ -28,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refreshed runtime and supply-chain dependencies: Tokio 1.53.0, bytes 1.12.1,
+  the pinned Rust builder image, eight pinned GitHub Actions, and
+  `sigstore/cosign-installer` 4.1.2.
 - Internal cleanup (no behavior change): dropped a redundant `async` on the
   streaming handler (all `.await`s live inside its spawned task, so the
   function itself never awaited — this avoids wrapping it in a needless
@@ -453,7 +458,9 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/miztertea/nim-proxy/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/miztertea/nim-proxy/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/miztertea/nim-proxy/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/miztertea/nim-proxy/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/miztertea/nim-proxy/compare/v0.5.0...v0.6.0
