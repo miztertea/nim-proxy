@@ -6,7 +6,7 @@
 # emulated on that arch, so we build for the matching native musl target.
 # Digest-pinned so a retargeted tag can't silently change the build base;
 # Dependabot's docker ecosystem advances the digest as the tag moves.
-FROM rust:1-alpine@sha256:a41f7740f8b45d45795624eec13a8b42263cc700f19f7e4e86e04d3dda08a479 AS build
+FROM rust:1-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS build
 RUN apk add --no-cache musl-dev gcc
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 # Map Docker's arch to the Rust musl target. The explicit --target (below) looks
