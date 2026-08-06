@@ -62,6 +62,9 @@ pub struct Config {
     pub governor: GovernorSettings,
 }
 
+/// Per-model worker-concurrency governing settings, stored in [`Config`].
+/// Controls adaptive cap behaviour (enabled/disabled) and operator-pinned
+/// per-model overrides applied by the governor at admission time.
 pub struct GovernorSettings {
     /// Adaptive governing on worker-exhaustion errors (on by default; the
     /// governor stays dormant until an upstream actually exhausts).
