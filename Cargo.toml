@@ -1,6 +1,6 @@
 [package]
 name = "nim-proxy"
-version = "0.6.5"
+version = "0.6.6"
 edition = "2021"
 description = "Rate-limit-aware OpenAI-compatible proxy for NVIDIA NIM with multi-key load balancing"
 license = "MIT"
@@ -38,6 +38,11 @@ hmac = "0.12"
 sha2 = "0.10"
 subtle = "2"
 getrandom = "0.2"
+# OpenAPI: the response types carry `ToSchema` and the handlers carry
+# `#[utoipa::path]`, so openapi.json is generated from the code that serves
+# the requests. Pinned exactly (project convention); no served UI — the
+# scalar/redoc crates pull JS from a CDN the dashboard CSP forbids.
+utoipa = "=5.5.0"
 
 [dev-dependencies]
 axum = "0.8"

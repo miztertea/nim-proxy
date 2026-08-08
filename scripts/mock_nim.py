@@ -95,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # NIM's second, orthogonal constraint: a per-model worker-concurrency
         # cap shared across ALL keys. The proxy's governor must absorb this
-        # without benching lanes (key failover cannot help).
+        # without putting lanes in cooldown (key failover cannot help).
         model = req.get("model", "none")
         if ARGS.worker_slots:
             with LOCK:
@@ -120,11 +120,17 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(ARGS.delay_ms / 1000)
 
         # Echo request shape: a tool-offering request gets a tool_calls answer,
-        # otherwise a normal stop. Usage always carries reasoning-token details.
+        # otherwise a normal stop. A max_tokens below the 4 tokens this mock
+        # emits truncates, exactly as the real API does — the dashboard has a
+        # Truncated column that is unreachable without it. Usage always carries
+        # reasoning-token details.
         offers_tools = bool(req.get("tools"))
-        finish = "tool_calls" if offers_tools else "stop"
-        usage = {"prompt_tokens": 120, "completion_tokens": 4,
-                 "completion_tokens_details": {"reasoning_tokens": 12}}
+        cap = req.get("max_tokens")
+        emitted = min(4, cap) if isinstance(cap, int) and cap > 0 else 4
+        truncated = emitted < 4
+        finish = "length" if truncated else ("tool_calls" if offers_tools else "stop")
+        usage = {"prompt_tokens": 120, "completion_tokens": emitted,
+                 "completion_tokens_details": {"reasoning_tokens": min(2, emitted)}}
 
         if req.get("stream"):
             self.send_response(200)
@@ -140,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(ARGS.token_ms / 1000)
             else:
-                for tok in ["Hello", " from", " mock", " NIM"]:
+                for tok in ["Hello", " from", " mock", " NIM"][:emitted]:
                     chunk = {"id": "c1", "object": "chat.completion.chunk", "choices": [
                         {"index": 0, "delta": {"content": tok}, "finish_reason": None}]}
                     self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
@@ -153,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                      "usage": usage}
             self.wfile.write(f"data: {json.dumps(final)}\n\n".encode())
             self.wfile.write(b"data: [DONE]\n\n")
-        elif offers_tools:
+        elif offers_tools and not truncated:
             self._json(200, {
                 "id": "c1", "object": "chat.completion",
                 "choices": [{"index": 0, "message": {"role": "assistant", "tool_calls": [
@@ -165,8 +171,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {
                 "id": "c1", "object": "chat.completion",
                 "choices": [{"index": 0, "message": {"role": "assistant",
-                             "content": "Hello from mock NIM"},
-                             "finish_reason": "stop"}],
+                             "content": " ".join(
+                                 ["Hello", "from", "mock", "NIM"][:emitted])},
+                             "finish_reason": finish}],
                 "usage": usage})
 
 

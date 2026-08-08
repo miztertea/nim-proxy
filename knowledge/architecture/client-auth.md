@@ -14,7 +14,7 @@ Two independent gates. Since v0.6.0 both are driven by the
 [posture decision](../decisions/auth-posture-and-dashboard-password.md) and its
 v0.6.0 amendment).
 
-## Setup phase (`src/settings.rs`, `src/setup.html`)
+## Setup phase (`src/settings.rs`, `src/web/setup.html`)
 
 `setup_required` is an `AtomicBool`, true iff the store has no superuser (a
 fresh install, or a lockout-recovery volume edit that emptied `users`). While
@@ -32,9 +32,11 @@ true:
   response carries the `npk_` secret exactly once, so a fresh keyed-mode proxy
   serves `/v1` with no Settings detour.
 
-Post-setup the setup routes 404 (gated on the AtomicBool). Boot logs a loud
-`SETUP REQUIRED — the FIRST VISITOR becomes the superuser` line — the claim
-window is [accepted risk](../decisions/ui-managed-config-store.md).
+Post-setup `GET /setup` is a bare 404 (gated on the AtomicBool), while
+`POST /setup` and `POST /setup/validate-key` return the typed
+`409 setup_complete` conflict before inspecting their JSON request bodies.
+Boot logs a loud `SETUP REQUIRED — the FIRST VISITOR becomes the superuser`
+line — the claim window is [accepted risk](../decisions/ui-managed-config-store.md).
 
 ## API gate — `/v1/*` (`src/proxy.rs`)
 
@@ -44,9 +46,10 @@ The store's `client_auth.mode` decides:
   SHA-256'd and `ct_eq`'d against the stored digests (`ClientKey.secret_sha256`).
   Fail-closed: keyed with **zero** keys rejects everything. Miss → OpenAI-style
   401, a `nimproxy_unauthorized_total` tick, and a delay to slow brute force.
-- **`open`** (labeled "local") — `/v1` is unauthenticated; trusted networks
-  only. This is the *only* thing the mode toggle affects — the dashboard is
-  never open.
+- **`open`** — `/v1` is unauthenticated; trusted networks only. Requests in
+  this mode use the machine client label `local` for attribution, while the UI
+  calls the mode **Open (no authentication)**. This is the *only* thing the
+  mode toggle affects — the dashboard is never open.
 
 Client secrets are server-generated 128-bit tokens with an `npk_` prefix, shown
 **exactly once** at creation; only the SHA-256 digest (+ last-4 for masked
@@ -85,9 +88,37 @@ superuser (an admin that can never be deleted — a deletion guard, no extra
 powers) · admin (server settings + user management) · user (own account, own
 client keys, own NIM keys). Dashboards are identical for all roles; only
 Settings differs, and `GET /api/config` is filtered **server-side** per role
-(hidden sections absent from the payload, not CSS-hidden). Partial lockout:
+(hidden sections absent from the payload, not CSS-hidden — the response type
+makes `server`/`users` `Option`s that are simply not built for a `user`).
+The response always includes the current user's `locale: string|null`;
+admin views additionally include `server.default_locale`. Every role may set
+or clear only its own locale through `/api/settings/account`; admin and
+superuser may set the server default through `/api/settings/locale`.
+Authorization owns the server-setting request before locale syntax or
+installed-registry validation.
+
+`openapi.json` records which routes need a session: 13 protected `/api/*`
+operations inherit the document-level requirement (session cookie **or**
+header credentials), while public `GET /api/locale-bootstrap` and the two
+`/setup` operations carry explicit empty `security` lists. The operator locale
+catalog is not an OpenAPI operation; it sits behind the post-setup session gate,
+which runs before locale lookup. The public setup/login catalog is always
+available and contains only `setup.*`, `login.*`, and `common.app_name`.
+Operator startup requests public bootstrap, then authenticated `/api/config`,
+then exactly one installed operator catalog using current-user override →
+persisted server default → `en-US`. It performs no browser-language or request
+header inference. Public setup/login continue to use the persisted server
+default.
+Partial lockout:
 any admin resets any password. Total lockout: the documented
 [volume edit](../ops/configure-env.md).
+
+The complete method/path inventory—including public routes, setup phases,
+role/ownership gates, request/success types, side effects, UI callers, and
+OpenAPI decisions—lives in the
+[HTTP trust-boundary map](http-trust-boundary-map.md). Superuser has zero
+exclusive routes; its distinction is the undeletable/undemotable invariant,
+not endpoint power beyond admin.
 
 TLS is not built in — terminate it at a reverse proxy / platform edge and set
 `TRUST_PROXY=true` so the session cookie is marked `Secure`.

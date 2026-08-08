@@ -1,0 +1,88 @@
+{
+  "config_revision": 7,
+  "diagnostics": {
+    "excluded_epochs": 0,
+    "excluded_records": 0,
+    "normalized_series": 1,
+    "skipped_metric_lines": 0,
+    "valid_checkpoints": 0,
+    "valid_samples": 1
+  },
+  "history_revision": 11,
+  "latest": [
+    {
+      "labels": {},
+      "metric": "nimproxy_active_requests",
+      "value": 2.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_queue_depth",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_model_inflight",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_model_limit",
+      "value": 8.0
+    }
+  ],
+  "points": [
+    {
+      "capacity": {
+        "average_rpm": 80.0,
+        "latest_rpms": [
+          40,
+          40
+        ]
+      },
+      "duration_seconds": 2592000,
+      "from": 1697411600,
+      "to": 1700003600,
+      "values": [
+        {
+          "labels": {
+            "client": "client-fixture-ccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "model": "publisher-fixture-pppppppppppppppppppp/model-mmmmmmmmmmmmmmmmmmm",
+            "path": "/v1/chat/completions",
+            "status": "200"
+          },
+          "metric": "nimproxy_requests_total",
+          "value": 3.0
+        }
+      ]
+    }
+  ],
+  "totals": [
+    {
+      "labels": {
+        "client": "client-fixture-ccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "model": "publisher-fixture-pppppppppppppppppppp/model-mmmmmmmmmmmmmmmmmmm",
+        "path": "/v1/chat/completions",
+        "status": "200"
+      },
+      "metric": "nimproxy_requests_total",
+      "value": 3.0
+    }
+  ],
+  "window": {
+    "available_from": 1697411600,
+    "available_to": 1700003600,
+    "complete": true,
+    "default_window_days": 30,
+    "effective_from": 1697411600,
+    "effective_to": 1700003600,
+    "following_now": false,
+    "requested_from": 1697411600,
+    "requested_to": 1700003600,
+    "retention_days": 30
+  }
+}

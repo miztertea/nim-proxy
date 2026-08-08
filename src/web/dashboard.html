@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title data-i18n-text="common.app_name">NIM Proxy</title>
+<link id="presentation-stylesheet" rel="stylesheet" href="/assets/operator/operator.css">
+</head>
+<body hidden>
+
+<aside id="side">
+  <div class="brand">
+    <!-- nim-proxy-icon -->
+    <span class="wordmark" aria-label="NIM Proxy" data-i18n-attr="aria-label:common.app_name"><b>NIM</b> <span data-i18n="dashboard.brand.proxy">Proxy</span></span>
+  </div>
+  <nav>
+    <button data-tab="overview" aria-current="page"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5L8 3l6 5.5M3.5 7.5V13h9V7.5"/></svg><span class="label" data-i18n="dashboard.nav.tab.overview">Overview</span></button>
+    <button data-tab="models"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13V7M8 13V3M12 13V9"/></svg><span class="label" data-i18n="dashboard.nav.tab.models">Models</span></button>
+    <button data-tab="clients"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg><span class="label" data-i18n="dashboard.nav.tab.clients">Clients</span></button>
+    <button data-tab="reliability"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l5 2v4c0 3.5-2.4 6-5 7-2.6-1-5-3.5-5-7v-4z"/></svg><span class="label" data-i18n="dashboard.nav.tab.reliability">Reliability</span></button>
+    <button data-tab="capacity"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11a6 6 0 0112 0M8 11l3-3.5"/></svg><span class="label" data-i18n="dashboard.nav.tab.capacity">Capacity</span></button>
+    <button data-tab="settings"><span class="nbar"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.6v2.1M8 12.3v2.1M1.6 8h2.1M12.3 8h2.1M3.5 3.5L5 5M11 11l1.5 1.5M12.5 3.5L11 5M5 11l-1.5 1.5"/></svg><span class="label" data-i18n="dashboard.nav.tab.settings">Settings</span></button>
+  </nav>
+  <div class="foot">
+    <button class="live" id="live" title="Click to freeze/resume the selected time range" data-i18n-attr="title:dashboard.nav.live.tooltip"><span class="dot"></span><span id="liveText" data-i18n="dashboard.nav.live.connecting">connecting</span></button>
+    <span id="uptime"></span>
+    <span id="verinfo"></span>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <h1 id="pagetitle" data-i18n="dashboard.nav.tab.overview">Overview</h1>
+    <div class="tright">
+      <span id="rangeinfo"></span>
+      <div class="pills" id="ranges">
+        <button data-range="default" aria-pressed="true" data-i18n="dashboard.topbar.range.default">Default · 30d</button>
+        <button data-range="3600" data-i18n="dashboard.topbar.range.p1h">1h</button>
+        <button data-range="21600" data-i18n="dashboard.topbar.range.p6h">6h</button>
+        <button data-range="86400" data-i18n="dashboard.topbar.range.p24h">24h</button>
+        <button data-range="604800" data-i18n="dashboard.topbar.range.p7d">7d</button>
+        <button data-range="2592000" data-i18n="dashboard.topbar.range.p30d">30d</button>
+        <button data-range="all-retained" data-i18n="dashboard.topbar.range.all_time">All time</button>
+        <button data-range="custom"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke-linecap="round"/></svg><span data-i18n="dashboard.topbar.range.custom">Custom</span></button>
+      </div>
+    </div>
+  </div>
+  <div id="custom">
+    <input type="datetime-local" id="from" data-i18n-attr="aria-label:dashboard.topbar.custom.from"> <span data-i18n="dashboard.topbar.custom.to">to</span>
+    <input type="datetime-local" id="to" data-i18n-attr="aria-label:dashboard.topbar.custom.to_label">
+    <button class="apply" id="applyRange" data-i18n="dashboard.topbar.custom.apply">Apply</button>
+  </div>
+
+  <svg class="svg-definitions" width="0" height="0"><defs>
+    <linearGradient id="gGreen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#76B900" stop-opacity="0.35"/><stop offset="1" stop-color="#76B900" stop-opacity="0"/></linearGradient>
+    <linearGradient id="gMuted" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8E967F" stop-opacity="0.20"/><stop offset="1" stop-color="#8E967F" stop-opacity="0"/></linearGradient>
+  </defs></svg>
+
+  <main>
+  <section id="tab-overview">
+    <div class="tiles" id="o-kpis"></div>
+    <div class="row">
+      <div class="card overview-primary">
+        <h2 data-i18n-text="dashboard.overview.traffic.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M1 8h3l2-5 3 11 2-6h4"/></svg>Traffic <span class="note">requests / min</span><span class="hr" id="o-reqnow"></span></h2>
+        <div id="o-traffic"></div>
+      </div>
+      <div class="card overview-health">
+        <h2 data-i18n-text="dashboard.overview.capacity_reliability.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M8 1.5A6.5 6.5 0 108 14.5"/><path d="M8 8l3.5-2.5"/></svg>Capacity &amp; reliability</h2>
+        <div class="rings" id="o-rings"></div>
+        <div class="overview-health-detail" id="o-health"></div>
+      </div>
+    </div>
+    <div class="card mb">
+      <h2 data-i18n-text="dashboard.overview.performance.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M9 1.5L3 9h4l-1 5.5L13 7H9z"/></svg>Performance <span class="note" data-i18n="dashboard.overview.performance.note">median &amp; p95 across the time range</span></h2>
+      <div class="perf3" id="o-perf"></div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2 data-i18n-text="dashboard.overview.top_models.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M4 13V7M8 13V3M12 13V9"/></svg>Top models <span class="note" data-i18n="dashboard.common.note.tokens_out">tokens out</span></h2>
+        <div id="o-topmodels"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n-text="dashboard.overview.top_clients.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg>Top clients <span class="note" data-i18n="dashboard.common.note.tokens_out">tokens out</span></h2>
+        <div id="o-topharness"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-models" hidden>
+    <div class="tiles sm" id="m-kpis"></div>
+    <div class="card mb">
+      <h2 data-i18n-text="dashboard.models.tokens_per_min.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M1 8h3l2-5 3 11 2-6h4"/></svg>Completion tokens per minute <span class="note" data-i18n="dashboard.models.tokens_per_min.note">by model</span></h2>
+      <div id="chart-modeltok"></div>
+      <div class="legend" id="legend-modeltok"></div>
+    </div>
+    <div class="gquad">
+      <div class="card">
+        <h2 class="metric-heading" data-i18n="dashboard.models.ttft.heading">Time to first token</h2>
+        <div class="note metric-note">p50 / p95</div>
+        <div id="chart-ttft"></div>
+        <div class="legend" id="q-ttft"></div>
+      </div>
+      <div class="card">
+        <h2 class="metric-heading" data-i18n="dashboard.models.genspeed.heading">Generation speed</h2>
+        <div class="note metric-note">tok/s</div>
+        <div id="chart-tps"></div>
+        <div class="legend" id="q-tps"></div>
+      </div>
+      <div class="card">
+        <h2 class="metric-heading" data-i18n="dashboard.models.itl.heading">Inter-token latency</h2>
+        <div class="note metric-note">TPOT</div>
+        <div id="chart-tpot"></div>
+        <div class="legend" id="q-tpot"></div>
+      </div>
+      <div class="card">
+        <h2 class="metric-heading" data-i18n="dashboard.models.upstream.heading">Upstream latency</h2>
+        <div class="note metric-note">p50 / p95</div>
+        <div id="chart-upstream"></div>
+        <div class="legend" id="q-upstream"></div>
+      </div>
+    </div>
+    <div class="grid2 grid-auto-300">
+      <div class="card card-grow-one-half">
+        <h2 data-i18n-text="dashboard.models.finish.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M2 8h5M2 4h9M2 12h7"/></svg>How responses end <span class="hr muted-regular" id="m-fincount"></span></h2>
+        <div id="table-finish"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n-text="dashboard.models.reasoning.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M8 1.5a4 4 0 00-2.5 7.1V11h5V8.6A4 4 0 008 1.5zM6 13h4M6.5 15h3"/></svg>Reasoning vs output</h2>
+        <div id="meters-reasoning"></div>
+      </div>
+    </div>
+    <div class="card mb" id="card-toolcalls" hidden>
+      <h2 data-i18n-text="dashboard.models.toolcalls.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M2 8h5M2 4h9M2 12h7"/></svg>Tool-call volume <span class="note" data-i18n="dashboard.models.toolcalls.note">tool calls emitted · by model</span></h2>
+      <div id="m-toolcalls"></div>
+    </div>
+    <div class="card mb">
+      <h2 data-i18n-text="dashboard.models.scorecard.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M8 2v12M3 5l5-3 5 3M3 11l5 3 5-3"/></svg>Model scorecard <span class="note" data-i18n="dashboard.models.scorecard.note">top models head to head · best in each column highlighted</span></h2>
+      <div id="compare-scorecard"></div>
+    </div>
+    <div class="card mb">
+      <h2 data-i18n-text="dashboard.models.head_to_head.heading"><svg class="hic" viewBox="0 0 16 16"><path d="M9 1.5L3 9h4l-1 5.5L13 7H9z"/></svg>Head to head <span class="note" data-i18n="dashboard.models.head_to_head.note">generation speed</span></h2>
+      <div id="compare-bars"></div>
+    </div>
+    <div class="subhead" data-i18n-text="dashboard.models.leading.subhead"><svg class="hic" viewBox="0 0 16 16"><path d="M4 13V7M8 13V3M12 13V9"/></svg>Leading models <span class="note" id="m-cardnote"></span></div>
+    <div class="gcards" id="modelcards"></div>
+    <div class="card">
+      <h2 data-i18n-text="dashboard.models.per_model.heading"><svg class="hic" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 6h13M6 6v7.5"/></svg>Per model <span class="note" id="m-tablecount"></span></h2>
+      <div id="table-models"></div>
+    </div>
+  </section>
+
+  <section id="tab-clients" hidden>
+    <div class="tiles sm" id="h-kpis"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2 data-i18n-text="dashboard.clients.toolint.heading">Tool intensity <span class="note" data-i18n="dashboard.clients.toolint.note">avg tools / request</span></h2>
+        <div id="h-toolint"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n-text="dashboard.clients.depth.heading">Conversation depth <span class="note" data-i18n="dashboard.clients.depth.note">avg messages / request</span></h2>
+        <div id="h-depth"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n-text="dashboard.clients.sampling.heading">Sampling fingerprint <span class="note" data-i18n="dashboard.clients.sampling.note">avg temperature</span></h2>
+        <div id="h-temp"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n-text="dashboard.clients.streammix.heading">Streaming share <span class="note" data-i18n="dashboard.clients.streammix.note">% streamed</span></h2>
+        <div id="h-streammix"></div>
+      </div>
+      <div class="card" id="h-maxtok-card" hidden>
+        <h2 data-i18n-text="dashboard.clients.maxtok.heading">Requested output cap <span class="note" data-i18n="dashboard.clients.maxtok.note">avg max_tokens / request</span></h2>
+        <div id="h-maxtok"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2><svg class="hic" viewBox="0 0 16 16"><path d="M4 5l-2.5 3L4 11M12 5l2.5 3L12 11M9.5 3l-3 10"/></svg><span data-i18n="dashboard.common.per_client.heading">Per client</span> <span class="note" data-i18n="dashboard.common.sort_hint">click a column to sort</span></h2>
+      <div id="table-harness"></div>
+    </div>
+  </section>
+
+  <section id="tab-reliability" hidden>
+    <div class="row">
+      <div class="htile hero-narrow" id="r-avail"></div>
+      <div class="htile hero-wide" id="r-time"></div>
+      <div class="htile hero-narrow" id="r-load"></div>
+    </div>
+    <div class="grid2 grid-auto-300">
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.reqrate.heading">Requests per minute</h2>
+        <div id="chart-reqrate"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.outrate.heading">Outcomes per minute</h2>
+        <div id="chart-outcomes"></div>
+        <div class="legend" id="legend-outcomes"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.load.heading">In flight &amp; queued</h2>
+        <div id="chart-load"></div>
+        <div class="legend" id="legend-load"></div>
+      </div>
+    </div>
+    <div class="card mb">
+      <h2 data-i18n-text="dashboard.reliability.outstack.heading">Requests by outcome <span class="note" data-i18n="dashboard.reliability.outstack.note">stacked · per minute</span></h2>
+      <div id="chart-outcome-stack"></div>
+      <div class="legend" id="legend-outcome-stack"></div>
+    </div>
+    <div class="grid2 grid-weighted">
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.queuewait.heading">Queue wait</h2>
+        <div id="chart-qwait"></div>
+        <div class="legend" id="legend-qwait"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.heatmap.heading">Activity by hour</h2>
+        <div id="heatmap"></div>
+      </div>
+    </div>
+    <div class="card mb" id="card-pressure" hidden>
+      <h2 data-i18n-text="dashboard.reliability.pressure.heading">Model limits <span class="note" data-i18n="dashboard.reliability.pressure.note">worker exhaustions &amp; per-model caps</span></h2>
+      <div id="chart-exhaust"></div>
+      <div id="pressure-bars" class="pressure-bars"></div>
+    </div>
+    <div class="grid2 grid-auto-260">
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.nonsuccess.heading">Non-success outcomes</h2>
+        <div id="table-outcomes"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.security.heading">Reliability &amp; security</h2>
+        <div id="table-reliability"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="dashboard.reliability.reqtypes.heading">Request types</h2>
+        <div id="table-reqtypes"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2 data-i18n-text="dashboard.common.per_client.heading">Per client <span class="note" data-i18n="dashboard.common.sort_hint">click a column to sort</span></h2>
+      <div id="table-clients"></div>
+    </div>
+  </section>
+
+  <section id="tab-capacity" hidden>
+    <div class="row">
+      <div class="htile hero-wide" id="k-sat"></div>
+      <div class="htile hero-key-narrow" id="k-prov"></div>
+      <div class="htile hero-key-narrow" id="k-pressure"></div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2 data-i18n-text="dashboard.capacity.keyutil.heading">Key utilization <span class="tag" data-i18n="dashboard.common.tag.now">Now</span></h2>
+        <div id="meters"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="dashboard.capacity.ratelimit.heading">Rate-limit hits per minute</h2>
+        <div id="chart-cooldowns"></div>
+        <div class="legend" id="legend-cooldowns"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2 data-i18n-text="dashboard.capacity.perkey.heading">Per key <span class="tag" data-i18n="dashboard.common.tag.now">Now</span><span class="note" data-i18n="dashboard.common.sort_hint">click a column to sort</span></h2>
+      <div id="table-lanes"></div>
+    </div>
+  </section>
+
+  <section id="tab-settings" hidden>
+    <div class="setwrap">
+      <nav class="setnav" id="setnav"></nav>
+      <div class="setbody" id="setbody"></div>
+    </div>
+  </section>
+  </main>
+</div>
+<div id="tooltip"></div>
+<dialog id="modal"><div class="box"><h3 class="modal-heading" data-i18n="dashboard.modal.secret.heading">One-time secret</h3><div id="modal-body"></div></div></dialog>
+
+<script src="/assets/operator/shared.js"></script>
+</body>
+</html>

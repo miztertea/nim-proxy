@@ -15,9 +15,10 @@ The security review found one root cause with three sinks: the client-supplied
 labels, (2) the access-log line, and (3) the dashboard via `innerHTML`. A
 semi-trusted client (an authenticated "friend" in a shared pool) could:
 
-- **Stored XSS** — `model` = `<img src=x onerror=…>` is stored as a label,
-  persisted in `history.jsonl`, and executes in the operator's browser when
-  they open the dashboard.
+- **Stored XSS** — `model` = `<img src=x onerror=…>` was stored as a label,
+  persisted in the then-current `history.jsonl`, and executed in the
+  operator's browser when they opened the dashboard. The canonical successor
+  is now `history-v1.jsonl`; production leaves the legacy file untouched.
 - **Cardinality blowup** — unbounded distinct `model` values grow the metrics
   registry (RAM) and every 5-min history snapshot (disk).
 - **Exposition / log injection** — quotes, braces, and newlines break the
@@ -32,13 +33,13 @@ Defense in depth, fixing it at both ends:
   else, and caps length at 64 — killing exposition + log injection. A bounded
   seen-set (cap 256) collapses further distinct models to `"other"`, bounding
   cardinality. `path` is reduced to an allowlist of known endpoints.
-- **In the view** (`src/dashboard.html`): an `esc()` HTML-escaper wraps every
-  dynamic value interpolated into `innerHTML` (model, client, tooltip/legend
-  series names). Pure defense-in-depth now that labels are sanitized server
-  side — the payload can no longer even reach the label.
-- **Response CSP** (`src/main.rs`): `connect-src 'self'` blocks the classic
-  exfil vector even if an escape were missed; `frame-ancestors 'none'` +
-  `nosniff` + `X-Frame-Options` round it out.
+- **In the view** (`src/web/shared.js` plus the operator renderers):
+  `escapeHtml()` wraps every machine value interpolated into fixed-markup HTML.
+  Catalog descriptors resolve only at that boundary. Pure defense-in-depth now
+  that labels are sanitized server side.
+- **Response CSP** (`src/lib.rs`): same-origin scripts/styles/connections,
+  `frame-ancestors 'none'`, `nosniff`, and `X-Frame-Options` backstop the sink
+  rules. See [the presentation layer](../architecture/presentation-layer.md).
 
 ## Consequences
 

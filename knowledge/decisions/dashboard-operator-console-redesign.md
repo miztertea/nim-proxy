@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: Dashboard operator-console redesign
-description: 6-tab IA collapsed to 5 (Compare merged in, three renames), dark-only palette, webfonts via Google Fonts CDN under an extended CSP, and window-halves delta-chip semantics.
+description: 6-tab IA collapsed to 5 (Compare merged in, three renames), dark-only palette, and window-halves delta-chip semantics; later presentation hardening superseded CDN fonts.
 tags: [dashboard, dataviz, frontend, csp]
 timestamp: 2026-07-03T00:00:00Z
 ---
@@ -115,3 +115,12 @@ Today every analytical tab consumes the typed `/api/dashboard` range contract
 plus `/api/dashboard/now`, shares one following/fixed selection, and computes
 delta chips from that selected server-backed sample window. The old
 `/api/history` transport and browser-owned lifetime mode no longer exist.
+
+## Amendment (2026-07-30 — local presentation assets)
+
+The Google Fonts/CDN choice and its CSP additions are superseded by
+[the embedded presentation layer](../architecture/presentation-layer.md).
+System UI and monospace stacks preserve the layout without network requests or
+font bytes in the binary. The model-logo CDN is also gone; fixed local
+SVG/text primitives supply identity. The information architecture, dark
+palette, interactions, and delta semantics above remain current.

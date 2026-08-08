@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title data-i18n-text="setup.document.title">NIM Proxy — First-time setup</title>
+<link id="presentation-stylesheet" rel="stylesheet" href="/assets/public/public.css">
+</head>
+<body hidden>
+<main>
+<form class="card" id="wiz" autocomplete="off">
+  <h1><span class="brand">NIM</span> PROXY <span data-i18n="setup.header.title">— First-time setup</span></h1>
+  <p class="sub" data-i18n="setup.header.subtitle">Complete setup: create the superuser account and add at least one NIM API key.</p>
+  <div class="steps"><span id="s1" class="on" data-n="1" data-i18n="setup.stepper.step1">Create account</span><span id="s2" data-n="2" data-i18n="setup.stepper.step2">Add NIM API keys</span><span id="s3" data-n="3" data-i18n="setup.stepper.step3">Review &amp; finish</span></div>
+  <p class="err" id="err"></p>
+
+  <section id="step1">
+    <label for="username" data-i18n="setup.step1.username">Username</label>
+    <input id="username" name="username" autofocus autocomplete="username" placeholder="e.g. admin" data-i18n-attr="placeholder:setup.step1.username.placeholder">
+    <label for="password" data-i18n="setup.step1.password">Password (10+ characters)</label>
+    <input id="password" name="password" type="password" autocomplete="new-password">
+    <label for="confirm" data-i18n="setup.step1.confirm">Confirm password</label>
+    <input id="confirm" type="password" autocomplete="new-password">
+    <button type="button" class="primary" id="to2" data-i18n="setup.wizard.continue">Continue</button>
+    <p class="hint" data-i18n="setup.step1.hint">The superuser account cannot be deleted.</p>
+  </section>
+
+  <section id="step2" hidden>
+    <ul class="keys" id="keylist"></ul>
+    <div class="addrow">
+      <input class="key" id="newkey" type="password" placeholder="nvapi-…" data-i18n-attr="aria-label:setup.step2.key_label">
+      <input class="rpm" id="newrpm" type="number" value="40" min="1" max="10000" title="requests/min" data-i18n-attr="aria-label:setup.step2.rpm_label">
+      <button type="button" class="ghost" id="addkey" data-i18n="setup.step2.addkey">Validate &amp; add</button>
+    </div>
+    <details>
+      <summary data-i18n="setup.step2.advanced">Advanced — upstream base URL</summary>
+      <input id="baseurl" placeholder="https://integrate.api.nvidia.com" data-i18n-attr="aria-label:setup.step2.base_url">
+    </details>
+    <div class="row">
+      <button type="button" class="ghost" id="back1" data-i18n="setup.wizard.back">Back</button>
+      <button type="button" class="primary" id="to3" disabled data-i18n="setup.wizard.continue">Continue</button>
+    </div>
+    <p class="hint" data-i18n="setup.step2.hint">NIM API keys are shared across clients. The default rate limit is 40 requests/min per key.</p>
+  </section>
+
+  <section id="step3" hidden>
+    <div class="review" id="review"></div>
+    <label class="opt"><input type="checkbox" id="mintkey" checked>
+      <span id="mintkey-label"></span></label>
+    <p class="warn" id="mintwarn" hidden></p>
+    <div class="row">
+      <button type="button" class="ghost" id="back2" data-i18n="setup.wizard.back">Back</button>
+      <button type="submit" class="primary" id="finish" data-i18n="setup.step3.finish">Create &amp; open dashboard</button>
+    </div>
+  </section>
+
+  <section id="step4" hidden>
+    <p class="sub" id="setup-complete-intro"></p>
+    <label data-i18n="setup.step4.baseurl">Client base URL</label>
+    <div class="copyrow"><code id="cbase"></code><button type="button" class="ghost" data-copy="cbase" data-i18n="setup.step4.copy">Copy</button></div>
+    <label data-i18n="setup.step4.apikey">Client API key</label>
+    <div class="copyrow"><code id="csecret"></code><button type="button" class="ghost" data-copy="csecret" data-i18n="setup.step4.copy">Copy</button></div>
+    <button type="button" class="primary" id="opendash" data-i18n="setup.step4.opendash">Open dashboard</button>
+  </section>
+</form>
+</main>
+
+<script src="/assets/public/setup.js"></script>
+</body>
+</html>

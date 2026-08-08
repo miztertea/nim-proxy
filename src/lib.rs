@@ -1,11 +1,17 @@
+mod api;
 mod auth;
 mod config;
 mod dispatch;
 mod governor;
 mod history;
+mod observation;
 mod pool;
+mod presentation;
 mod proxy;
+mod routes;
 mod settings;
+
+pub use api::openapi_json;
 
 // Fuzzing-only re-exports (the modules themselves stay private). Compiled
 // only under cargo-fuzz's `--cfg fuzzing`, so normal builds, coverage, and
@@ -17,13 +23,13 @@ pub use config::fuzz as fuzz_config;
 #[doc(hidden)]
 pub use proxy::fuzz as fuzz_proxy;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::StatusCode;
+use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::Router;
@@ -34,6 +40,21 @@ use tokio::sync::Mutex;
 use auth::Admin;
 use dispatch::Dispatcher;
 use pool::{Pool, PoolHandle};
+
+// Recorder configuration and Rust-owned browser fixtures share this one
+// production bucket registry; fixture code must never approximate it.
+#[rustfmt::skip]
+const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[
+    ("nimproxy_ttft_seconds",       &[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]),
+    ("nimproxy_tokens_per_second",  &[1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 320.0]),
+    ("nimproxy_queue_wait_seconds", &[0.001, 0.05, 0.25, 1.0, 5.0, 15.0, 60.0, 180.0, 600.0]),
+    ("nimproxy_upstream_seconds",   &[0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0]),
+    ("nimproxy_tpot_seconds",       &[0.005, 0.01, 0.02, 0.04, 0.08, 0.16, 0.32]),
+    ("nimproxy_request_messages",   &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0]),
+    ("nimproxy_request_tools",      &[0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]),
+    ("nimproxy_request_max_tokens", &[128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0]),
+    ("nimproxy_request_temperature", &[0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0]),
+];
 
 /// App-level configuration, published as an immutable snapshot: every request
 /// takes one `Arc<Config>` via [`AppState::cfg`] and sees a consistent view;
@@ -51,9 +72,6 @@ pub struct Config {
     pub request_timeout: Duration,
     /// Never modify request bodies (disables stream_options usage injection).
     pub strict_passthrough: bool,
-    /// Reference $/1M token prices for the dashboard's "dollars saved" figure.
-    pub price_in: f64,
-    pub price_out: f64,
     /// token -> client name. None = local mode, no client auth.
     pub clients: Option<HashMap<String, String>>,
     /// Cap on concurrent requests; bounds memory under floods.
@@ -67,14 +85,14 @@ pub struct GovernorSettings {
     /// governor stays dormant until an upstream actually exhausts).
     pub enabled: bool,
     /// Operator-pinned per-model concurrency caps (model id -> max in-flight).
-    pub overrides: HashMap<String, usize>,
+    pub overrides: BTreeMap<String, usize>,
 }
 
 impl Default for GovernorSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            overrides: HashMap::new(),
+            overrides: BTreeMap::new(),
         }
     }
 }
@@ -181,16 +199,31 @@ fn capacity_snapshot(pool: &Pool) -> history::CapacitySnapshot {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 struct DashboardQuery {
+    /// Window start, unix seconds. Defaults to `to - default_window_days`.
     from: Option<u64>,
+    /// Window end, unix seconds. Omitting it means "follow now".
     to: Option<u64>,
+    /// Rollup buckets, clamped to 2..=1000. Defaults to 288.
     points: Option<usize>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/dashboard",
+    tag = "dashboard",
+    params(DashboardQuery),
+    responses(
+        (status = 200, description = "Rolled-up history for the window", body = api::DashboardResponse),
+        (status = 400, description = "`from` is not before `to`", body = api::ApiError),
+        (status = 401, description = "No session", body = api::ApiError),
+    ),
+)]
 async fn api_dashboard(
     State(state): State<Arc<AppState>>,
-    axum::extract::Query(query): axum::extract::Query<DashboardQuery>,
+    api::ApiQuery(query): api::ApiQuery<DashboardQuery>,
 ) -> Response {
     let stored = state.store.lock().unwrap();
     let config_revision = state
@@ -205,13 +238,10 @@ async fn api_dashboard(
     if requested_from >= requested_to {
         return (
             StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({
-                "error": {
-                    "message": "from must be less than to",
-                    "type": "proxy_error",
-                    "code": "invalid_time_window",
-                }
-            })),
+            axum::Json(api::ApiError::new(
+                "invalid_time_window",
+                "from must be less than to",
+            )),
         )
             .into_response();
     }
@@ -221,29 +251,42 @@ async fn api_dashboard(
         requested_to,
         query.points.unwrap_or(288).clamp(2, 1000),
     );
-    axum::Json(serde_json::json!({
-        "history_revision": rollup.history_revision,
-        "config_revision": config_revision,
-        "window": {
-            "requested_from": requested_from,
-            "requested_to": requested_to,
-            "following_now": following_now,
-            "effective_from": rollup.effective_from,
-            "effective_to": rollup.effective_to,
-            "available_from": rollup.available_from,
-            "available_to": rollup.available_to,
-            "default_window_days": stored.dashboard.default_window_days,
-            "retention_days": stored.history.days,
+    axum::Json(api::DashboardResponse {
+        config_revision,
+        diagnostics: rollup.diagnostics,
+        history_revision: rollup.data.history_revision,
+        latest: rollup.data.latest,
+        points: rollup.data.points,
+        totals: rollup.data.totals,
+        window: api::DashboardWindow {
+            available_from: rollup.data.available_from,
+            available_to: rollup.data.available_to,
+            complete: rollup.complete,
+            default_window_days: stored.dashboard.default_window_days,
+            effective_from: rollup.data.effective_from,
+            effective_to: rollup.data.effective_to,
+            following_now,
+            requested_from,
+            requested_to,
+            retention_days: stored.history.days,
         },
-        "totals": rollup.totals,
-        "latest": rollup.latest,
-        "points": rollup.points,
-        "diagnostics": rollup.diagnostics,
-    }))
+    })
     .into_response()
 }
 
-async fn api_dashboard_now(State(state): State<Arc<AppState>>) -> axum::Json<serde_json::Value> {
+#[utoipa::path(
+    get,
+    path = "/api/dashboard/now",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "Live registry values plus the configuration they were \
+            sampled under", body = api::DashboardNowResponse),
+        (status = 401, description = "No session", body = api::ApiError),
+    ),
+)]
+async fn api_dashboard_now(
+    State(state): State<Arc<AppState>>,
+) -> axum::Json<api::DashboardNowResponse> {
     let stored = state.store.lock().unwrap();
     let config_revision = state
         .config_revision
@@ -252,54 +295,110 @@ async fn api_dashboard_now(State(state): State<Arc<AppState>>) -> axum::Json<ser
     let now = unix_now();
     let current = state.history.current(now, || state.prometheus.render());
     let history_revision = current.tail.base_history_revision;
-    axum::Json(serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "sampled_at": now,
-        "started": state.started,
-        "price_in": stored.pricing.ref_price_in,
-        "price_out": stored.pricing.ref_price_out,
-        "auth": stored.client_auth.mode == config::Mode::Keyed,
-        "lanes": pool.len(),
-        "rpms": pool.rpms(),
-        "capacity_rpm": pool.capacity_rpm(),
-        "default_window_days": stored.dashboard.default_window_days,
-        "retention_days": stored.history.days,
-        "slo_target_percent": stored.dashboard.slo_target_percent,
-        "history_revision": history_revision,
-        "config_revision": config_revision,
-        "available_from": current.available_from,
-        "available_to": current.available_to,
-        "metrics": current.metrics,
-        "tail": current.tail,
-    }))
+    axum::Json(api::DashboardNowResponse {
+        auth: stored.client_auth.mode == config::Mode::Keyed,
+        available_from: current.available_from,
+        available_to: current.available_to,
+        capacity_rpm: pool.capacity_rpm(),
+        config_revision,
+        default_window_days: stored.dashboard.default_window_days,
+        history_revision,
+        lanes: pool.len(),
+        metrics: current.metrics,
+        retention_days: stored.history.days,
+        rpms: pool.rpms(),
+        sampled_at: now,
+        slo_target_percent: stored.dashboard.slo_target_percent,
+        started: state.started,
+        tail: current.tail,
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+    })
 }
 
 async fn metrics_text(State(state): State<Arc<AppState>>) -> String {
     state.prometheus.render()
 }
 
-/// Add hardening headers to every response. The CSP allows the dashboard's
-/// own inline script/style, unpkg logos, and Google Fonts (system-font
-/// fallback offline), but pins `connect-src` to 'self' so an injected
-/// element can't exfiltrate to another origin — a second line of defense
-/// behind server-side sanitizing and the dashboard's `esc()`.
+fn page_response(page: presentation::Page) -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        presentation::page(page),
+    )
+        .into_response()
+}
+
+async fn public_asset(uri: Uri) -> Response {
+    asset_response(presentation::public_asset(uri.path()))
+}
+
+async fn operator_asset(uri: Uri) -> Response {
+    asset_response(presentation::operator_asset(uri.path()))
+}
+
+async fn public_catalog(Path(locale_file): Path<String>) -> Response {
+    asset_response(
+        locale_file
+            .strip_suffix(".json")
+            .and_then(presentation::public_catalog),
+    )
+}
+
+async fn operator_catalog(Path(locale_file): Path<String>) -> Response {
+    asset_response(
+        locale_file
+            .strip_suffix(".json")
+            .and_then(presentation::operator_catalog),
+    )
+}
+
+fn asset_response(asset: Option<presentation::Asset>) -> Response {
+    let Some(asset) = asset else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, asset.content_type),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        asset.body,
+    )
+        .into_response()
+}
+
+fn is_presentation_path(path: &str) -> bool {
+    matches!(
+        path,
+        routes::ROOT | routes::DASH | routes::LOGIN | routes::SETUP
+    ) || path.starts_with("/assets/")
+}
+
+/// Add hardening headers to every response. Presentation resources are
+/// same-origin compile-time assets, so the policy needs no inline or external
+/// source exceptions.
 async fn security_headers(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::http::HeaderValue;
+    let no_store = is_presentation_path(req.uri().path());
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();
     h.insert(
         "content-security-policy",
         HeaderValue::from_static(
-            "default-src 'none'; img-src 'self' https://unpkg.com data:; \
-             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
-             font-src https://fonts.gstatic.com; \
-             script-src 'self' 'unsafe-inline'; \
+            "default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; \
              connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         ),
     );
+    if no_store {
+        h.insert(
+            axum::http::header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        );
+    }
     h.insert(
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
@@ -430,36 +529,51 @@ pub async fn run() {
         cfg.heartbeat.as_secs()
     );
 
-    // Histogram bucket bounds, one row per metric.
-    #[rustfmt::skip]
-    let buckets: &[(&str, &[f64])] = &[
-        ("nimproxy_ttft_seconds",       &[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]),
-        ("nimproxy_tokens_per_second",  &[1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 320.0]),
-        ("nimproxy_queue_wait_seconds", &[0.001, 0.05, 0.25, 1.0, 5.0, 15.0, 60.0, 180.0, 600.0]),
-        ("nimproxy_upstream_seconds",   &[0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0]),
-        ("nimproxy_tpot_seconds",       &[0.005, 0.01, 0.02, 0.04, 0.08, 0.16, 0.32]),
-        ("nimproxy_request_messages",   &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0]),
-        ("nimproxy_request_tools",      &[0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]),
-        ("nimproxy_request_max_tokens", &[128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0]),
-        ("nimproxy_request_temperature", &[0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0]),
-    ];
     let mut builder = PrometheusBuilder::new();
-    for (name, bounds) in buckets {
+    for (name, bounds) in HISTOGRAM_BUCKETS {
         builder = builder
             .set_buckets_for_metric(Matcher::Full((*name).into()), bounds)
             .unwrap();
     }
     let prometheus = builder.install_recorder().expect("prometheus recorder");
+    metrics::describe_counter!(
+        "nimproxy_usage_observations_total",
+        "Final classified upstream usage observations by field and result."
+    );
+    metrics::describe_gauge!(
+        "nimproxy_history_persistence_degraded",
+        "Whether canonical history persistence is degraded (0 = ok, 1 = degraded)."
+    );
 
     let pool: PoolHandle = Arc::new(RwLock::new(Arc::new(Pool::new(pool_specs))));
 
     // Metrics history: finish indexing before the listener can report ready,
     // then sample the registry with contemporaneous pool capacity.
-    let hist = Arc::new(history::History::load(
-        Some(data_dir.clone()),
+    let history_capacity = capacity_snapshot(&pool.read().unwrap());
+    let hist = match history::History::open(
+        data_dir.clone(),
         stored.history.days,
-        capacity_snapshot(&pool.read().unwrap()),
-    ));
+        history_capacity.clone(),
+    ) {
+        Ok(history) => Arc::new(history),
+        Err(error) => {
+            tracing::error!(
+                "canonical history unavailable: {error}; continuing with in-memory history"
+            );
+            Arc::new(history::History::load(
+                None,
+                stored.history.days,
+                history_capacity,
+            ))
+        }
+    };
+    metrics::gauge!("nimproxy_history_persistence_degraded").set(
+        if hist.status().persistence == "degraded" {
+            1.0
+        } else {
+            0.0
+        },
+    );
     {
         let hist = hist.clone();
         let prom = prometheus.clone();
@@ -504,51 +618,77 @@ pub async fn run() {
         cfg: RwLock::new(Arc::new(cfg)),
     });
 
-    let dash = || async {
-        (
-            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            include_str!("dashboard.html"),
-        )
-    };
+    let dash = || async { page_response(presentation::Page::Dashboard) };
     // Session-gated surface: dashboard, config, history, metrics. The guard
     // middleware requires an authenticated user (session cookie, or
     // user:password header credentials for scrapers); pre-setup it routes
     // everything to the wizard.
-    let protected = Router::new()
-        .route("/", get(dash))
-        .route("/dash", get(dash))
-        .route("/api/dashboard", get(api_dashboard))
-        .route("/api/dashboard/now", get(api_dashboard_now))
-        .route("/api/config", get(settings::api_config))
-        .route("/api/settings/nim-keys", post(settings::nim_keys))
-        .route("/api/settings/clients", post(settings::clients))
-        .route("/api/settings/upstream", post(settings::upstream))
-        .route("/api/settings/limits", post(settings::limits))
-        .route("/api/settings/pricing", post(settings::pricing))
-        .route("/api/settings/history", post(settings::history))
-        .route("/api/settings/governor", post(settings::governor_cfg))
-        .route("/api/settings/users", post(settings::users))
-        .route("/api/settings/account", post(settings::account))
-        .route("/api/settings/validate-key", post(settings::validate_key))
-        .route("/metrics", get(metrics_text))
-        .route_layer(axum::middleware::from_fn_with_state(
+    let control_plane = Router::new()
+        .route(routes::API_DASHBOARD, get(api_dashboard))
+        .route(routes::API_DASHBOARD_NOW, get(api_dashboard_now))
+        .route(routes::API_CONFIG, get(settings::api_config))
+        .route(routes::API_SETTINGS_NIM_KEYS, post(settings::nim_keys))
+        .route(routes::API_SETTINGS_CLIENTS, post(settings::clients))
+        .route(routes::API_SETTINGS_UPSTREAM, post(settings::upstream))
+        .route(routes::API_SETTINGS_LIMITS, post(settings::limits))
+        .route(routes::API_SETTINGS_HISTORY, post(settings::history))
+        .route(routes::API_SETTINGS_GOVERNOR, post(settings::governor_cfg))
+        .route(routes::API_SETTINGS_USERS, post(settings::users))
+        .route(routes::API_SETTINGS_ACCOUNT, post(settings::account))
+        .route(routes::API_SETTINGS_LOCALE, post(settings::locale))
+        .route(
+            routes::API_SETTINGS_VALIDATE_KEY,
+            post(settings::validate_key),
+        )
+        .fallback(api::api_not_found)
+        .method_not_allowed_fallback(api::api_method_not_allowed)
+        .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_session,
         ));
+
+    let protected = Router::new()
+        .route(routes::ROOT, get(dash))
+        .route(routes::DASH, get(dash))
+        .route(routes::METRICS, get(metrics_text))
+        .route(routes::ASSET_OPERATOR_CSS, get(operator_asset))
+        .route(routes::ASSET_OPERATOR_SHARED_JS, get(operator_asset))
+        .route(routes::ASSET_OPERATOR_DASHBOARD_JS, get(operator_asset))
+        .route(routes::ASSET_OPERATOR_SETTINGS_JS, get(operator_asset))
+        .route(routes::ASSET_OPERATOR_LOCALE, get(operator_catalog))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_session,
+        ))
+        .nest(routes::API_PREFIX, control_plane);
 
     // Public surface: health probe, login flow, the first-run wizard (404
     // once setup completes), and the API (its own key gate + setup gate).
     let app = Router::new()
         .merge(protected)
-        .route("/health", get(|| async { "ok" }))
-        .route("/login", get(auth::login_page).post(auth::login_submit))
-        .route("/logout", post(auth::logout))
+        .route(routes::HEALTH, get(|| async { "ok" }))
+        .route(routes::ASSET_PUBLIC_CSS, get(public_asset))
+        .route(routes::ASSET_PUBLIC_SETUP_JS, get(public_asset))
+        .route(routes::ASSET_PUBLIC_LOGIN_JS, get(public_asset))
+        .route(routes::ASSET_PUBLIC_LOCALE, get(public_catalog))
+        .nest(
+            routes::API_PREFIX,
+            Router::new().route(routes::API_LOCALE_BOOTSTRAP, get(api::locale_bootstrap)),
+        )
         .route(
-            "/setup",
+            routes::LOGIN,
+            get(auth::login_page).post(auth::login_submit),
+        )
+        .route(routes::LOGOUT, post(auth::logout))
+        .route(
+            routes::SETUP,
             get(settings::setup_page).post(settings::setup_submit),
         )
-        .route("/setup/validate-key", post(settings::setup_validate_key))
-        .route("/v1/{*path}", any(proxy::handle))
+        .route(
+            routes::SETUP_VALIDATE_KEY,
+            post(settings::setup_validate_key),
+        )
+        .route(routes::V1_WILDCARD, any(proxy::handle))
         .layer(axum::middleware::from_fn(security_headers))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(state);

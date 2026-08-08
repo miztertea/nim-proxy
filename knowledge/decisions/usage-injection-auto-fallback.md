@@ -38,7 +38,9 @@ existing `stream_options`.
 ## Consequences
 
 - Exact token counts (`source="usage"`) become the norm; estimates remain
-  only for models that genuinely reject the field.
+  only for completed streams with no measured completion and valid countable
+  nonterminal SSE events. Invalid, incomplete, error, and unobservable events
+  do not become estimates; see [NIM observations](../architecture/nim-observations.md).
 - One extra upstream request the first time a rejecting model is seen, per
   process lifetime.
 - Covered e2e: injection presence, 400-fallback-and-remember, and the kill

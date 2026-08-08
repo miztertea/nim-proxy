@@ -1,0 +1,1938 @@
+{
+  "locale": "en-US",
+  "state": "Source",
+  "messages": {
+    "common.app_name": {
+      "en": "NIM Proxy",
+      "desc": "Product name.",
+      "hash": "1e2b099a"
+    },
+    "dashboard.brand.proxy": {
+      "en": "Proxy",
+      "hash": "a68ee416"
+    },
+    "dashboard.capacity.col.429s": {
+      "en": "429s",
+      "desc": "Column header. '429' is an HTTP status and must survive verbatim.",
+      "hash": "e3aeda21"
+    },
+    "dashboard.capacity.col.current_rate": {
+      "en": "Current rate",
+      "desc": "Column header. The key's instantaneous rate against its configured limit.",
+      "hash": "0e80e3ff"
+    },
+    "dashboard.capacity.empty.no_capacity_data": {
+      "en": "No capacity data for this time range",
+      "hash": "30f6f8f5"
+    },
+    "dashboard.capacity.hero.saturation": {
+      "en": "Saturation",
+      "hash": "993f024b"
+    },
+    "dashboard.capacity.hero.throttling": {
+      "en": "Throttling",
+      "hash": "06222d69"
+    },
+    "dashboard.capacity.history.no_data.few": {
+      "en": "{n} intervals with no capacity data",
+      "desc": "CLDR plural category 'few' of the note about intervals whose configured capacity is unknown. {n} is the count and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "fce1bc1e"
+    },
+    "dashboard.capacity.history.no_data.many": {
+      "en": "{n} intervals with no capacity data",
+      "desc": "CLDR plural category 'many' of the note about intervals whose configured capacity is unknown. {n} is the count and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "fce1bc1e"
+    },
+    "dashboard.capacity.history.no_data.one": {
+      "en": "{n} interval with no capacity data",
+      "desc": "CLDR plural category 'one' of the note about intervals whose configured capacity is unknown. {n} is the count and must stay a placeholder. This is the singular English uses for exactly 1.",
+      "hash": "c0adc7d6"
+    },
+    "dashboard.capacity.history.no_data.other": {
+      "en": "{n} intervals with no capacity data",
+      "desc": "CLDR plural category 'other' of the note about intervals whose configured capacity is unknown. {n} is the count and must stay a placeholder. English uses this form for every count except 1, including 0.",
+      "hash": "fce1bc1e"
+    },
+    "dashboard.capacity.history.no_data.two": {
+      "en": "{n} intervals with no capacity data",
+      "desc": "CLDR plural category 'two' of the note about intervals whose configured capacity is unknown. {n} is the count and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "fce1bc1e"
+    },
+    "dashboard.capacity.history.no_data.zero": {
+      "en": "{n} intervals with no capacity data",
+      "desc": "CLDR plural category 'zero' of the note about intervals whose configured capacity is unknown. {n} is the count and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "fce1bc1e"
+    },
+    "dashboard.capacity.history.shortfall": {
+      "en": "Peak shortfall · rpm",
+      "desc": "Unit label under the Capacity history figure: the largest amount by which demand exceeded the capacity configured at the time. 'rpm' is a unit and must survive verbatim; '·' is a separator.",
+      "hash": "037f087b"
+    },
+    "dashboard.capacity.history.title": {
+      "en": "Capacity history",
+      "hash": "0e9d9c58"
+    },
+    "dashboard.capacity.history.utilization": {
+      "en": "avg {avg} · peak {peak} of capacity at the time",
+      "desc": "Footer under the Capacity history figure. {avg} and {peak} are already-formatted percentages. 'at the time' means against the capacity configured then, not today's. Lowercase note, not a heading.",
+      "hash": "32d932f7"
+    },
+    "dashboard.capacity.keyutil.heading": {
+      "en": "Key utilization",
+      "hash": "c7487387"
+    },
+    "dashboard.capacity.note.current_vs_capacity": {
+      "en": "current rate vs total capacity",
+      "desc": "Note beside the Saturation heading, explaining what the percentage divides: the pool's current request rate over its total configured capacity. Lowercase note, not a heading.",
+      "hash": "61534260"
+    },
+    "dashboard.capacity.note.enabled_keys.few": {
+      "en": "{n} enabled keys",
+      "desc": "CLDR plural category 'few' of the sub-label under the saturation bar. {n} is the count of enabled upstream NIM API keys and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "8d762678"
+    },
+    "dashboard.capacity.note.enabled_keys.many": {
+      "en": "{n} enabled keys",
+      "desc": "CLDR plural category 'many' of the sub-label under the saturation bar. {n} is the count of enabled upstream NIM API keys and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "8d762678"
+    },
+    "dashboard.capacity.note.enabled_keys.one": {
+      "en": "{n} enabled key",
+      "desc": "CLDR plural category 'one' of the sub-label under the saturation bar. {n} is the count of enabled upstream NIM API keys and must stay a placeholder. This is the singular English uses for exactly 1.",
+      "hash": "9aae9534"
+    },
+    "dashboard.capacity.note.enabled_keys.other": {
+      "en": "{n} enabled keys",
+      "desc": "CLDR plural category 'other' of the sub-label under the saturation bar. {n} is the count of enabled upstream NIM API keys and must stay a placeholder. English uses this form for every count except 1, including 0.",
+      "hash": "8d762678"
+    },
+    "dashboard.capacity.note.enabled_keys.two": {
+      "en": "{n} enabled keys",
+      "desc": "CLDR plural category 'two' of the sub-label under the saturation bar. {n} is the count of enabled upstream NIM API keys and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "8d762678"
+    },
+    "dashboard.capacity.note.enabled_keys.zero": {
+      "en": "{n} enabled keys",
+      "desc": "CLDR plural category 'zero' of the sub-label under the saturation bar. {n} is the count of enabled upstream NIM API keys and must stay a placeholder. English distinguishes only 'one' and 'other', so this form repeats the English of 'other' — do not assume the categories are identical in your language.",
+      "hash": "8d762678"
+    },
+    "dashboard.capacity.note.rpm_available": {
+      "en": "rpm available",
+      "desc": "Follows a number in the saturation footer: how much of the pool's per-minute capacity is still unused. 'rpm' is a unit and must survive verbatim; only 'available' is translated.",
+      "hash": "f1a43cbe"
+    },
+    "dashboard.capacity.perkey.heading": {
+      "en": "Per key",
+      "hash": "95898667"
+    },
+    "dashboard.capacity.ratelimit.heading": {
+      "en": "Rate-limit hits per minute",
+      "hash": "602570e6"
+    },
+    "dashboard.capacity.row.session_affinity": {
+      "en": "Session affinity",
+      "hash": "0596f708"
+    },
+    "dashboard.capacity.row.slots_in_use": {
+      "en": "Enabled keys",
+      "hash": "226de726"
+    },
+    "dashboard.capacity.slot": {
+      "en": "Slot {n}",
+      "hash": "18616a78"
+    },
+    "dashboard.chart.active": {
+      "en": "Active",
+      "hash": "92340695"
+    },
+    "dashboard.chart.disconnects": {
+      "en": "Disconnects",
+      "hash": "5c92edf8"
+    },
+    "dashboard.chart.errors": {
+      "en": "Errors",
+      "hash": "cb702378"
+    },
+    "dashboard.chart.median": {
+      "en": "median",
+      "hash": "7896a617"
+    },
+    "dashboard.chart.p95": {
+      "en": "p95",
+      "hash": "f771f4d3"
+    },
+    "dashboard.chart.queued": {
+      "en": "Queued",
+      "hash": "661ff40a"
+    },
+    "dashboard.chart.requests_per_min": {
+      "en": "Requests/min",
+      "hash": "ee05a90c"
+    },
+    "dashboard.chart.success": {
+      "en": "Success",
+      "hash": "c88a0b90"
+    },
+    "dashboard.clients.depth.heading": {
+      "en": "Conversation depth",
+      "hash": "786c066b"
+    },
+    "dashboard.clients.depth.note": {
+      "en": "avg messages / request",
+      "hash": "3c610ce6"
+    },
+    "dashboard.clients.maxtok.heading": {
+      "en": "Requested output cap",
+      "hash": "c03bef01"
+    },
+    "dashboard.clients.maxtok.note": {
+      "en": "avg max_tokens / request",
+      "desc": "max_tokens is an API parameter name and must survive verbatim.",
+      "hash": "e188f939"
+    },
+    "dashboard.clients.sampling.heading": {
+      "en": "Sampling fingerprint",
+      "hash": "97f6f2cb"
+    },
+    "dashboard.clients.sampling.note": {
+      "en": "avg temperature",
+      "desc": "The model sampling parameter, not a physical temperature.",
+      "hash": "6b417a81"
+    },
+    "dashboard.clients.streammix.heading": {
+      "en": "Streaming share",
+      "hash": "5c1a4d52"
+    },
+    "dashboard.clients.streammix.note": {
+      "en": "% streamed",
+      "hash": "0c0b2363"
+    },
+    "dashboard.clients.tile.avg_messages": {
+      "en": "Avg messages / request",
+      "hash": "a983f199"
+    },
+    "dashboard.clients.tile.avg_tools": {
+      "en": "Avg tools / request",
+      "hash": "6dca1f1e"
+    },
+    "dashboard.clients.tile.clients": {
+      "en": "Clients",
+      "hash": "65a72565"
+    },
+    "dashboard.clients.tile.requests_using_tools": {
+      "en": "Requests using tools",
+      "hash": "59ea0958"
+    },
+    "dashboard.clients.tile.streaming_share": {
+      "en": "Streaming share",
+      "hash": "5c1a4d52"
+    },
+    "dashboard.clients.toolint.heading": {
+      "en": "Tool intensity",
+      "hash": "728b0c45"
+    },
+    "dashboard.clients.toolint.note": {
+      "en": "avg tools / request",
+      "hash": "d8668050"
+    },
+    "dashboard.common.col.client": {
+      "en": "Client",
+      "desc": "Table column header. The calling agent or tool, not an end user.",
+      "hash": "0c77fe09"
+    },
+    "dashboard.common.col.count": {
+      "en": "Count",
+      "desc": "Table column header. Number of requests with this outcome.",
+      "hash": "37bac495"
+    },
+    "dashboard.common.col.key": {
+      "en": "Key",
+      "desc": "Table column header. An upstream NIM API key. Not a keyboard key or a map key.",
+      "hash": "99a52df3"
+    },
+    "dashboard.common.col.model": {
+      "en": "Model",
+      "desc": "Table column header. The model identifier for the row.",
+      "hash": "5e2c614c"
+    },
+    "dashboard.common.col.reason": {
+      "en": "Reason",
+      "desc": "Table column header. Why a request did not return 200.",
+      "hash": "f81ab834"
+    },
+    "dashboard.common.col.requests": {
+      "en": "Requests",
+      "desc": "Table column header. Count of requests in the selected time range.",
+      "hash": "ada27592"
+    },
+    "dashboard.common.col.share": {
+      "en": "Share",
+      "desc": "Table column header. This row's percentage of the total. Noun, never the verb.",
+      "hash": "29887a5f"
+    },
+    "dashboard.common.col.streaming": {
+      "en": "Streaming",
+      "desc": "Share of this client's requests that used streaming responses.",
+      "hash": "a951c594"
+    },
+    "dashboard.common.col.tokens_in": {
+      "en": "Tokens in",
+      "desc": "Prompt tokens.",
+      "hash": "0aae0f75"
+    },
+    "dashboard.common.col.tokens_out": {
+      "en": "Tokens out",
+      "desc": "Completion tokens generated.",
+      "hash": "da9a58f8"
+    },
+    "dashboard.common.empty.history_unavailable": {
+      "en": "History unavailable for selected time range",
+      "desc": "Range status when history exists globally but no usable observation covers the selected interval.",
+      "hash": "e2aca469"
+    },
+    "dashboard.common.empty.no_completed_requests": {
+      "en": "No completed requests yet",
+      "hash": "597d8faa"
+    },
+    "dashboard.common.empty.no_data_in_range": {
+      "en": "No data in selected time range",
+      "hash": "458e9291"
+    },
+    "dashboard.common.empty.no_data_yet": {
+      "en": "No data yet",
+      "hash": "e2e18a76"
+    },
+    "dashboard.common.empty.no_keys_configured": {
+      "en": "No keys configured",
+      "hash": "8db382fc"
+    },
+    "dashboard.common.empty.no_traffic": {
+      "en": "No traffic yet",
+      "hash": "aaef1f94"
+    },
+    "dashboard.common.kpi.delta_tooltip": {
+      "en": "second half of this time range vs the first",
+      "hash": "77d91f0f"
+    },
+    "dashboard.common.kpi.success_rate": {
+      "en": "Success rate",
+      "desc": "KPI label. Share of requests that returned 200.",
+      "hash": "49da60f8"
+    },
+    "dashboard.common.note.selected_time_range": {
+      "en": "selected time range",
+      "desc": "Sub-label under a KPI number: the figure covers the time range currently selected in the topbar, not all history.",
+      "hash": "59e32cdb"
+    },
+    "dashboard.common.note.tokens_out": {
+      "en": "tokens out",
+      "hash": "6cfcdef3"
+    },
+    "dashboard.common.per_client.heading": {
+      "en": "Per client",
+      "hash": "391351c8"
+    },
+    "dashboard.common.row.active_now": {
+      "en": "Active now",
+      "desc": "Requests in flight at this instant, not a windowed aggregate.",
+      "hash": "441658c6"
+    },
+    "dashboard.common.row.dropped": {
+      "en": "Dropped",
+      "desc": "Requests shed under overload.",
+      "hash": "739f68fe"
+    },
+    "dashboard.common.row.error_rate": {
+      "en": "Error rate",
+      "desc": "Live-panel label beside Active now and Queued: the share of requests in the selected time range that did not return 2xx. Noun phrase, not an imperative.",
+      "hash": "33a22472"
+    },
+    "dashboard.common.row.failed_logins": {
+      "en": "Failed logins",
+      "hash": "c4b167af"
+    },
+    "dashboard.common.row.queued": {
+      "en": "Queued",
+      "hash": "661ff40a"
+    },
+    "dashboard.common.row.rate_limit_cooldowns": {
+      "en": "Rate-limit cooldowns",
+      "hash": "5f009330"
+    },
+    "dashboard.common.row.streaming": {
+      "en": "Streaming",
+      "hash": "a951c594"
+    },
+    "dashboard.common.row.unauthorized": {
+      "en": "Unauthorized",
+      "hash": "d089c8a9"
+    },
+    "dashboard.common.sort_hint": {
+      "en": "click a column to sort",
+      "hash": "3334d184"
+    },
+    "dashboard.common.status.bad_gateway_502": {
+      "en": "Bad gateway (502)",
+      "desc": "Non-success reason. '502' must survive verbatim.",
+      "hash": "1c52523b"
+    },
+    "dashboard.common.status.bad_request_400": {
+      "en": "Bad request (400)",
+      "desc": "Non-success reason. '400' must survive verbatim.",
+      "hash": "3ce1cfb4"
+    },
+    "dashboard.common.status.client_disconnected": {
+      "en": "Client disconnected",
+      "desc": "Non-success reason: the calling client closed the connection before the response finished.",
+      "hash": "61fcc9b2"
+    },
+    "dashboard.common.status.client_error_4xx": {
+      "en": "Client error (4xx)",
+      "desc": "Outcome band for 4xx statuses other than 429. '4xx' is an HTTP status class and must survive verbatim.",
+      "hash": "c2b42c93"
+    },
+    "dashboard.common.status.disconnect": {
+      "en": "Disconnect",
+      "desc": "Outcome band: the client went away before the response finished. Noun, not the imperative verb.",
+      "hash": "acfc5be7"
+    },
+    "dashboard.common.status.forbidden_403": {
+      "en": "Forbidden (403)",
+      "desc": "Non-success reason. '403' must survive verbatim.",
+      "hash": "ae88f5b2"
+    },
+    "dashboard.common.status.not_found_404": {
+      "en": "Not found (404)",
+      "desc": "Non-success reason. '404' must survive verbatim.",
+      "hash": "8bcbdab7"
+    },
+    "dashboard.common.status.rate_limited": {
+      "en": "Rate limited",
+      "desc": "Outcome band: requests the upstream rejected with 429. Past participle describing the requests.",
+      "hash": "a06130a5"
+    },
+    "dashboard.common.status.rate_limited_429": {
+      "en": "Rate limited (429)",
+      "desc": "'429' must survive verbatim.",
+      "hash": "2d8d2785"
+    },
+    "dashboard.common.status.stream_error": {
+      "en": "Stream error",
+      "desc": "Non-success reason: the upstream stream failed mid-response.",
+      "hash": "38f63d7c"
+    },
+    "dashboard.common.status.stream_stalled": {
+      "en": "Stream stalled",
+      "desc": "Non-success reason: the upstream stopped emitting tokens and the request was abandoned.",
+      "hash": "2845f98c"
+    },
+    "dashboard.common.status.success": {
+      "en": "Success",
+      "desc": "Outcome band and stacked-chart series: requests that returned a 2xx status. Noun.",
+      "hash": "c88a0b90"
+    },
+    "dashboard.common.status.timeout_stall": {
+      "en": "Timeout / stall",
+      "desc": "Outcome band grouping upstream timeouts (504) with stalled streams. Two nouns joined by a slash.",
+      "hash": "efe2e882"
+    },
+    "dashboard.common.status.unauthorized_401": {
+      "en": "Unauthorized (401)",
+      "desc": "'401' must survive verbatim.",
+      "hash": "e31a10f2"
+    },
+    "dashboard.common.status.unavailable_503": {
+      "en": "Unavailable (503)",
+      "desc": "Non-success reason. '503' must survive verbatim.",
+      "hash": "f544ed2c"
+    },
+    "dashboard.common.status.upstream_error_cooldowns": {
+      "en": "Upstream error cooldowns",
+      "hash": "082e7f63"
+    },
+    "dashboard.common.status.upstream_timeout_504": {
+      "en": "Upstream timeout (504)",
+      "desc": "Non-success reason. '504' must survive verbatim.",
+      "hash": "37653bb1"
+    },
+    "dashboard.common.tag.now": {
+      "en": "Now",
+      "desc": "Badge on a card heading: this figure is the live instant, not an aggregate over the selected time range. Adverb of time.",
+      "hash": "fe18013d"
+    },
+    "dashboard.common.value.now": {
+      "en": "{value} now",
+      "hash": "dc1a4806"
+    },
+    "dashboard.modal.secret.heading": {
+      "en": "One-time secret",
+      "hash": "04a195c4"
+    },
+    "dashboard.models.cards.note": {
+      "en": "top 4 by tokens out · full list in the table below",
+      "desc": "Note above the leading-model cards. 'top 4' is a count of cards shown.",
+      "hash": "dedd5a12"
+    },
+    "dashboard.models.col.avg_response": {
+      "en": "Avg response",
+      "hash": "0449c134"
+    },
+    "dashboard.models.col.avg_tps": {
+      "en": "Avg tok/s",
+      "desc": "Column header. 'tok/s' is a unit and must survive verbatim.",
+      "hash": "cb513f6e"
+    },
+    "dashboard.models.col.avg_ttft": {
+      "en": "Avg TTFT",
+      "desc": "Column header. 'TTFT' is an abbreviation and must survive verbatim.",
+      "hash": "1a2a2e30"
+    },
+    "dashboard.models.col.errors": {
+      "en": "Errors",
+      "hash": "cb702378"
+    },
+    "dashboard.models.col.reasoning": {
+      "en": "Reasoning",
+      "hash": "d8211e24"
+    },
+    "dashboard.models.col.truncated": {
+      "en": "Truncated",
+      "hash": "d9d9fcf3"
+    },
+    "dashboard.models.count.few": {
+      "en": "{n} models",
+      "hash": "a394ccda"
+    },
+    "dashboard.models.count.many": {
+      "en": "{n} models",
+      "hash": "a394ccda"
+    },
+    "dashboard.models.count.one": {
+      "en": "{n} model",
+      "hash": "8044e016"
+    },
+    "dashboard.models.count.other": {
+      "en": "{n} models",
+      "hash": "a394ccda"
+    },
+    "dashboard.models.count.two": {
+      "en": "{n} models",
+      "hash": "a394ccda"
+    },
+    "dashboard.models.count.zero": {
+      "en": "{n} models",
+      "hash": "a394ccda"
+    },
+    "dashboard.models.count_with_sort.few": {
+      "en": "{n} models · click a column to sort",
+      "hash": "b8a32ca0"
+    },
+    "dashboard.models.count_with_sort.many": {
+      "en": "{n} models · click a column to sort",
+      "hash": "b8a32ca0"
+    },
+    "dashboard.models.count_with_sort.one": {
+      "en": "{n} model · click a column to sort",
+      "hash": "148617d0"
+    },
+    "dashboard.models.count_with_sort.other": {
+      "en": "{n} models · click a column to sort",
+      "hash": "b8a32ca0"
+    },
+    "dashboard.models.count_with_sort.two": {
+      "en": "{n} models · click a column to sort",
+      "hash": "b8a32ca0"
+    },
+    "dashboard.models.count_with_sort.zero": {
+      "en": "{n} models · click a column to sort",
+      "hash": "b8a32ca0"
+    },
+    "dashboard.models.empty.no_reasoning": {
+      "en": "No reasoning tokens",
+      "hash": "f1faf3fa"
+    },
+    "dashboard.models.finish.completed": {
+      "en": "Completed",
+      "desc": "Finish reason. The response ended normally.",
+      "hash": "22a970d2"
+    },
+    "dashboard.models.finish.filtered": {
+      "en": "Filtered",
+      "desc": "Finish reason. Stopped by the upstream content filter.",
+      "hash": "0ba993b3"
+    },
+    "dashboard.models.finish.heading": {
+      "en": "How responses end",
+      "hash": "9aef0990"
+    },
+    "dashboard.models.finish.other": {
+      "en": "Other",
+      "desc": "Finish reason matched by no known value.",
+      "hash": "f97e9da0"
+    },
+    "dashboard.models.finish.tool_call": {
+      "en": "Tool call",
+      "hash": "17011048"
+    },
+    "dashboard.models.genspeed.heading": {
+      "en": "Generation speed",
+      "hash": "f48a69f4"
+    },
+    "dashboard.models.head_to_head.heading": {
+      "en": "Head to head",
+      "hash": "bff461ca"
+    },
+    "dashboard.models.head_to_head.note": {
+      "en": "generation speed",
+      "hash": "f8b44b7c"
+    },
+    "dashboard.models.itl.heading": {
+      "en": "Inter-token latency",
+      "hash": "28905439"
+    },
+    "dashboard.models.kpi.avg_speed": {
+      "en": "Avg speed",
+      "hash": "607e4c5f"
+    },
+    "dashboard.models.kpi.completion_tokens": {
+      "en": "Completion tokens",
+      "hash": "f5ad1c5b"
+    },
+    "dashboard.models.kpi.prompt_tokens": {
+      "en": "Prompt tokens",
+      "hash": "b8fbf83c"
+    },
+    "dashboard.models.leading.subhead": {
+      "en": "Leading models",
+      "hash": "4fc18b3a"
+    },
+    "dashboard.models.per_model.heading": {
+      "en": "Per model",
+      "hash": "139a5981"
+    },
+    "dashboard.models.reasoning.heading": {
+      "en": "Reasoning vs output",
+      "hash": "b78166d2"
+    },
+    "dashboard.models.scorecard.heading": {
+      "en": "Model scorecard",
+      "hash": "13fb2211"
+    },
+    "dashboard.models.scorecard.note": {
+      "en": "top models head to head · best in each column highlighted",
+      "hash": "91939a12"
+    },
+    "dashboard.models.stat.median": {
+      "en": "median {value}",
+      "hash": "6a59ac2c"
+    },
+    "dashboard.models.stat.p95": {
+      "en": "p95 {value}",
+      "hash": "1b5e500c"
+    },
+    "dashboard.models.stat.tool_calls_per_request": {
+      "en": "{calls} · {per_request}/req",
+      "hash": "321ebcce"
+    },
+    "dashboard.models.tokens_per_min.heading": {
+      "en": "Completion tokens per minute",
+      "hash": "0b7c1721"
+    },
+    "dashboard.models.tokens_per_min.note": {
+      "en": "by model",
+      "hash": "7f1be7e6"
+    },
+    "dashboard.models.toolcalls.heading": {
+      "en": "Tool-call volume",
+      "hash": "452e4258"
+    },
+    "dashboard.models.toolcalls.note": {
+      "en": "tool calls emitted · by model",
+      "hash": "01e3b873"
+    },
+    "dashboard.models.ttft.heading": {
+      "en": "Time to first token",
+      "hash": "0cec400f"
+    },
+    "dashboard.models.upstream.heading": {
+      "en": "Upstream latency",
+      "hash": "4d1a7ea7"
+    },
+    "dashboard.nav.footer.api_key_required.few": {
+      "en": "v{version} · {keys} keys · API key required",
+      "hash": "d0138474"
+    },
+    "dashboard.nav.footer.api_key_required.many": {
+      "en": "v{version} · {keys} keys · API key required",
+      "hash": "d0138474"
+    },
+    "dashboard.nav.footer.api_key_required.one": {
+      "en": "v{version} · {keys} key · API key required",
+      "hash": "2495b67e"
+    },
+    "dashboard.nav.footer.api_key_required.other": {
+      "en": "v{version} · {keys} keys · API key required",
+      "hash": "d0138474"
+    },
+    "dashboard.nav.footer.api_key_required.two": {
+      "en": "v{version} · {keys} keys · API key required",
+      "hash": "d0138474"
+    },
+    "dashboard.nav.footer.api_key_required.zero": {
+      "en": "v{version} · {keys} keys · API key required",
+      "hash": "d0138474"
+    },
+    "dashboard.nav.footer.open.few": {
+      "en": "v{version} · {keys} keys · Open (no authentication)",
+      "hash": "6b524fb3"
+    },
+    "dashboard.nav.footer.open.many": {
+      "en": "v{version} · {keys} keys · Open (no authentication)",
+      "hash": "6b524fb3"
+    },
+    "dashboard.nav.footer.open.one": {
+      "en": "v{version} · {keys} key · Open (no authentication)",
+      "hash": "094c6383"
+    },
+    "dashboard.nav.footer.open.other": {
+      "en": "v{version} · {keys} keys · Open (no authentication)",
+      "hash": "6b524fb3"
+    },
+    "dashboard.nav.footer.open.two": {
+      "en": "v{version} · {keys} keys · Open (no authentication)",
+      "hash": "6b524fb3"
+    },
+    "dashboard.nav.footer.open.zero": {
+      "en": "v{version} · {keys} keys · Open (no authentication)",
+      "hash": "6b524fb3"
+    },
+    "dashboard.nav.live.connecting": {
+      "en": "connecting",
+      "hash": "3d6df245"
+    },
+    "dashboard.nav.live.disconnected": {
+      "en": "Disconnected",
+      "desc": "Live-tail control: the browser lost contact with the proxy.",
+      "hash": "04dfac36"
+    },
+    "dashboard.nav.live.following": {
+      "en": "Live",
+      "desc": "Live-tail control: the range follows the present.",
+      "hash": "b64ac05f"
+    },
+    "dashboard.nav.live.frozen": {
+      "en": "Absolute",
+      "desc": "Live-tail control: the range is pinned to fixed bounds.",
+      "hash": "f288738f"
+    },
+    "dashboard.nav.live.tooltip": {
+      "en": "Click to freeze/resume the selected time range",
+      "hash": "c08680d1"
+    },
+    "dashboard.nav.tab.capacity": {
+      "en": "Capacity",
+      "hash": "ae65d096"
+    },
+    "dashboard.nav.tab.clients": {
+      "en": "Clients",
+      "hash": "65a72565"
+    },
+    "dashboard.nav.tab.models": {
+      "en": "Models",
+      "desc": "Navigation tab. Plural noun: the per-LLM-model section.",
+      "hash": "d17d2d78"
+    },
+    "dashboard.nav.tab.overview": {
+      "en": "Overview",
+      "hash": "d4b1ea57"
+    },
+    "dashboard.nav.tab.reliability": {
+      "en": "Reliability",
+      "hash": "71d0acd4"
+    },
+    "dashboard.nav.tab.settings": {
+      "en": "Settings",
+      "hash": "74a883a0"
+    },
+    "dashboard.overview.capacity_reliability.heading": {
+      "en": "Capacity & reliability",
+      "hash": "fa267d5d"
+    },
+    "dashboard.overview.kpi.success_counts": {
+      "en": "{ok} of {requests}",
+      "hash": "b15c5ac8"
+    },
+    "dashboard.overview.kpi.tokens_in": {
+      "en": "{tokens} in",
+      "hash": "b48a8ba7"
+    },
+    "dashboard.overview.observation_quality.estimated": {
+      "en": "Estimated",
+      "hash": "b774599a"
+    },
+    "dashboard.overview.observation_quality.invalid": {
+      "en": "Invalid",
+      "hash": "96c34a07"
+    },
+    "dashboard.overview.observation_quality.measured": {
+      "en": "Measured",
+      "hash": "9298c8f4"
+    },
+    "dashboard.overview.observation_quality.unavailable": {
+      "en": "Unavailable",
+      "hash": "ca184496"
+    },
+    "dashboard.overview.observation_quality.zero": {
+      "en": "No observations",
+      "hash": "fed7c51b"
+    },
+    "dashboard.overview.perf.higher_is_better": {
+      "en": "higher is better",
+      "desc": "Note beside a throughput distribution: larger numbers are better. Lowercase, sits under the card heading.",
+      "hash": "8cde7e09"
+    },
+    "dashboard.overview.perf.lower_is_better": {
+      "en": "lower is better",
+      "desc": "Note beside a latency distribution: smaller numbers are better. Lowercase, sits under the card heading.",
+      "hash": "aa8c153c"
+    },
+    "dashboard.overview.performance.heading": {
+      "en": "Performance",
+      "hash": "442aded8"
+    },
+    "dashboard.overview.performance.note": {
+      "en": "median & p95 across the time range",
+      "hash": "3f0caaba"
+    },
+    "dashboard.overview.ring.capacity_sub.few": {
+      "en": "{rpm_now} / {rpm_capacity} rpm · {n} keys",
+      "hash": "9fa2e113"
+    },
+    "dashboard.overview.ring.capacity_sub.many": {
+      "en": "{rpm_now} / {rpm_capacity} rpm · {n} keys",
+      "hash": "9fa2e113"
+    },
+    "dashboard.overview.ring.capacity_sub.one": {
+      "en": "{rpm_now} / {rpm_capacity} rpm · {n} key",
+      "hash": "ba394345"
+    },
+    "dashboard.overview.ring.capacity_sub.other": {
+      "en": "{rpm_now} / {rpm_capacity} rpm · {n} keys",
+      "hash": "9fa2e113"
+    },
+    "dashboard.overview.ring.capacity_sub.two": {
+      "en": "{rpm_now} / {rpm_capacity} rpm · {n} keys",
+      "hash": "9fa2e113"
+    },
+    "dashboard.overview.ring.capacity_sub.zero": {
+      "en": "{rpm_now} / {rpm_capacity} rpm · {n} keys",
+      "hash": "9fa2e113"
+    },
+    "dashboard.overview.ring.capacity_used": {
+      "en": "Capacity used",
+      "desc": "Ring-gauge label. Share of the key pool's configured requests-per-minute currently in use.",
+      "hash": "9448656c"
+    },
+    "dashboard.overview.ring.errors.few": {
+      "en": "errors {pct} · {cooldowns} cooldowns",
+      "hash": "17ac4dc4"
+    },
+    "dashboard.overview.ring.errors.many": {
+      "en": "errors {pct} · {cooldowns} cooldowns",
+      "hash": "17ac4dc4"
+    },
+    "dashboard.overview.ring.errors.one": {
+      "en": "errors {pct} · {cooldowns} cooldown",
+      "hash": "0e735443"
+    },
+    "dashboard.overview.ring.errors.other": {
+      "en": "errors {pct} · {cooldowns} cooldowns",
+      "hash": "17ac4dc4"
+    },
+    "dashboard.overview.ring.errors.two": {
+      "en": "errors {pct} · {cooldowns} cooldowns",
+      "hash": "17ac4dc4"
+    },
+    "dashboard.overview.ring.errors.zero": {
+      "en": "errors {pct} · {cooldowns} cooldowns",
+      "hash": "17ac4dc4"
+    },
+    "dashboard.overview.row.observation_quality": {
+      "en": "Observation quality",
+      "hash": "b56e5b8f"
+    },
+    "dashboard.overview.top_clients.heading": {
+      "en": "Top clients",
+      "hash": "9008a2bd"
+    },
+    "dashboard.overview.top_models.heading": {
+      "en": "Top models",
+      "hash": "79489561"
+    },
+    "dashboard.overview.traffic.heading": {
+      "en": "Traffic",
+      "hash": "4876efb7"
+    },
+    "dashboard.reliability.col.first_token": {
+      "en": "First token",
+      "desc": "Latency segment: time to the first token. Do not expand to the TTFT acronym.",
+      "hash": "2b2cc212"
+    },
+    "dashboard.reliability.col.generation": {
+      "en": "Generation",
+      "desc": "Latency segment: token generation after the first token.",
+      "hash": "40536dd8"
+    },
+    "dashboard.reliability.col.queue_wait": {
+      "en": "Queue wait",
+      "hash": "d55e1fe8"
+    },
+    "dashboard.reliability.empty.no_errors": {
+      "en": "No errors in this time range",
+      "hash": "fbbc2eb1"
+    },
+    "dashboard.reliability.heatmap.heading": {
+      "en": "Activity by hour",
+      "hash": "e9ba315b"
+    },
+    "dashboard.reliability.hero.availability": {
+      "en": "Availability",
+      "hash": "12f67f85"
+    },
+    "dashboard.reliability.hero.budget_used": {
+      "en": "{pct} used",
+      "desc": "Right-hand side of the error-budget row: how much of the budget is consumed. {pct} is an already-formatted percentage.",
+      "hash": "786461c1"
+    },
+    "dashboard.reliability.hero.error_budget": {
+      "en": "error budget",
+      "desc": "SLO error budget: how much of the allowed unavailability has already been consumed. Lowercase on purpose — it sits inline above the budget bar, not as a heading.",
+      "hash": "32064cd1"
+    },
+    "dashboard.reliability.latency.note": {
+      "en": "avg end-to-end",
+      "hash": "50b47513"
+    },
+    "dashboard.reliability.latency.title": {
+      "en": "Latency breakdown",
+      "hash": "66da8fe2"
+    },
+    "dashboard.reliability.load.heading": {
+      "en": "In flight & queued",
+      "hash": "3a303b5c"
+    },
+    "dashboard.reliability.nonsuccess.heading": {
+      "en": "Non-success outcomes",
+      "hash": "c2b41afd"
+    },
+    "dashboard.reliability.outrate.heading": {
+      "en": "Outcomes per minute",
+      "hash": "a7fbda2f"
+    },
+    "dashboard.reliability.outstack.heading": {
+      "en": "Requests by outcome",
+      "hash": "132be6cc"
+    },
+    "dashboard.reliability.outstack.note": {
+      "en": "stacked · per minute",
+      "hash": "bd2367b1"
+    },
+    "dashboard.reliability.pressure.heading": {
+      "en": "Model limits",
+      "hash": "43e77160"
+    },
+    "dashboard.reliability.pressure.note": {
+      "en": "worker exhaustions & per-model caps",
+      "hash": "cde0a950"
+    },
+    "dashboard.reliability.pressure.series": {
+      "en": "Capacity errors/min",
+      "desc": "Chart series name: upstream worker-capacity errors per minute.",
+      "hash": "2fd5ae55"
+    },
+    "dashboard.reliability.queuewait.heading": {
+      "en": "Queue wait",
+      "hash": "d55e1fe8"
+    },
+    "dashboard.reliability.reqrate.heading": {
+      "en": "Requests per minute",
+      "hash": "aa6d477f"
+    },
+    "dashboard.reliability.reqtypes.heading": {
+      "en": "Request types",
+      "hash": "d91b8539"
+    },
+    "dashboard.reliability.row.buffered": {
+      "en": "Buffered",
+      "desc": "Opposite of streaming: the whole response returned at once.",
+      "hash": "8e89b290"
+    },
+    "dashboard.reliability.row.dropped_503": {
+      "en": "Dropped (overload 503)",
+      "desc": "'503' is an HTTP status and must survive verbatim.",
+      "hash": "dc219614"
+    },
+    "dashboard.reliability.row.json_mode": {
+      "en": "JSON mode",
+      "desc": "'JSON' must survive verbatim; only 'mode' translates.",
+      "hash": "36636e63"
+    },
+    "dashboard.reliability.row.requests_with_tools": {
+      "en": "Requests with tools",
+      "hash": "904e6992"
+    },
+    "dashboard.reliability.row.tool_choice": {
+      "en": "Tool choice",
+      "desc": "The API parameter rendered as a label.",
+      "hash": "d3a2c6a3"
+    },
+    "dashboard.reliability.security.heading": {
+      "en": "Reliability & security",
+      "hash": "def25f10"
+    },
+    "dashboard.reliability.slo.met": {
+      "en": "SLO {target} · met",
+      "desc": "Under the availability figure when the target was achieved. 'SLO' is an abbreviation and must survive verbatim; {target} is the target percentage.",
+      "hash": "019ba1ae"
+    },
+    "dashboard.reliability.slo.missed": {
+      "en": "SLO {target} · missed",
+      "desc": "Under the availability figure when the target was not achieved. 'SLO' must survive verbatim; {target} is the target percentage.",
+      "hash": "80d04652"
+    },
+    "dashboard.reliability.slo.no_traffic": {
+      "en": "SLO {target} · no eligible traffic",
+      "desc": "Under the availability figure when the time range contains no requests the SLO counts. 'SLO' must survive verbatim; {target} is the target percentage.",
+      "hash": "a9c9a18c"
+    },
+    "dashboard.topbar.custom.apply": {
+      "en": "Apply",
+      "desc": "Button, imperative verb. Applies the entered range.",
+      "hash": "31e392d1"
+    },
+    "dashboard.topbar.custom.from": {
+      "en": "From",
+      "desc": "Accessible name for the start of a custom dashboard time range.",
+      "hash": "21819769"
+    },
+    "dashboard.topbar.custom.to": {
+      "en": "to",
+      "desc": "Separator between the from and to datetime inputs. Preposition, not a verb.",
+      "hash": "663ea1bf"
+    },
+    "dashboard.topbar.custom.to_label": {
+      "en": "To",
+      "desc": "Accessible name for the end of a custom dashboard time range.",
+      "hash": "f4b06ef6"
+    },
+    "dashboard.topbar.error.load": {
+      "en": "Failed to load time range",
+      "hash": "3f4d86a6"
+    },
+    "dashboard.topbar.error.resume": {
+      "en": "Failed to resume time range",
+      "hash": "5bcd9d8e"
+    },
+    "dashboard.topbar.range.all_time": {
+      "en": "All time",
+      "hash": "9755c8d7"
+    },
+    "dashboard.topbar.range.custom": {
+      "en": "Custom",
+      "desc": "Toggle button. Opens the from/to picker. Adjective used as a label.",
+      "hash": "494ca78f"
+    },
+    "dashboard.topbar.range.default": {
+      "en": "Default · 30d",
+      "desc": "Toggle button. 'Default' is an adjective qualifying the preset time range; 30d is its length.",
+      "hash": "4c1bd988"
+    },
+    "dashboard.topbar.range.default_dynamic": {
+      "en": "Default · {days}d",
+      "hash": "b8f2d75f"
+    },
+    "dashboard.topbar.range.p1h": {
+      "en": "1h",
+      "desc": "Short duration abbreviation on a time-range pill.",
+      "hash": "89481628"
+    },
+    "dashboard.topbar.range.p24h": {
+      "en": "24h",
+      "desc": "Short duration abbreviation on a time-range pill.",
+      "hash": "0b509e6d"
+    },
+    "dashboard.topbar.range.p30d": {
+      "en": "30d",
+      "desc": "Short duration abbreviation on a time-range pill.",
+      "hash": "e3ba17e3"
+    },
+    "dashboard.topbar.range.p6h": {
+      "en": "6h",
+      "desc": "Short duration abbreviation on a time-range pill.",
+      "hash": "13eded38"
+    },
+    "dashboard.topbar.range.p7d": {
+      "en": "7d",
+      "desc": "Short duration abbreviation on a time-range pill.",
+      "hash": "a7c74264"
+    },
+    "dashboard.topbar.scope.absolute": {
+      "en": "○ Absolute {from} – {to}",
+      "hash": "49041a3c"
+    },
+    "dashboard.topbar.scope.following": {
+      "en": "● Live {preset} {from} – {to}",
+      "hash": "f24435d2"
+    },
+    "dashboard.topbar.scope.partial_history": {
+      "en": "Partial history · {from}–{to}",
+      "desc": "Range status for incomplete history; variables are the effective observed bounds, not the requested bounds.",
+      "hash": "41fcec64"
+    },
+    "login.document.title": {
+      "en": "NIM Proxy — Sign in",
+      "desc": "Browser tab title for the sign-in page.",
+      "hash": "991ec816"
+    },
+    "login.error.invalid_credentials": {
+      "en": "Incorrect username or password.",
+      "desc": "Generic authentication failure; never disclose which credential was wrong.",
+      "hash": "2420afe3"
+    },
+    "login.password.placeholder": {
+      "en": "Password",
+      "desc": "Password input placeholder.",
+      "hash": "e7cf3ef4"
+    },
+    "login.prompt": {
+      "en": "Sign in to the dashboard.",
+      "hash": "252990f5"
+    },
+    "login.submit": {
+      "en": "Sign in",
+      "desc": "Submit button, imperative verb phrase.",
+      "hash": "bfd402b2"
+    },
+    "login.username.placeholder": {
+      "en": "Username",
+      "desc": "Username input placeholder.",
+      "hash": "e3b89e9d"
+    },
+    "settings.account.confirm_password": {
+      "en": "Confirm new password",
+      "hash": "bf000421"
+    },
+    "settings.account.current_password": {
+      "en": "Current password",
+      "hash": "72ed2bd7"
+    },
+    "settings.account.heading": {
+      "en": "Account",
+      "hash": "7e1b0d56"
+    },
+    "settings.account.new_password": {
+      "en": "New password · at least 10 characters",
+      "hash": "24a62e18"
+    },
+    "settings.account.note": {
+      "en": "Changing your password signs out your other sessions.",
+      "hash": "eff3bf4c"
+    },
+    "settings.account.update": {
+      "en": "Update password",
+      "hash": "fe45b401"
+    },
+    "settings.account.username": {
+      "en": "Username",
+      "hash": "e3b89e9d"
+    },
+    "settings.client_key.empty": {
+      "en": "No client keys yet",
+      "hash": "27a9a0bf"
+    },
+    "settings.client_key.generate": {
+      "en": "+ Generate key",
+      "hash": "92abcd19"
+    },
+    "settings.client_key.heading.all": {
+      "en": "Client API keys",
+      "hash": "d82056dd"
+    },
+    "settings.client_key.heading.mine": {
+      "en": "My client API keys",
+      "hash": "57621a6e"
+    },
+    "settings.client_key.note": {
+      "en": "These bearer tokens authenticate your clients.",
+      "hash": "2cde1ba8"
+    },
+    "settings.client_key.placeholder": {
+      "en": "name this key, e.g. laptop-cli",
+      "hash": "70a0d9c2"
+    },
+    "settings.client_key.revoke": {
+      "en": "Revoke",
+      "hash": "87e6d00b"
+    },
+    "settings.common.done": {
+      "en": "Done",
+      "hash": "11a6767d"
+    },
+    "settings.common.save": {
+      "en": "Save",
+      "hash": "1509f561"
+    },
+    "settings.connection.base_url": {
+      "en": "Client base URL",
+      "hash": "32444228"
+    },
+    "settings.connection.heading": {
+      "en": "Connection",
+      "hash": "639a40e8"
+    },
+    "settings.copy.copied": {
+      "en": "Copied ✓",
+      "hash": "58d73ef4"
+    },
+    "settings.copy.copy": {
+      "en": "Copy",
+      "hash": "e21f935f"
+    },
+    "settings.copy.failed": {
+      "en": "Copy failed",
+      "hash": "5b50e7a6"
+    },
+    "settings.dialog.delete_user": {
+      "en": "Delete {username}? Their NIM API keys leave the pool and their client API keys are revoked.",
+      "hash": "56bdc932"
+    },
+    "settings.dialog.remove_key": {
+      "en": "Remove NIM API key nvapi-••••{last4} from the pool? In-flight requests finish, but its rate-limit window is lost.",
+      "hash": "73435aa0"
+    },
+    "settings.dialog.reset_password": {
+      "en": "New password for {username} (at least 10 characters):",
+      "hash": "338150d4"
+    },
+    "settings.dialog.revoke_client_key": {
+      "en": "Revoke client API key \"{name}\"? Clients using it stop working immediately.",
+      "hash": "5fb2a465"
+    },
+    "settings.error.load": {
+      "en": "Could not load Settings. Reload the page and sign in again.",
+      "hash": "caed8f2c"
+    },
+    "settings.error.request_failed": {
+      "en": "Request failed (HTTP {status}).",
+      "hash": "3692891d"
+    },
+    "settings.key.add_anyway": {
+      "en": "Add anyway",
+      "hash": "d0652ad3"
+    },
+    "settings.key.empty": {
+      "en": "No NIM API keys yet — add one below",
+      "hash": "fa52e200"
+    },
+    "settings.key.guarded": {
+      "en": "Protected: the superuser must keep at least one enabled NIM API key. Add or enable another before removing this one.",
+      "hash": "8f84df6b"
+    },
+    "settings.key.heading.all": {
+      "en": "NIM API keys",
+      "hash": "11fdda21"
+    },
+    "settings.key.heading.mine": {
+      "en": "My NIM API keys",
+      "hash": "af1c4f87"
+    },
+    "settings.key.notice.admin": {
+      "en": "Keys you add are assigned to your account and join the shared pool. Changes take effect immediately. Disabling a key preserves its rate-limit state.",
+      "hash": "4b69ae49"
+    },
+    "settings.key.notice.mine": {
+      "en": "Keys you add are assigned to your account and join the shared pool. Only you and admins can see that they exist. Changes take effect immediately. Disabling a key preserves its rate-limit state.",
+      "hash": "124f2a6c"
+    },
+    "settings.key.off": {
+      "en": "Disabled",
+      "hash": "75081b59"
+    },
+    "settings.key.placeholder": {
+      "en": "Paste a new NIM API key (nvapi-…)",
+      "hash": "4c922c00"
+    },
+    "settings.key.pool_note": {
+      "en": "Pool: {enabled} enabled · Total: {capacity} rpm",
+      "hash": "c2936548"
+    },
+    "settings.key.remove": {
+      "en": "Remove NIM API key",
+      "hash": "d15bafa9"
+    },
+    "settings.key.rpm": {
+      "en": "Requests per minute",
+      "desc": "Accessible name for a NIM API key rate-limit input.",
+      "hash": "aa6d477f"
+    },
+    "settings.key.slot": {
+      "en": "Slot {n}",
+      "hash": "18616a78"
+    },
+    "settings.key.state.cooldown": {
+      "en": "cooldown {seconds}s",
+      "hash": "b35f8e5e"
+    },
+    "settings.key.state.disabled": {
+      "en": "Disabled",
+      "hash": "75081b59"
+    },
+    "settings.key.state.in_window": {
+      "en": "{in_window} / {rpm} in window",
+      "hash": "773cf007"
+    },
+    "settings.key.state.unassigned": {
+      "en": "Unassigned",
+      "hash": "14d33bd0"
+    },
+    "settings.key.toggle.disable": {
+      "en": "Disable. Rate-limit state is preserved.",
+      "hash": "48b5c705"
+    },
+    "settings.key.toggle.enable": {
+      "en": "Enable",
+      "hash": "5342e09f"
+    },
+    "settings.key.validate_add": {
+      "en": "Validate & add",
+      "hash": "15414785"
+    },
+    "settings.key.validating": {
+      "en": "Validating…",
+      "hash": "cd51f8c8"
+    },
+    "settings.mode.heading": {
+      "en": "API access mode",
+      "hash": "4668b68f"
+    },
+    "settings.mode.help": {
+      "en": "Controls /v1 client calls only. In API key required mode, clients use a bearer token. Open (no authentication) allows anyone who can reach /v1. Use only on trusted networks.",
+      "desc": "Full API access-mode explanation. This is deliberately one plain catalog sentence; the former bold literals are not parsed or reassembled at runtime.",
+      "hash": "3431dd52"
+    },
+    "settings.mode.keyed": {
+      "en": "API key required",
+      "hash": "3b855d54"
+    },
+    "settings.mode.keyed_note": {
+      "en": "Clients authenticate with a client API key.",
+      "hash": "7fd7e1d1"
+    },
+    "settings.mode.no_client_keys": {
+      "en": "Requiring an API key with no client API keys locks every client out. Generate one under Access & keys.",
+      "hash": "d3d6605c"
+    },
+    "settings.mode.open": {
+      "en": "Open (no authentication)",
+      "hash": "17759351"
+    },
+    "settings.mode.open_note": {
+      "en": "Anyone who can reach /v1 can use the pool.",
+      "hash": "d9251b4a"
+    },
+    "settings.nav.access": {
+      "en": "Access & keys",
+      "hash": "bb83749e"
+    },
+    "settings.nav.account": {
+      "en": "Account",
+      "hash": "7e1b0d56"
+    },
+    "settings.nav.server": {
+      "en": "Server",
+      "hash": "aef7de28"
+    },
+    "settings.nav.users": {
+      "en": "Users",
+      "hash": "6b0cc904"
+    },
+    "settings.secret.copy": {
+      "en": "Copy",
+      "hash": "e21f935f"
+    },
+    "settings.secret.ready": {
+      "en": "Client API key “{name}” is ready. Copy it now.",
+      "hash": "942f7f44"
+    },
+    "settings.secret.warning": {
+      "en": "You won't see this again.",
+      "hash": "8452e785"
+    },
+    "settings.server.adaptive": {
+      "en": "Automatic",
+      "hash": "d461a493"
+    },
+    "settings.server.add_override": {
+      "en": "Add override",
+      "hash": "fafc22c3"
+    },
+    "settings.server.base_url": {
+      "en": "Upstream base URL",
+      "desc": "Accessible name for the configurable upstream base URL.",
+      "hash": "a3b55051"
+    },
+    "settings.server.base_url_note": {
+      "en": "Saving changes the upstream base URL and clears the model catalog cache.",
+      "hash": "eefdd484"
+    },
+    "settings.server.days": {
+      "en": "days",
+      "hash": "ab51004e"
+    },
+    "settings.server.history.bytes.few": {
+      "en": "{bytes} bytes",
+      "desc": "CLDR plural category 'few' for the history data-file size. {bytes} is already locale-formatted; English repeats the other form.",
+      "hash": "31800b69"
+    },
+    "settings.server.history.bytes.many": {
+      "en": "{bytes} bytes",
+      "desc": "CLDR plural category 'many' for the history data-file size. {bytes} is already locale-formatted; English repeats the other form.",
+      "hash": "31800b69"
+    },
+    "settings.server.history.bytes.one": {
+      "en": "{bytes} byte",
+      "desc": "CLDR plural category 'one' for the history data-file size. {bytes} is already locale-formatted.",
+      "hash": "51bd3673"
+    },
+    "settings.server.history.bytes.other": {
+      "en": "{bytes} bytes",
+      "desc": "CLDR plural category 'other' for the history data-file size. {bytes} is already locale-formatted.",
+      "hash": "31800b69"
+    },
+    "settings.server.history.bytes.two": {
+      "en": "{bytes} bytes",
+      "desc": "CLDR plural category 'two' for the history data-file size. {bytes} is already locale-formatted; English repeats the other form.",
+      "hash": "31800b69"
+    },
+    "settings.server.history.bytes.zero": {
+      "en": "{bytes} bytes",
+      "desc": "CLDR plural category 'zero' for the history data-file size. {bytes} is already locale-formatted; English repeats the other form.",
+      "hash": "31800b69"
+    },
+    "settings.server.history.compaction_pending": {
+      "en": "Compaction is pending.",
+      "hash": "1260d448"
+    },
+    "settings.server.history.data_file": {
+      "en": "Data file",
+      "hash": "38f5f508"
+    },
+    "settings.server.history.default_range": {
+      "en": "Default time range",
+      "hash": "5ec3c658"
+    },
+    "settings.server.history.heading": {
+      "en": "History & dashboard",
+      "hash": "d0c9c7aa"
+    },
+    "settings.server.history.no_data": {
+      "en": "No data yet",
+      "hash": "e2e18a76"
+    },
+    "settings.server.history.oldest": {
+      "en": "Oldest data point",
+      "hash": "ef4ab020"
+    },
+    "settings.server.history.persistence_degraded": {
+      "en": "History persistence is degraded. Restart the proxy to retry canonical storage.",
+      "hash": "4b24eb63"
+    },
+    "settings.server.history.retention": {
+      "en": "History retention · 0 = unlimited",
+      "hash": "c137c172"
+    },
+    "settings.server.history.slo": {
+      "en": "Availability SLO",
+      "hash": "226f7fe9"
+    },
+    "settings.server.limit.heartbeat": {
+      "en": "Heartbeat",
+      "hash": "9df89427"
+    },
+    "settings.server.limit.max_inflight": {
+      "en": "Max in-flight",
+      "hash": "ea457682"
+    },
+    "settings.server.limit.max_wait": {
+      "en": "Max wait",
+      "hash": "c2cd8e04"
+    },
+    "settings.server.limit.models_ttl": {
+      "en": "Model cache TTL",
+      "hash": "cbd325d5"
+    },
+    "settings.server.limit.request_timeout": {
+      "en": "Request timeout",
+      "hash": "70f60044"
+    },
+    "settings.server.limit.stream_idle": {
+      "en": "Stream idle timeout",
+      "hash": "c81a6778"
+    },
+    "settings.server.model_concurrency": {
+      "en": "Model concurrency limit",
+      "desc": "Accessible name for a per-model governor override limit.",
+      "hash": "c1032472"
+    },
+    "settings.server.model_limits": {
+      "en": "Model limits",
+      "hash": "43e77160"
+    },
+    "settings.server.model_limits_help": {
+      "en": "Limits concurrent requests per model when NIM reports worker exhaustion. Limits adjust automatically; add an override only for a known concurrency limit.",
+      "hash": "e091e076"
+    },
+    "settings.server.model_placeholder": {
+      "en": "model id, e.g. moonshotai/kimi-k2.5",
+      "hash": "26ae28e9"
+    },
+    "settings.server.no_overrides": {
+      "en": "No overrides set",
+      "hash": "3cbc17e7"
+    },
+    "settings.server.remove_override": {
+      "en": "Remove override",
+      "hash": "6d43eea1"
+    },
+    "settings.server.strict_note": {
+      "en": "Rejects parameters the upstream does not accept.",
+      "hash": "4e5f898d"
+    },
+    "settings.server.strict_passthrough": {
+      "en": "Strict passthrough",
+      "hash": "75005c81"
+    },
+    "settings.server.unit.limit": {
+      "en": "concurrent",
+      "hash": "a35178ec"
+    },
+    "settings.server.unit.seconds": {
+      "en": "s",
+      "hash": "043a7187"
+    },
+    "settings.server.upstream_limits": {
+      "en": "Upstream & limits",
+      "hash": "e1ebfed2"
+    },
+    "settings.users.add": {
+      "en": "Add user",
+      "hash": "eec5c73a"
+    },
+    "settings.users.client_key_count.few": {
+      "en": "{n} client API keys",
+      "desc": "CLDR plural category 'few' for the user's client API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "db3cf8c9"
+    },
+    "settings.users.client_key_count.many": {
+      "en": "{n} client API keys",
+      "desc": "CLDR plural category 'many' for the user's client API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "db3cf8c9"
+    },
+    "settings.users.client_key_count.one": {
+      "en": "{n} client API key",
+      "desc": "CLDR plural category 'one' for the user's client API key count. {n} is already locale-formatted.",
+      "hash": "591f6a81"
+    },
+    "settings.users.client_key_count.other": {
+      "en": "{n} client API keys",
+      "desc": "CLDR plural category 'other' for the user's client API key count. {n} is already locale-formatted.",
+      "hash": "db3cf8c9"
+    },
+    "settings.users.client_key_count.two": {
+      "en": "{n} client API keys",
+      "desc": "CLDR plural category 'two' for the user's client API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "db3cf8c9"
+    },
+    "settings.users.client_key_count.zero": {
+      "en": "{n} client API keys",
+      "desc": "CLDR plural category 'zero' for the user's client API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "db3cf8c9"
+    },
+    "settings.users.delete": {
+      "en": "Delete",
+      "hash": "e2d0a549"
+    },
+    "settings.users.heading": {
+      "en": "Users",
+      "hash": "6b0cc904"
+    },
+    "settings.users.nim_key_count.few": {
+      "en": "{n} NIM API keys",
+      "desc": "CLDR plural category 'few' for the user's NIM API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "e964131c"
+    },
+    "settings.users.nim_key_count.many": {
+      "en": "{n} NIM API keys",
+      "desc": "CLDR plural category 'many' for the user's NIM API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "e964131c"
+    },
+    "settings.users.nim_key_count.one": {
+      "en": "{n} NIM API key",
+      "desc": "CLDR plural category 'one' for the user's NIM API key count. {n} is already locale-formatted.",
+      "hash": "edbe8c52"
+    },
+    "settings.users.nim_key_count.other": {
+      "en": "{n} NIM API keys",
+      "desc": "CLDR plural category 'other' for the user's NIM API key count. {n} is already locale-formatted.",
+      "hash": "e964131c"
+    },
+    "settings.users.nim_key_count.two": {
+      "en": "{n} NIM API keys",
+      "desc": "CLDR plural category 'two' for the user's NIM API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "e964131c"
+    },
+    "settings.users.nim_key_count.zero": {
+      "en": "{n} NIM API keys",
+      "desc": "CLDR plural category 'zero' for the user's NIM API key count. {n} is already locale-formatted; English repeats the other form.",
+      "hash": "e964131c"
+    },
+    "settings.users.note": {
+      "en": "Deleting a user removes their NIM API keys from the pool and revokes their client API keys.",
+      "hash": "10877a46"
+    },
+    "settings.users.password_placeholder": {
+      "en": "initial password (10+ characters)",
+      "hash": "460b4335"
+    },
+    "settings.users.reset_password": {
+      "en": "Reset password",
+      "hash": "e0edfeb3"
+    },
+    "settings.users.role": {
+      "en": "Role",
+      "hash": "14736a2e"
+    },
+    "settings.users.self_managed": {
+      "en": "Self-managed",
+      "hash": "122c90c3"
+    },
+    "settings.users.superuser_note": {
+      "en": "The superuser changes its own password in Account settings.",
+      "hash": "cf3196cb"
+    },
+    "settings.users.username_placeholder": {
+      "en": "new username",
+      "hash": "534c560d"
+    },
+    "settings.validation.client_key_name": {
+      "en": "Enter a client API key name, for example laptop-cli.",
+      "hash": "75659563"
+    },
+    "settings.validation.governor": {
+      "en": "Enter a model ID and a concurrency limit of at least 1.",
+      "hash": "82446307"
+    },
+    "settings.validation.history_default": {
+      "en": "Default time range must be at least 1 day.",
+      "hash": "d0de6732"
+    },
+    "settings.validation.history_retention": {
+      "en": "History retention must be 0 or more days.",
+      "hash": "6f5ebc67"
+    },
+    "settings.validation.initial_password": {
+      "en": "Initial password must be at least 10 characters.",
+      "hash": "fd6c7b3d"
+    },
+    "settings.validation.limits": {
+      "en": "Every limit needs a whole number ≥ 0.",
+      "hash": "bd14b8f3"
+    },
+    "settings.validation.models_added.few": {
+      "en": "✓ {n} models found. Adding NIM API key…",
+      "desc": "CLDR plural category 'few' for successful NIM API key validation. {n} is the number of returned models and is already locale-formatted; English repeats the other form.",
+      "hash": "8325eafc"
+    },
+    "settings.validation.models_added.many": {
+      "en": "✓ {n} models found. Adding NIM API key…",
+      "desc": "CLDR plural category 'many' for successful NIM API key validation. {n} is the number of returned models and is already locale-formatted; English repeats the other form.",
+      "hash": "8325eafc"
+    },
+    "settings.validation.models_added.one": {
+      "en": "✓ {n} model found. Adding NIM API key…",
+      "desc": "CLDR plural category 'one' for successful NIM API key validation. {n} is the number of returned models and is already locale-formatted.",
+      "hash": "c1e489e4"
+    },
+    "settings.validation.models_added.other": {
+      "en": "✓ {n} models found. Adding NIM API key…",
+      "desc": "CLDR plural category 'other' for successful NIM API key validation. {n} is the number of returned models and is already locale-formatted.",
+      "hash": "8325eafc"
+    },
+    "settings.validation.models_added.two": {
+      "en": "✓ {n} models found. Adding NIM API key…",
+      "desc": "CLDR plural category 'two' for successful NIM API key validation. {n} is the number of returned models and is already locale-formatted; English repeats the other form.",
+      "hash": "8325eafc"
+    },
+    "settings.validation.models_added.zero": {
+      "en": "✓ {n} models found. Adding NIM API key…",
+      "desc": "CLDR plural category 'zero' for successful NIM API key validation. {n} is the number of returned models and is already locale-formatted; English repeats the other form.",
+      "hash": "8325eafc"
+    },
+    "settings.validation.new_password": {
+      "en": "New password must be at least 10 characters.",
+      "hash": "cbe2939e"
+    },
+    "settings.validation.nim_key_required": {
+      "en": "Paste a NIM API key first.",
+      "hash": "45e7e8a4"
+    },
+    "settings.validation.password": {
+      "en": "Password must be at least 10 characters.",
+      "hash": "7e65d20b"
+    },
+    "settings.validation.password_mismatch": {
+      "en": "Passwords do not match.",
+      "hash": "6c6e178a"
+    },
+    "settings.validation.password_reset": {
+      "en": "Password reset for {username}.",
+      "hash": "42bdd256"
+    },
+    "settings.validation.password_updated": {
+      "en": "Password updated. Other sessions were signed out.",
+      "hash": "3856551c"
+    },
+    "settings.validation.saved": {
+      "en": "Saved.",
+      "hash": "fca046cc"
+    },
+    "settings.validation.slo": {
+      "en": "SLO target must be greater than 0 and at most 100.",
+      "hash": "90bf3754"
+    },
+    "settings.validation.username": {
+      "en": "Choose a username.",
+      "hash": "b9305ea3"
+    },
+    "setup.document.title": {
+      "en": "NIM Proxy — First-time setup",
+      "desc": "Browser tab title. 'NIM Proxy' is the product name and stays.",
+      "hash": "a59b017c"
+    },
+    "setup.header.subtitle": {
+      "en": "Complete setup: create the superuser account and add at least one NIM API key.",
+      "hash": "e713a395"
+    },
+    "setup.header.title": {
+      "en": "— First-time setup",
+      "desc": "Follows the untranslated NIM PROXY wordmark.",
+      "hash": "f1de6d69"
+    },
+    "setup.step1.confirm": {
+      "en": "Confirm password",
+      "hash": "5ac265f3"
+    },
+    "setup.step1.error.password_length": {
+      "en": "Password must be at least 10 characters.",
+      "desc": "Validation error under the account form. 10 is the enforced minimum length.",
+      "hash": "7e65d20b"
+    },
+    "setup.step1.error.password_mismatch": {
+      "en": "Passwords do not match.",
+      "hash": "6c6e178a"
+    },
+    "setup.step1.error.username_charset": {
+      "en": "Username: 1–32 letters, digits, '.', '_' or '-'.",
+      "desc": "Validation error under the account form. The character set and the 1-32 range are enforced by the server and must survive verbatim.",
+      "hash": "c437375f"
+    },
+    "setup.step1.hint": {
+      "en": "The superuser account cannot be deleted.",
+      "desc": "The one durable restriction this hint communicates.",
+      "hash": "322426e9"
+    },
+    "setup.step1.password": {
+      "en": "Password (10+ characters)",
+      "hash": "79c07c0e"
+    },
+    "setup.step1.username": {
+      "en": "Username",
+      "hash": "e3b89e9d"
+    },
+    "setup.step1.username.placeholder": {
+      "en": "e.g. admin",
+      "desc": "Input placeholder. 'e.g.' needs the locale's own abbreviation; 'admin' is a suggested value.",
+      "hash": "d415d634"
+    },
+    "setup.step2.addkey": {
+      "en": "Validate & add",
+      "hash": "15414785"
+    },
+    "setup.step2.advanced": {
+      "en": "Advanced — upstream base URL",
+      "hash": "8dd07757"
+    },
+    "setup.step2.base_url": {
+      "en": "Upstream base URL",
+      "desc": "Accessible name for the optional setup upstream URL input.",
+      "hash": "a3b55051"
+    },
+    "setup.step2.error.key_duplicate": {
+      "en": "That key is already added.",
+      "desc": "Validation error: the same NIM key is already in the list.",
+      "hash": "984cdd49"
+    },
+    "setup.step2.error.key_required": {
+      "en": "Paste a NIM API key first.",
+      "desc": "Validation error: the key field is empty. 'NIM' is the vendor product name and stays.",
+      "hash": "45e7e8a4"
+    },
+    "setup.step2.error.validation_failed": {
+      "en": "Key validation failed: {error}",
+      "desc": "The upstream rejected the key. {error} is the upstream's own error text or an HTTP status code, inserted verbatim and never translated.",
+      "hash": "38f22520"
+    },
+    "setup.step2.error.validation_request": {
+      "en": "Validation request failed: {error}",
+      "desc": "The browser could not reach the proxy to validate the key. {error} is the browser's error text, inserted verbatim and never translated.",
+      "hash": "9e7beddf"
+    },
+    "setup.step2.hint": {
+      "en": "NIM API keys are shared across clients. The default rate limit is 40 requests/min per key.",
+      "desc": "Explains pool sharing and the default per-key rate limit.",
+      "hash": "de52a624"
+    },
+    "setup.step2.key_label": {
+      "en": "NIM API key",
+      "desc": "Accessible name for the setup NIM API key input.",
+      "hash": "48470460"
+    },
+    "setup.step2.key_meta": {
+      "en": "{models} models · {rpm} rpm",
+      "desc": "Meta line on an added key: how many models the key reached, then its per-minute limit. 'rpm' is a unit and must survive verbatim.",
+      "hash": "026c787c"
+    },
+    "setup.step2.rpm_label": {
+      "en": "Requests per minute",
+      "desc": "Accessible name for the setup NIM API key rate-limit input.",
+      "hash": "aa6d477f"
+    },
+    "setup.step2.validating": {
+      "en": "Validating…",
+      "desc": "Button label while a key is probed upstream.",
+      "hash": "cd51f8c8"
+    },
+    "setup.step3.api_access_keyed": {
+      "en": "API key required · first client key \"default\"",
+      "desc": "Review line, shown when the wizard will mint a client key. \"default\" is the key's literal name and must survive verbatim, quotes included.",
+      "hash": "e77044c2"
+    },
+    "setup.step3.api_access_open": {
+      "en": "API key required · no client keys configured",
+      "desc": "Review line when keyed mode has no client keys.",
+      "hash": "df3a52d0"
+    },
+    "setup.step3.error.failed": {
+      "en": "Setup failed ({status})",
+      "desc": "The proxy rejected the setup request. {status} is the HTTP status code, a number inserted verbatim.",
+      "hash": "1a1df234"
+    },
+    "setup.step3.error.request": {
+      "en": "Setup request failed: {error}",
+      "desc": "The browser could not reach the proxy to submit setup. {error} is the browser's error text, inserted verbatim and never translated.",
+      "hash": "d35faf3c"
+    },
+    "setup.step3.finish": {
+      "en": "Create & open dashboard",
+      "hash": "c91cfd01"
+    },
+    "setup.step3.mintkey": {
+      "en": "Create the first client API key ({key}) for immediate access to {endpoint}",
+      "desc": "Checkbox label. {key} and {endpoint} are fixed machine values.",
+      "hash": "fc1a3704"
+    },
+    "setup.step3.mintwarn": {
+      "en": "Without a client API key, {b}all{/b} /v1 requests are rejected. Create one in Settings → Access & keys, or change API authentication to Open (no authentication).",
+      "desc": "{b}...{/b} emphasizes that every /v1 request is rejected until the operator creates a client key or explicitly opens API authentication.",
+      "hash": "169155e2"
+    },
+    "setup.step3.review.api_access": {
+      "en": "API access",
+      "desc": "Review-panel row label. Whether the proxy's own /v1 endpoint will require a client API key.",
+      "hash": "923fd434"
+    },
+    "setup.step3.review.keys": {
+      "en": "NIM keys",
+      "desc": "Review-panel row label: the upstream NIM API keys added in step 2. 'NIM' is the vendor product name and stays.",
+      "hash": "504945ef"
+    },
+    "setup.step3.review.keys_value": {
+      "en": "{count} validated · Total {rpm} rpm",
+      "desc": "Review-panel value for the NIM keys row: how many keys validated, then the pool's combined per-minute limit. 'rpm' is a unit and must survive verbatim.",
+      "hash": "1497318d"
+    },
+    "setup.step3.review.superuser": {
+      "en": "Superuser",
+      "desc": "Review-panel row label. The role of the account being created; the proxy persists this same role name.",
+      "hash": "593b0a98"
+    },
+    "setup.step3.review.upstream": {
+      "en": "Upstream",
+      "desc": "Review-panel row label. The upstream base URL requests are forwarded to; the value beside it is a URL.",
+      "hash": "94adc696"
+    },
+    "setup.step4.apikey": {
+      "en": "Client API key",
+      "hash": "f3a91248"
+    },
+    "setup.step4.baseurl": {
+      "en": "Client base URL",
+      "hash": "32444228"
+    },
+    "setup.step4.copied": {
+      "en": "Copied",
+      "desc": "Button label after a successful clipboard copy. Past tense.",
+      "hash": "8d525e5f"
+    },
+    "setup.step4.copy": {
+      "en": "Copy",
+      "desc": "Button, imperative verb. Copies the adjacent value to the clipboard.",
+      "hash": "e21f935f"
+    },
+    "setup.step4.intro": {
+      "en": "Setup complete. Configure your client with the proxy URL and API key below. The API key is shown {b}only once{/b}; only its digest is stored.",
+      "desc": "{b}...{/b} emphasizes the once-only secret display.",
+      "hash": "b9a0cea0"
+    },
+    "setup.step4.opendash": {
+      "en": "Open dashboard",
+      "desc": "Button, imperative verb phrase. 'Open' is the verb, not the API-mode adjective.",
+      "hash": "803f2313"
+    },
+    "setup.step4.select_copy": {
+      "en": "Select & copy",
+      "desc": "Button label when the clipboard API is unavailable and the user must copy manually.",
+      "hash": "09201dce"
+    },
+    "setup.stepper.step1": {
+      "en": "Create account",
+      "hash": "798ca2ce"
+    },
+    "setup.stepper.step2": {
+      "en": "Add NIM API keys",
+      "hash": "77cd4a4d"
+    },
+    "setup.stepper.step3": {
+      "en": "Review & finish",
+      "hash": "d037a7cf"
+    },
+    "setup.wizard.back": {
+      "en": "Back",
+      "hash": "76900f1b"
+    },
+    "setup.wizard.continue": {
+      "en": "Continue",
+      "hash": "31fbef16"
+    }
+  }
+}

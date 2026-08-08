@@ -1,0 +1,26 @@
+{
+  "locale": "xx-XX",
+  "state": "Machine",
+  "messages": {
+    "app.greeting": {
+      "en": "Hello",
+      "hash": "185f8db3"
+    },
+    "app.count": {
+      "en": "{count} of {total}",
+      "hash": "de344ba2"
+    },
+    "app.emphasis": {
+      "en": "Shown once only",
+      "hash": "4723b13d"
+    },
+    "app.short_label": {
+      "en": "Keys",
+      "hash": "f0d66a79"
+    },
+    "app.rate": {
+      "en": "120 rpm · 429 retry",
+      "hash": "4b64f8c2"
+    }
+  }
+}

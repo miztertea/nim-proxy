@@ -1,0 +1,85 @@
+{
+  "client_keys": [
+    {
+      "last4": "abcd",
+      "name": "fixture-client",
+      "owner": "fixture-user"
+    }
+  ],
+  "locale": "en-US",
+  "mode": "keyed",
+  "nim_keys": [
+    {
+      "cooldown_ms": 0,
+      "enabled": true,
+      "fingerprint": "f17e0001",
+      "guarded": false,
+      "in_window": 1,
+      "lane": 0,
+      "last4": "wxyz",
+      "owner": "fixture-user",
+      "rpm": 40
+    },
+    {
+      "cooldown_ms": 0,
+      "enabled": true,
+      "fingerprint": "5a000001",
+      "guarded": true,
+      "in_window": 0,
+      "lane": 1,
+      "last4": "root",
+      "owner": "fixture-superuser",
+      "rpm": 40
+    }
+  ],
+  "pool": {
+    "capacity_rpm": 80,
+    "enabled": 2
+  },
+  "role": "superuser",
+  "server": {
+    "base_url": "https://integrate.api.nvidia.com",
+    "dashboard": {
+      "default_window_days": 30,
+      "slo_target_percent": 99.9
+    },
+    "default_locale": "en-US",
+    "governor": {
+      "enabled": true,
+      "overrides": {
+        "fixture/model": 8
+      }
+    },
+    "history": {
+      "available_from": 1700000000,
+      "compaction_pending": true,
+      "days": 30,
+      "file_bytes": 12345,
+      "persistence": "degraded"
+    },
+    "limits": {
+      "heartbeat_secs": 10,
+      "max_inflight": 512,
+      "max_wait_secs": 900,
+      "models_ttl_secs": 600,
+      "request_timeout_secs": 300,
+      "stream_idle_secs": 300,
+      "strict_passthrough": false
+    }
+  },
+  "username": "fixture-superuser",
+  "users": [
+    {
+      "client_keys": 0,
+      "nim_keys": 1,
+      "role": "superuser",
+      "username": "fixture-superuser"
+    },
+    {
+      "client_keys": 1,
+      "nim_keys": 1,
+      "role": "user",
+      "username": "fixture-user"
+    }
+  ]
+}

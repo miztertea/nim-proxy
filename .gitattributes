@@ -11,3 +11,8 @@
 # Fuzz seed inputs are exact bytes; eol-normalizing them would corrupt the
 # corpus.
 fuzz/seeds/** binary
+
+# openapi.json is generated from the handlers (UPDATE_OPENAPI=1 cargo test
+# --test openapi) and CI fails on drift — collapse it in review, and never
+# hand-edit it.
+openapi.json linguist-generated=true

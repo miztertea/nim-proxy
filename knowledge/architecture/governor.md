@@ -14,7 +14,7 @@ orthogonal to the per-key 40 RPM limit
 40 RPM with 45–90s generations, steady-state in-flight is 30–60 — you saturate
 the worker pool while fully RPM-legal. Crucially the cap is **model-scoped and
 shared across all keys** (and all of NIM's tenants), so failing over to another
-key can't help; the old behavior of benching the lane just burned healthy key
+key can't help; the old behavior of cooling down the lane just burned healthy key
 capacity.
 
 ## Classify first, then govern
@@ -22,7 +22,7 @@ capacity.
 `is_worker_exhausted(body)` sniffs the signature (`"Worker local total request
 limit"`) on the pre-stream error response. In `proxy.rs`'s retry path this is
 checked **before** generic 429/5xx handling: worker exhaustion routes to
-per-model backoff and **never benches the lane**. Plain 429/5xx behavior is
+per-model backoff and **never cools down the lane**. Plain 429/5xx behavior is
 unchanged ([key-pool](key-pool.md)).
 
 ## Admission gate
@@ -44,7 +44,7 @@ error the governor:
 - engages at `max(1, inflight_at_error / 2)` (the failing request's permit is
   still held, so the observed count includes it),
 - opens a short **2s drain gap** blocking new admissions while workers free up
-  (a drain gap, not a lane-style bench),
+  (a drain gap, not a lane-style cooldown),
 - then **grows +1 per stable minute** (additive increase),
 - and **dissolves back to ungoverned after 30 clean minutes**.
 

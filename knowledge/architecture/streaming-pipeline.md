@@ -1,8 +1,8 @@
 ---
 type: Component
 title: Streaming pipeline (src/proxy.rs)
-description: SSE commitment, heartbeats, retry/failover, absolute deadlines, idle cutoff, and token scanning.
-tags: [streaming, sse, retries, deadlines, metrics]
+description: SSE commitment, heartbeats, retry/failover, deadlines, idle cutoff, and bounded side-band observations.
+tags: [streaming, sse, retries, deadlines, metrics, observations]
 timestamp: 2026-07-16T00:00:00Z
 ---
 
@@ -20,7 +20,7 @@ For a `stream: true` chat request:
    interval a `: heartbeat` comment goes out (send failure = client gone →
    the granted slot is never wasted on a dead request).
 4. **Send + triage**: 400-after-injection → retry untouched and remember the
-   model; 429/500/502/503/504 → bench the lane, `: retrying` comment, loop
+   model; 429/500/502/503/504 → cool down the lane, `: retrying` comment, loop
    (instant failover to other lanes); other non-2xx → relay as an in-stream
    `error` event; success → pipe.
 5. **Race the absolute deadline**: when the caller supplies
@@ -29,21 +29,23 @@ For a `stream: true` chat request:
    workflow (reqwest work + model/queue ownership), records status `deadline`,
    and best-effort sends a terminal `deadline_exceeded` SSE error. See the
    [deadline decision](../decisions/explicit-request-deadline.md).
-6. **Pipe with watchdog**: chunks forward verbatim while `SseScan` (a
-   line-reassembling observer) counts data events and extracts the `usage`
-   object. Each upstream read races two exits in a `select!`: the
+6. **Pipe with watchdog**: chunks forward verbatim while the private
+   [`SseObserver`](nim-observations.md) assembles only one bounded current SSE
+   event for side-band classification. Each upstream read races two exits in a `select!`: the
    `stream_idle` timeout cuts stalled upstreams with an in-stream error
    (status label `stall`), and `tx.closed()` notices a client hang-up
    immediately — freeing the request's `max_inflight` slot at disconnect
    time rather than at the stall cutoff (with `stream_idle` 0 there is no
    cutoff, so this is what prevents hung upstreams from pinning slots until
    restart).
-7. **Account**: TTFT histogram at first chunk; tokens/sec and prompt/
-   completion counters at end (`source="usage"` exact, `"estimate"` =
-   one-per-event fallback); one access-log line per request.
+7. **Account**: TTFT histogram at first chunk; finalized measured prompt,
+   measured/estimated completion (`source="usage"`/`"estimate"`), bounded
+   finish, reasoning, and tool counters at end; one access-log line per
+   request. Invalid/unavailable upstream observation values emit no existing
+   numeric/quality metric.
 
-Non-streaming requests use the same wait/retry loop minus heartbeats and
-harvest `usage` from the buffered JSON. An explicit deadline races the whole
+Non-streaming requests use the same wait/retry loop minus heartbeats and pass
+the already-buffered JSON body to the same observation rules. An explicit deadline races the whole
 buffered future, which is also how the proxy bounds upstream work after an
 otherwise-unobservable buffered client disconnect. `/v1/models` GETs
 short-circuit to a TTL cache with single-flight refresh.

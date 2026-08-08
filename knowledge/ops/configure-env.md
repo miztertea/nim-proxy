@@ -42,8 +42,8 @@ the contract.)
 NIM keys (per-key rpm, enable/disable, ownership), the upstream base URL,
 client API keys and the open/keyed API mode, limits (max_wait, heartbeat,
 stream_idle, request_timeout, models_ttl, max_inflight, strict_passthrough),
-pricing, the default dashboard window, history retention days, the
-availability SLO, the model-pressure governor, and users/roles all live in the
+the default time range, history retention days, the
+availability SLO, the model limits, and users/roles all live in the
 store and are edited from the dashboard. A Settings save validates the
 complete candidate, writes `config.json` atomically, and swaps the live
 configuration; no restart is needed.
@@ -58,13 +58,20 @@ default to 30 days. The default window must be at least one day. Retention `0`
 is unlimited; finite retention must be at least the default window. The SLO
 must be a finite percentage greater than 0 and at most 100. A combined save is
 all-or-nothing: any invalid field leaves the persisted and live configuration
-unchanged. Reducing retention trims the visible index immediately and
-schedules atomic background compaction of `history.jsonl`.
+unchanged. Reducing finite retention trims the visible index immediately and
+schedules atomic canonical `history-v1.jsonl` compaction; startup debt remains
+visible as `compaction_pending` until safe replacement completes. Recovery
+evidence intersecting the retained window defers replacement. Setting
+retention to `0` keeps canonical history unlimited and cancels stale finite
+work. Experimental `history.jsonl` is never a compaction input or target (see
+[metrics history](../architecture/metrics-history.md)).
 
 **Legacy env vars are ignored.** `NIM_API_KEYS`, `PROXY_API_KEYS`,
 `ADMIN_PASSWORD`, `INSECURE_NO_AUTH`, `NIM_BASE_URL`, `RPM_PER_KEY`,
 `MAX_WAIT_SECS`, `HEARTBEAT_SECS`, `MODELS_TTL_SECS`, `STREAM_IDLE_SECS`,
-`REQUEST_TIMEOUT_SECS`, `STRICT_PASSTHROUGH`, `REF_PRICE_IN`/`REF_PRICE_OUT`,
+`REQUEST_TIMEOUT_SECS`, `STRICT_PASSTHROUGH`, `REF_PRICE_IN`/`REF_PRICE_OUT`
+(removed in 0.6.6 — see
+[no-estimated-savings-metric](../decisions/no-estimated-savings-metric.md)),
 `HISTORY_DAYS`, and `MAX_INFLIGHT` no longer do anything; a set-but-ignored one
 gets a single boot warning (`ignoring legacy env vars (…) — these settings live
 in the dashboard now`). There is no seed-from-env and no migration (there were

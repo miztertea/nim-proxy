@@ -1,7 +1,7 @@
 ---
 type: Component
 title: Key pool (src/pool.rs)
-description: One lane per NIM key; exact sliding-window limiter, least-loaded selection, cooldown benching, releasable reservations.
+description: One lane per NIM key; exact sliding-window limiter, least-loaded selection, cooldown on upstream backoff, releasable reservations.
 tags: [pool, rate-limiting]
 timestamp: 2026-07-02T00:00:00Z
 ---
@@ -9,7 +9,7 @@ timestamp: 2026-07-02T00:00:00Z
 # Key pool — `src/pool.rs`
 
 Each API key is a **lane** holding a `VecDeque<Instant>` of send timestamps
-(the sliding window) and a `cooldown_until` instant (benching).
+(the sliding window) and a `cooldown_until` instant (cooldown).
 
 - **Reserve** (`reserve(prefer)`): the preferred lane wins if it has capacity
   ([affinity](../decisions/sticky-affinity-with-spillover.md)); otherwise the
@@ -19,8 +19,8 @@ Each API key is a **lane** holding a `VecDeque<Instant>` of send timestamps
   `Wait(duration)` until the soonest slot.
 - **Window** is 61s for a 60s upstream limit — see
   [window-jitter-margin](../decisions/window-jitter-margin.md).
-- **Penalize**: an upstream 429/5xx benches the lane (`Retry-After` honored,
-  defaults 10s for 429, 5s for connect errors). Benched lanes are skipped;
+- **Penalize**: an upstream 429/5xx puts the lane in cooldown (`Retry-After` honored,
+  defaults 10s for 429, 5s for connect errors). Lanes in cooldown are skipped;
   other lanes absorb traffic.
 - **Release**: a reservation granted to a client that vanished while queued
   is removed from the window by its stamp, returning the slot.
@@ -37,7 +37,7 @@ only**. Rebuild **carries over per-lane rate state** (`sent` window,
 (can't be double-spent across a swap), a lowered rpm is honored immediately
 (`try_take` checks `sent.len() < rpm` live), and a disabled key keeps its stored
 state so it re-enables **warm**. Grants carry their originating `Arc<Pool>`
-(`Slot { pool, lane, key }`) so late bench/release after a swap route to the
+(`Slot { pool, lane, key }`) so late cooldown/release after a swap route to the
 pool that granted them — no index-out-of-bounds, late ops on a retired pool are
 benign. **Invariant**: the superuser always owns ≥1 enabled key, pinning the
 pool floor (removing/disabling the last one is a 400), so the pool can never

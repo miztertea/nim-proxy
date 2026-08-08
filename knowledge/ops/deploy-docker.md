@@ -53,9 +53,10 @@ What the compose file gives you (see
   with an ignored `.env` override (`PUBLISH_HOST`) for intentional exposure.
 - `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges` — writes go only
   to the named `history` volume mounted at `/data`, which now holds both
-  `history.jsonl` **and `config.json` (credentials, 0600)**. A volume backup
-  therefore contains the password hashes and NIM keys — treat backups as
-  secrets. Total-lockout recovery is a volume edit of `config.json`
+  canonical `history-v1.jsonl` **and `config.json` (credentials, 0600)**;
+  opaque experimental history or stale canonical temporaries may also remain.
+  A volume backup therefore contains the password hashes and NIM keys — treat
+  backups as secrets. Total-lockout recovery is a volume edit of `config.json`
   ([configure-env](configure-env.md)).
 - `HEALTHCHECK` via `nim-proxy --health` (the binary probes itself; there is
   no shell in the image).

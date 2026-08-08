@@ -12,13 +12,14 @@
 //! The settings handlers are the only writer; every consumer reads immutable
 //! snapshots (see `AppState::cfg`), so there is no file watching or reload.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 pub const FILE: &str = "config.json";
 
@@ -26,14 +27,14 @@ pub const FILE: &str = "config.json";
 pub struct StoredConfig {
     #[serde(default = "default_version")]
     pub version: u32,
+    #[serde(default = "default_locale")]
+    pub default_locale: String,
     #[serde(default)]
     pub upstream: Upstream,
     #[serde(default)]
     pub client_auth: ClientAuth,
     #[serde(default)]
     pub limits: Limits,
-    #[serde(default)]
-    pub pricing: Pricing,
     #[serde(default)]
     pub history: HistoryCfg,
     #[serde(default)]
@@ -87,7 +88,7 @@ pub struct ClientAuth {
 
 /// Whether `/v1` requires a client API key. `Keyed` with zero keys rejects
 /// everything — fail closed; the dashboard prompts to create a key.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     Open,
@@ -109,20 +110,23 @@ pub struct ClientKey {
     pub owner: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Fields are declared in ASCII order because this struct is served verbatim
+/// inside `/api/config`, where declaration order is the wire order — see the
+/// module docs in `src/api.rs`.
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 pub struct Limits {
-    #[serde(default = "default_max_wait")]
-    pub max_wait_secs: u64,
     #[serde(default = "default_heartbeat")]
     pub heartbeat_secs: u64,
-    #[serde(default = "default_models_ttl")]
-    pub models_ttl_secs: u64,
-    #[serde(default = "default_stream_idle")]
-    pub stream_idle_secs: u64,
-    #[serde(default = "default_request_timeout")]
-    pub request_timeout_secs: u64,
     #[serde(default = "default_max_inflight")]
     pub max_inflight: usize,
+    #[serde(default = "default_max_wait")]
+    pub max_wait_secs: u64,
+    #[serde(default = "default_models_ttl")]
+    pub models_ttl_secs: u64,
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout_secs: u64,
+    #[serde(default = "default_stream_idle")]
+    pub stream_idle_secs: u64,
     #[serde(default)]
     pub strict_passthrough: bool,
 }
@@ -130,23 +134,6 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         serde_json::from_str("{}").expect("all Limits fields have defaults")
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Pricing {
-    #[serde(default = "default_price_in")]
-    pub ref_price_in: f64,
-    #[serde(default = "default_price_out")]
-    pub ref_price_out: f64,
-}
-
-impl Default for Pricing {
-    fn default() -> Self {
-        Self {
-            ref_price_in: default_price_in(),
-            ref_price_out: default_price_out(),
-        }
     }
 }
 
@@ -165,7 +152,7 @@ impl Default for HistoryCfg {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 pub struct DashboardCfg {
     #[serde(default = "default_dashboard_window_days")]
     pub default_window_days: u64,
@@ -182,20 +169,22 @@ impl Default for DashboardCfg {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 pub struct GovernorCfg {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Operator-pinned per-model concurrency caps.
+    /// Operator-pinned per-model concurrency caps. Ordered (not a `HashMap`)
+    /// so both `config.json` and `/api/config` serialize deterministically —
+    /// a hash-ordered map made two saves of the same config differ.
     #[serde(default)]
-    pub overrides: HashMap<String, usize>,
+    pub overrides: BTreeMap<String, usize>,
 }
 
 impl Default for GovernorCfg {
     fn default() -> Self {
         Self {
             enabled: true,
-            overrides: HashMap::new(),
+            overrides: BTreeMap::new(),
         }
     }
 }
@@ -206,9 +195,11 @@ pub struct User {
     /// `pbkdf2-sha256$<iters>$<salt>$<hash>` (see `auth::hash_password`).
     pub password_hash: String,
     pub role: Role,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     /// An admin that can never be deleted (so the last admin can't vanish).
@@ -226,6 +217,9 @@ impl Role {
 
 fn default_version() -> u32 {
     1
+}
+fn default_locale() -> String {
+    crate::presentation::DEFAULT_LOCALE.to_owned()
 }
 fn default_true() -> bool {
     true
@@ -254,12 +248,6 @@ fn default_request_timeout() -> u64 {
 fn default_max_inflight() -> usize {
     512
 }
-fn default_price_in() -> f64 {
-    0.5
-}
-fn default_price_out() -> f64 {
-    2.0
-}
 fn default_history_days() -> u64 {
     30
 }
@@ -277,6 +265,10 @@ impl StoredConfig {
 
     pub fn user(&self, username: &str) -> Option<&User> {
         self.users.iter().find(|u| u.username == username)
+    }
+
+    pub fn user_mut(&mut self, username: &str) -> Option<&mut User> {
+        self.users.iter_mut().find(|u| u.username == username)
     }
 
     /// Every stored key as a pool lane spec. Disabled keys ride along as
@@ -303,8 +295,6 @@ impl StoredConfig {
             stream_idle: Duration::from_secs(self.limits.stream_idle_secs),
             request_timeout: Duration::from_secs(self.limits.request_timeout_secs),
             strict_passthrough: self.limits.strict_passthrough,
-            price_in: self.pricing.ref_price_in,
-            price_out: self.pricing.ref_price_out,
             clients: match self.client_auth.mode {
                 Mode::Open => None,
                 Mode::Keyed => Some(
@@ -430,6 +420,7 @@ pub fn validate(sc: &StoredConfig) -> Result<(), String> {
     if sc.version != 1 {
         return Err(format!("version must be 1, got {}", sc.version));
     }
+    validate_stored_locale("default_locale", &sc.default_locale)?;
     let l = &sc.limits;
     if l.heartbeat_secs == 0 {
         return Err("heartbeat_secs must be >= 1".into());
@@ -442,13 +433,6 @@ pub fn validate(sc: &StoredConfig) -> Result<(), String> {
     }
     if l.max_inflight == 0 {
         return Err("max_inflight must be >= 1".into());
-    }
-    if !sc.pricing.ref_price_in.is_finite()
-        || !sc.pricing.ref_price_out.is_finite()
-        || sc.pricing.ref_price_in < 0.0
-        || sc.pricing.ref_price_out < 0.0
-    {
-        return Err("reference prices must be non-negative numbers".into());
     }
     if sc.dashboard.default_window_days == 0 {
         return Err("default_window_days must be >= 1".into());
@@ -477,6 +461,9 @@ pub fn validate(sc: &StoredConfig) -> Result<(), String> {
         }
         if u.password_hash.is_empty() {
             return Err(format!("user {:?} has an empty password hash", u.username));
+        }
+        if let Some(locale) = &u.locale {
+            validate_stored_locale(&format!("user {:?} locale", u.username), locale)?;
         }
     }
     if sc
@@ -560,6 +547,19 @@ pub fn validate(sc: &StoredConfig) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_stored_locale(label: &str, locale: &str) -> Result<(), String> {
+    match crate::presentation::canonical_locale(locale) {
+        Ok(canonical) if canonical != locale => Err(format!(
+            "{label} must use canonical locale spelling {canonical}"
+        )),
+        Ok(canonical) if !crate::presentation::INSTALLED_LOCALES.contains(&canonical.as_str()) => {
+            Err(format!("{label} locale {canonical} is not installed"))
+        }
+        Ok(_) => Ok(()),
+        Err(_) => Err(format!("{label} is not a valid locale")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,6 +591,7 @@ mod tests {
                 username: "root".into(),
                 password_hash: "pbkdf2-sha256$1000$aa$bb".into(),
                 role: Role::Superuser,
+                locale: None,
             }],
             upstream: Upstream {
                 base_url: default_base_url(),
@@ -742,6 +743,213 @@ mod tests {
         }
     }
 
+    /// 0.6.6 removed the `pricing` block. Stores written by 0.6.5 and earlier
+    /// still carry it; `StoredConfig` has no `deny_unknown_fields`, so the
+    /// orphan key must load and be ignored rather than fail the boot.
+    #[test]
+    fn config_with_a_legacy_pricing_block_still_loads() {
+        let dir = TestDir::new();
+        let mut raw = serde_json::to_value(claimed()).unwrap();
+        raw.as_object_mut().unwrap().insert(
+            "pricing".into(),
+            serde_json::json!({"ref_price_in": 0.5, "ref_price_out": 2.0}),
+        );
+        fs::write(store_path(&dir.0), serde_json::to_string(&raw).unwrap()).unwrap();
+
+        let sc = load(&dir.0).unwrap().expect("legacy store must load");
+        validate(&sc).expect("a legacy pricing block must not fail validation");
+    }
+
+    /// A verbatim `config.json` as 0.6.5 wrote it: `limits` in the pre-reorder
+    /// key order and `governor.overrides` written by a `HashMap` (so, arbitrary
+    /// order). Neither the field reorder nor the `HashMap -> BTreeMap` switch
+    /// may change what loads — serde matches by name, not position.
+    #[test]
+    fn a_0_6_5_config_json_loads_unchanged() {
+        let dir = TestDir::new();
+        // Hand-written, NOT round-tripped through the current structs: this is
+        // the byte shape an installed 0.6.5 has on disk.
+        let raw = r#"{
+          "version": 1,
+          "upstream": {
+            "base_url": "https://integrate.api.nvidia.com",
+            "nim_keys": [{"key":"nvapi-one","owner":"root","enabled":true,"rpm":40}]
+          },
+          "client_auth": {"mode":"keyed","keys":[]},
+          "limits": {
+            "max_wait_secs": 111,
+            "heartbeat_secs": 22,
+            "models_ttl_secs": 333,
+            "stream_idle_secs": 44,
+            "request_timeout_secs": 555,
+            "max_inflight": 66,
+            "strict_passthrough": true
+          },
+          "history": {"days": 7},
+          "dashboard": {"default_window_days": 3, "slo_target_percent": 95.5},
+          "governor": {
+            "enabled": false,
+            "overrides": {"zzz/model": 9, "aaa/model": 1, "mmm/model": 5}
+          },
+          "users": [{"username":"root","password_hash":"pbkdf2-sha256$1000$aa$bb","role":"superuser"}],
+          "pricing": {"ref_price_in": 0.5, "ref_price_out": 2.0}
+        }"#;
+        fs::write(store_path(&dir.0), raw).unwrap();
+
+        let sc = load(&dir.0).unwrap().expect("a 0.6.5 store must load");
+        validate(&sc).expect("a 0.6.5 store must stay valid");
+
+        // Every `limits` field landed on the right key despite the reorder.
+        assert_eq!(sc.limits.max_wait_secs, 111);
+        assert_eq!(sc.limits.heartbeat_secs, 22);
+        assert_eq!(sc.limits.models_ttl_secs, 333);
+        assert_eq!(sc.limits.stream_idle_secs, 44);
+        assert_eq!(sc.limits.request_timeout_secs, 555);
+        assert_eq!(sc.limits.max_inflight, 66);
+        assert!(sc.limits.strict_passthrough);
+
+        // Nothing else drifted.
+        assert_eq!(sc.history.days, 7);
+        assert_eq!(sc.dashboard.default_window_days, 3);
+        assert_eq!(sc.dashboard.slo_target_percent, 95.5);
+        assert_eq!(sc.upstream.nim_keys[0].rpm, 40);
+        assert_eq!(sc.users[0].role, Role::Superuser);
+
+        // The HashMap -> BTreeMap switch drops no entry and rewrites no value.
+        assert!(!sc.governor.enabled);
+        assert_eq!(sc.governor.overrides.len(), 3);
+        assert_eq!(sc.governor.overrides["aaa/model"], 1);
+        assert_eq!(sc.governor.overrides["mmm/model"], 5);
+        assert_eq!(sc.governor.overrides["zzz/model"], 9);
+
+        // Re-saving keeps every value, and is now byte-deterministic.
+        save(&dir.0, &sc).unwrap();
+        let first = fs::read_to_string(store_path(&dir.0)).unwrap();
+        let again = load(&dir.0).unwrap().expect("round-trip");
+        save(&dir.0, &again).unwrap();
+        let second = fs::read_to_string(store_path(&dir.0)).unwrap();
+        assert_eq!(first, second, "two saves of one config must be identical");
+        assert_eq!(again.governor.overrides, sc.governor.overrides);
+        assert_eq!(again.limits.max_wait_secs, 111);
+        assert_eq!(again.limits.max_inflight, 66);
+    }
+
+    #[test]
+    fn locale_current_store_migrates_on_read_and_persists_defaults() {
+        let dir = TestDir::new();
+        // This is a current-version store from before locale preferences. It
+        // is hand-authored so the current serializer cannot smuggle the new
+        // fields into the migration input.
+        let raw = r#"{
+          "version": 1,
+          "upstream": {
+            "base_url": "https://integrate.api.nvidia.com",
+            "nim_keys": [{"key":"nvapi-one","owner":"root","enabled":true,"rpm":40}]
+          },
+          "client_auth": {"mode":"keyed","keys":[]},
+          "users": [
+            {"username":"root","password_hash":"pbkdf2-sha256$1000$aa$bb","role":"superuser"}
+          ]
+        }"#;
+        fs::write(store_path(&dir.0), raw).unwrap();
+
+        let sc = load(&dir.0)
+            .expect("current-version store must load")
+            .expect("store exists");
+        save(&dir.0, &sc).expect("ordinary save persists additive defaults");
+
+        let persisted = fs::read_to_string(store_path(&dir.0)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&persisted).unwrap();
+        assert_eq!(
+            value.get("default_locale"),
+            Some(&serde_json::Value::String("en-US".into())),
+            "locale-store:migration: a current v1 store defaults and persists server locale"
+        );
+        assert_eq!(
+            value["users"][0].get("locale"),
+            None,
+            "locale-store:migration: absent user preference stays absent"
+        );
+
+        let version_at = persisted.find("\"version\"").expect("version field");
+        let default_at = persisted
+            .find("\"default_locale\"")
+            .expect("default_locale field");
+        let upstream_at = persisted.find("\"upstream\"").expect("upstream field");
+        assert!(
+            version_at < default_at && default_at < upstream_at,
+            "locale-store:serialization-order: expected version, default_locale, upstream; got {persisted}"
+        );
+    }
+
+    #[test]
+    fn locale_store_migration_refuses_corrupt_and_future_bytes_without_mutation() {
+        for (label, raw) in [
+            ("corrupt", b"{ not json".as_slice()),
+            ("future", br#"{"version":2}"#.as_slice()),
+        ] {
+            let dir = TestDir::new();
+            fs::write(store_path(&dir.0), raw).unwrap();
+            let before = fs::read(store_path(&dir.0)).unwrap();
+
+            assert!(
+                load(&dir.0).is_err(),
+                "locale-store:fail-closed: {label} store loaded"
+            );
+            assert_eq!(
+                fs::read(store_path(&dir.0)).unwrap(),
+                before,
+                "locale-store:non-mutation: {label} load changed durable bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn locale_store_refuses_invalid_noncanonical_and_uninstalled_values_without_mutation() {
+        for (scope, class, locale) in [
+            ("default", "invalid", "en_US"),
+            ("default", "noncanonical", "EN-us"),
+            ("default", "uninstalled", "fr-FR"),
+            ("user", "invalid", "en_US"),
+            ("user", "noncanonical", "EN-us"),
+            ("user", "uninstalled", "fr-FR"),
+        ] {
+            let dir = TestDir::new();
+            let mut value = serde_json::to_value(claimed()).unwrap();
+            match scope {
+                "default" => {
+                    value
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("default_locale".into(), serde_json::json!(locale));
+                }
+                "user" => {
+                    value["users"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("locale".into(), serde_json::json!(locale));
+                }
+                _ => unreachable!(),
+            }
+            fs::write(
+                store_path(&dir.0),
+                serde_json::to_vec_pretty(&value).unwrap(),
+            )
+            .unwrap();
+            let before = fs::read(store_path(&dir.0)).unwrap();
+
+            assert!(
+                load(&dir.0).is_err(),
+                "locale-store:fail-closed:{scope}:{class}: {locale} loaded"
+            );
+            assert_eq!(
+                fs::read(store_path(&dir.0)).unwrap(),
+                before,
+                "locale-store:non-mutation:{scope}:{class}: load changed durable bytes"
+            );
+        }
+    }
+
     #[test]
     fn future_version_refuses_to_load() {
         let dir = TestDir::new();
@@ -811,10 +1019,6 @@ mod tests {
             (
                 "bad base_url",
                 Box::new(|sc| sc.upstream.base_url = "ftp://x".into()),
-            ),
-            (
-                "negative price",
-                Box::new(|sc| sc.pricing.ref_price_in = -1.0),
             ),
             (
                 "bad governor cap",

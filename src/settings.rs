@@ -6,11 +6,18 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{FromRequest, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde::Deserialize;
+use serde::de::{self, IgnoredAny, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+use utoipa::ToSchema;
 
+use crate::api::{
+    ApiError, ApiJson, ClientKeyRow, ClientsResponse, ConfigResponse, HistorySettings,
+    MintedClientKey, NimKeyRow, OkResponse, PoolSummary, ServerSettings, SetupResponse, UserRow,
+    ValidateKeyResponse,
+};
 use crate::config::{self, NimKey, Role, StoredConfig, User};
 use crate::{auth, AppState};
 
@@ -43,14 +50,19 @@ pub fn commit(
 }
 
 fn json_error(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
-    let body = serde_json::json!({
-        "error": { "message": message.into(), "type": "proxy_error", "code": code }
-    });
-    (status, axum::Json(body)).into_response()
+    (status, axum::Json(ApiError::new(code, message))).into_response()
 }
 
 fn not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
+}
+
+fn setup_complete() -> Response {
+    json_error(
+        StatusCode::CONFLICT,
+        "setup_complete",
+        "setup is already complete",
+    )
 }
 
 /// `GET /setup` — the first-run wizard (404 once setup is complete).
@@ -59,13 +71,16 @@ pub async fn setup_page(State(state): State<Arc<AppState>>) -> Response {
         return not_found();
     }
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("setup.html"),
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        crate::presentation::page(crate::presentation::Page::Setup),
     )
         .into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SetupReq {
     username: String,
     password: String,
@@ -79,12 +94,12 @@ pub struct SetupReq {
     create_client_key: Option<CreateClientKey>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct CreateClientKey {
     name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SetupKey {
     key: String,
     rpm: Option<usize>,
@@ -93,14 +108,29 @@ pub struct SetupKey {
 /// `POST /setup` — one atomic claim: create the superuser, record the
 /// initial NIM keys, persist, and mint a session. No half-configured server
 /// state exists at any point; an abandoned wizard leaves nothing behind.
-pub async fn setup_submit(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    axum::Json(req): axum::Json<SetupReq>,
-) -> Response {
+#[utoipa::path(
+    post,
+    path = "/setup",
+    tag = "setup",
+    request_body = SetupReq,
+    security(),
+    responses(
+        (status = 200, description = "Claimed. Sets the session cookie; `client_key` carries \
+            the minted secret, which is never retrievable again.", body = SetupResponse),
+        (status = 400, description = "Weak password or a config the store rejects", body = ApiError),
+        (status = 409, description = "Setup is already complete or another caller claimed the \
+            proxy first", body = ApiError),
+    ),
+)]
+pub async fn setup_submit(State(state): State<Arc<AppState>>, req: Request) -> Response {
     if !state.setup_required.load(Ordering::SeqCst) {
-        return not_found();
+        return setup_complete();
     }
+    let headers = req.headers().clone();
+    let ApiJson(req) = match ApiJson::<SetupReq>::from_request(req, &state).await {
+        Ok(req) => req,
+        Err(response) => return response,
+    };
     if req.password.len() < 10 {
         return json_error(
             StatusCode::BAD_REQUEST,
@@ -118,17 +148,14 @@ pub async fn setup_submit(
         let mut guard = state.store.lock().unwrap();
         if guard.superuser().is_some() {
             // Two claimers raced; the store lock made the first win whole.
-            return json_error(
-                StatusCode::CONFLICT,
-                "already_configured",
-                "setup was just completed by someone else",
-            );
+            return setup_complete();
         }
         let mut cand = guard.clone();
         cand.users = vec![User {
             username: req.username.clone(),
             password_hash: hash.clone(),
             role: Role::Superuser,
+            locale: None,
         }];
         // Lockout recovery: keys already in the store belonged to hand-deleted
         // users; the new superuser adopts any orphans, restoring both the
@@ -171,11 +198,11 @@ pub async fn setup_submit(
             state.setup_required.store(false, Ordering::SeqCst);
             tracing::info!(user = %req.username, "first-time setup complete; superuser created");
             let cookie = auth::mint_session_cookie(&state, &headers, &req.username, &hash);
-            let mut body = serde_json::json!({"ok": true});
-            if let Some((name, secret)) = minted {
+            let body = SetupResponse {
                 // The one and only time this secret leaves the server.
-                body["client_key"] = serde_json::json!({"name": name, "secret": secret});
-            }
+                client_key: minted.map(|(name, secret)| MintedClientKey { name, secret }),
+                ok: true,
+            };
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, cookie)],
@@ -187,22 +214,42 @@ pub async fn setup_submit(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ValidateKeyReq {
+    /// The NIM key to probe.
     key: String,
+    /// Only honored by `/setup/validate-key` (pre-claim, no upstream is
+    /// configured yet). The authenticated twin ignores it — see
+    /// [`validate_key`].
     #[serde(default)]
     base_url: Option<String>,
 }
 
 /// `POST /setup/validate-key` — pre-auth key probe for the wizard, bounded
 /// by the shared login throttle plus a fixed delay (probe abuse control).
-pub async fn setup_validate_key(
-    State(state): State<Arc<AppState>>,
-    axum::Json(req): axum::Json<ValidateKeyReq>,
-) -> Response {
+#[utoipa::path(
+    post,
+    path = "/setup/validate-key",
+    tag = "setup",
+    request_body = ValidateKeyReq,
+    security(),
+    responses(
+        (status = 200, description = "Probe finished; `ok` says whether the key worked",
+            body = ValidateKeyResponse),
+        (status = 400, description = "`base_url` is not an allowed upstream", body = ApiError),
+        (status = 409, description = "Setup is already complete", body = ApiError),
+        (status = 429, description = "Probe throttle (shared with the login throttle)",
+            body = ApiError),
+    ),
+)]
+pub async fn setup_validate_key(State(state): State<Arc<AppState>>, req: Request) -> Response {
     if !state.setup_required.load(Ordering::SeqCst) {
-        return not_found();
+        return setup_complete();
     }
+    let ApiJson(req) = match ApiJson::<ValidateKeyReq>::from_request(req, &state).await {
+        Ok(req) => req,
+        Err(response) => return response,
+    };
     if state.admin.is_throttled() {
         return json_error(
             StatusCode::TOO_MANY_REQUESTS,
@@ -223,10 +270,9 @@ pub async fn setup_validate_key(
     if let Err(e) = config::check_base_url(&base) {
         return json_error(StatusCode::BAD_REQUEST, "invalid_base_url", e);
     }
-    axum::Json(match probe_key(&state.http, &base, req.key.trim()).await {
-        Ok(models) => serde_json::json!({"ok": true, "models": models}),
-        Err(e) => serde_json::json!({"ok": false, "error": e}),
-    })
+    axum::Json(ValidateKeyResponse::probed(
+        probe_key(&state.http, &base, req.key.trim()).await,
+    ))
     .into_response()
 }
 
@@ -287,8 +333,9 @@ fn bad_request(msg: impl Into<String>) -> Response {
     json_error(StatusCode::BAD_REQUEST, "invalid_config", msg)
 }
 
-fn ok_json(v: serde_json::Value) -> Response {
-    axum::Json(v).into_response()
+/// The uniform "it applied" answer every settings write shares.
+fn ok_json() -> Response {
+    axum::Json(OkResponse::new()).into_response()
 }
 
 /// The caller's role, or None if their user was deleted mid-session
@@ -308,6 +355,16 @@ fn stale_session() -> Response {
 /// `GET /api/config` — the Settings page's data source, filtered by role
 /// BEFORE serialization: a user-role response simply contains no server
 /// settings and no other users' key rows, so DOM tampering reveals nothing.
+#[utoipa::path(
+    get,
+    path = "/api/config",
+    tag = "settings",
+    responses(
+        (status = 200, description = "Settings visible to the caller's role", body = ConfigResponse),
+        (status = 401, description = "No session, or the caller's user was deleted",
+            body = ApiError),
+    ),
+)]
 pub async fn api_config(
     State(state): State<Arc<AppState>>,
     Extension(Identity(username)): Extension<Identity>,
@@ -341,91 +398,117 @@ pub async fn api_config(
         .collect();
     let guarded_key = (su_enabled.len() == 1).then(|| su_enabled[0].to_owned());
 
-    let nim_keys: Vec<serde_json::Value> = sc
+    let nim_keys: Vec<NimKeyRow> = sc
         .upstream
         .nim_keys
         .iter()
         .filter(|k| admin_view || k.owner == username)
         .map(|k| {
             let lane = stats.get(&k.key);
-            serde_json::json!({
-                "fingerprint": fingerprint(&k.key),
-                "last4": last4(&k.key),
-                "owner": k.owner,
-                "enabled": k.enabled,
-                "rpm": k.rpm,
-                "lane": lane.map(|(i, _, _)| i),
-                "in_window": lane.map(|(_, w, _)| w),
-                "cooldown_ms": lane.map(|(_, _, c)| c),
-                "guarded": guarded_key.as_deref() == Some(k.key.as_str()),
-            })
+            NimKeyRow {
+                cooldown_ms: lane.map(|(_, _, c)| *c),
+                enabled: k.enabled,
+                fingerprint: fingerprint(&k.key),
+                guarded: guarded_key.as_deref() == Some(k.key.as_str()),
+                in_window: lane.map(|(_, w, _)| *w),
+                lane: lane.map(|(i, _, _)| *i),
+                last4: last4(&k.key),
+                owner: k.owner.clone(),
+                rpm: k.rpm,
+            }
         })
         .collect();
 
-    let client_keys: Vec<serde_json::Value> = sc
+    let client_keys: Vec<ClientKeyRow> = sc
         .client_auth
         .keys
         .iter()
         .filter(|c| admin_view || c.owner == username)
-        .map(|c| serde_json::json!({"name": c.name, "last4": c.last4, "owner": c.owner}))
+        .map(|c| ClientKeyRow {
+            last4: c.last4.clone(),
+            name: c.name.clone(),
+            owner: c.owner.clone(),
+        })
         .collect();
 
-    let mut body = serde_json::json!({
-        "username": username,
-        "role": match role { Role::Superuser => "superuser", Role::Admin => "admin", Role::User => "user" },
-        "mode": match sc.client_auth.mode { Mode::Open => "open", Mode::Keyed => "keyed" },
-        "pool": {
-            "enabled": pool.len(),
-            "capacity_rpm": pool.capacity_rpm(),
-        },
-        "nim_keys": nim_keys,
-        "client_keys": client_keys,
-    });
-    if admin_view {
+    // Role filtering happens HERE, by building or not building the section —
+    // never by omitting it later or by trusting the client to hide it.
+    let (server, users) = if admin_view {
         let history = state.history.status();
-        body["server"] = serde_json::json!({
-            "base_url": sc.upstream.base_url,
-            "limits": sc.limits,
-            "pricing": sc.pricing,
-            "history": {
-                "days": sc.history.days,
-                "available_from": history.available_from,
-                "file_bytes": history.file_bytes,
-                "compaction_pending": history.compaction_pending,
+        let server = ServerSettings {
+            base_url: sc.upstream.base_url.clone(),
+            dashboard: sc.dashboard.clone(),
+            default_locale: sc.default_locale.clone(),
+            governor: sc.governor.clone(),
+            history: HistorySettings {
+                available_from: history.available_from,
+                compaction_pending: history.compaction_pending,
+                days: sc.history.days,
+                file_bytes: history.file_bytes,
+                persistence: history.persistence,
             },
-            "dashboard": sc.dashboard,
-            "governor": sc.governor,
-        });
-        body["users"] = serde_json::json!(sc
+            limits: sc.limits.clone(),
+        };
+        let users = sc
             .users
             .iter()
-            .map(|u| {
-                serde_json::json!({
-                    "username": u.username,
-                    "role": match u.role { Role::Superuser => "superuser", Role::Admin => "admin", Role::User => "user" },
-                    "nim_keys": sc.upstream.nim_keys.iter().filter(|k| k.owner == u.username).count(),
-                    "client_keys": sc.client_auth.keys.iter().filter(|c| c.owner == u.username).count(),
-                })
+            .map(|u| UserRow {
+                client_keys: sc
+                    .client_auth
+                    .keys
+                    .iter()
+                    .filter(|c| c.owner == u.username)
+                    .count(),
+                nim_keys: sc
+                    .upstream
+                    .nim_keys
+                    .iter()
+                    .filter(|k| k.owner == u.username)
+                    .count(),
+                role: u.role,
+                username: u.username.clone(),
             })
-            .collect::<Vec<_>>());
-    }
-    ok_json(body)
+            .collect();
+        (Some(server), Some(users))
+    } else {
+        (None, None)
+    };
+
+    axum::Json(ConfigResponse {
+        client_keys,
+        locale: sc.user(&username).and_then(|user| user.locale.clone()),
+        mode: sc.client_auth.mode,
+        nim_keys,
+        pool: PoolSummary {
+            capacity_rpm: pool.capacity_rpm(),
+            enabled: pool.len(),
+        },
+        role,
+        server,
+        username,
+        users,
+    })
+    .into_response()
 }
 
-#[derive(Deserialize)]
+/// Exactly one of `add` / `remove` / `set` per request.
+#[derive(Deserialize, ToSchema)]
 pub struct NimKeysReq {
     add: Option<AddNimKey>,
-    remove: Option<String>, // fingerprint
+    /// Fingerprint of the key to remove.
+    remove: Option<String>,
     set: Option<SetNimKey>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct AddNimKey {
     key: String,
+    /// Requests per minute for this key's lane; defaults to 40 (NIM's free
+    /// tier).
     rpm: Option<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SetNimKey {
     fingerprint: String,
     enabled: Option<bool>,
@@ -435,10 +518,24 @@ pub struct SetNimKey {
 /// `POST /api/settings/nim-keys` — any role may add keys (owner = caller)
 /// and manage their OWN keys; admins manage any key. The superuser's last
 /// enabled key is protected by `validate` (the pool-floor invariant).
+#[utoipa::path(
+    post,
+    path = "/api/settings/nim-keys",
+    tag = "settings",
+    request_body = NimKeysReq,
+    responses(
+        (status = 200, description = "Applied; the pool was rebuilt with rate-state carryover",
+            body = OkResponse),
+        (status = 400, description = "No such key, more than one action, or a store the \
+            validator rejects (e.g. removing the pool floor)", body = ApiError),
+        (status = 401, description = "No session, or the caller's user was deleted", body = ApiError),
+        (status = 403, description = "Not the key's owner and not an admin", body = ApiError),
+    ),
+)]
 pub async fn nim_keys(
     State(state): State<Arc<AppState>>,
     Extension(Identity(username)): Extension<Identity>,
-    axum::Json(req): axum::Json<NimKeysReq>,
+    ApiJson(req): ApiJson<NimKeysReq>,
 ) -> Response {
     let mut guard = state.store.lock().unwrap();
     let Some(role) = role_of(&guard, &username) else {
@@ -490,19 +587,22 @@ pub async fn nim_keys(
         _ => return bad_request("send exactly one of add / remove / set"),
     }
     match commit(&state, &mut guard, cand) {
-        Ok(()) => ok_json(serde_json::json!({"ok": true})),
+        Ok(()) => ok_json(),
         Err(e) => bad_request(e),
     }
 }
 
-#[derive(Deserialize)]
+/// Exactly one of `add` / `remove` / `mode` per request.
+#[derive(Deserialize, ToSchema)]
 pub struct ClientsReq {
     add: Option<AddClient>,
-    remove: Option<String>, // name
+    /// Name of the client key to revoke.
+    remove: Option<String>,
+    /// `open` or `keyed` — whether `/v1` requires a client key (admin only).
     mode: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct AddClient {
     name: String,
 }
@@ -510,10 +610,25 @@ pub struct AddClient {
 /// `POST /api/settings/clients` — client-key create/revoke for any role
 /// (own keys; admins revoke any); the open/keyed mode toggle is admin-only.
 /// A created secret is returned exactly once and stored only as a digest.
+#[utoipa::path(
+    post,
+    path = "/api/settings/clients",
+    tag = "settings",
+    request_body = ClientsReq,
+    responses(
+        (status = 200, description = "Applied. On `add`, `secret` is the plaintext key — the \
+            only time it is ever served.", body = ClientsResponse),
+        (status = 400, description = "No such client key, more than one action, or an \
+            unknown mode", body = ApiError),
+        (status = 401, description = "No session, or the caller's user was deleted", body = ApiError),
+        (status = 403, description = "Revoking someone else's key, or a non-admin changing \
+            the mode", body = ApiError),
+    ),
+)]
 pub async fn clients(
     State(state): State<Arc<AppState>>,
     Extension(Identity(username)): Extension<Identity>,
-    axum::Json(req): axum::Json<ClientsReq>,
+    ApiJson(req): ApiJson<ClientsReq>,
 ) -> Response {
     let mut guard = state.store.lock().unwrap();
     let Some(role) = role_of(&guard, &username) else {
@@ -554,22 +669,42 @@ pub async fn clients(
         _ => return bad_request("send exactly one of add / remove / mode"),
     }
     match commit(&state, &mut guard, cand) {
-        Ok(()) => ok_json(match minted {
-            Some(secret) => serde_json::json!({"ok": true, "secret": secret}),
-            None => serde_json::json!({"ok": true}),
-        }),
+        Ok(()) => axum::Json(ClientsResponse {
+            ok: true,
+            secret: minted,
+        })
+        .into_response(),
         Err(e) => bad_request(e),
     }
 }
 
 /// Admin-only settings sections share one skeleton: role check, mutate the
-/// candidate, commit.
+/// candidate, commit. The OpenAPI operation is generated from the same
+/// invocation, so a section can't exist without being documented.
 macro_rules! admin_section {
-    ($fn_name:ident, $req:ty, $apply:expr) => {
+    ($fn_name:ident, $req:ident, $path:literal, $doc:literal, $apply:expr) => {
+        #[doc = $doc]
+        #[utoipa::path(
+            post,
+            path = $path,
+            tag = "settings",
+            request_body = $req,
+            responses(
+                (status = 200, description = "Applied, persisted, and swapped into the live \
+                    runtime config", body = OkResponse),
+                (status = 400, description = "The store validator rejected the result",
+                    body = ApiError),
+                (status = 401, description = "No session, or the caller's user was deleted",
+                    body = ApiError),
+                (status = 403, description = "Server settings require an admin", body = ApiError),
+                (status = 422, description = "A field is missing or the wrong type — a partial \
+                    body is never a silent reset", body = ApiError),
+            ),
+        )]
         pub async fn $fn_name(
             State(state): State<Arc<AppState>>,
             Extension(Identity(username)): Extension<Identity>,
-            axum::Json(req): axum::Json<$req>,
+            ApiJson(req): ApiJson<$req>,
         ) -> Response {
             let mut guard = state.store.lock().unwrap();
             match role_of(&guard, &username) {
@@ -581,24 +716,39 @@ macro_rules! admin_section {
             #[allow(clippy::redundant_closure_call)]
             ($apply)(&mut cand, req);
             match commit(&state, &mut guard, cand) {
-                Ok(()) => ok_json(serde_json::json!({"ok": true})),
+                Ok(()) => ok_json(),
                 Err(e) => bad_request(e),
             }
         }
     };
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct UpstreamReq {
+    /// `http(s)://host[:port]`; link-local addresses are refused (cloud
+    /// metadata endpoints have no legitimate NIM use).
     base_url: String,
 }
 
 /// `POST /api/settings/upstream` (admin) — also flushes the model-catalog
 /// cache and the per-model no-inject memory, which are upstream-specific.
+#[utoipa::path(
+    post,
+    path = "/api/settings/upstream",
+    tag = "settings",
+    request_body = UpstreamReq,
+    responses(
+        (status = 200, description = "Applied; the model catalog cache and the per-model \
+            no-inject memory were flushed", body = OkResponse),
+        (status = 400, description = "Not an http(s) URL, or a link-local address", body = ApiError),
+        (status = 401, description = "No session, or the caller's user was deleted", body = ApiError),
+        (status = 403, description = "Server settings require an admin", body = ApiError),
+    ),
+)]
 pub async fn upstream(
     State(state): State<Arc<AppState>>,
     Extension(Identity(username)): Extension<Identity>,
-    axum::Json(req): axum::Json<UpstreamReq>,
+    ApiJson(req): ApiJson<UpstreamReq>,
 ) -> Response {
     let result = {
         let mut guard = state.store.lock().unwrap();
@@ -615,7 +765,7 @@ pub async fn upstream(
         Ok(()) => {
             *state.models_cache.lock().await = None;
             state.no_inject.lock().unwrap().clear();
-            ok_json(serde_json::json!({"ok": true}))
+            ok_json()
         }
         Err(e) => bad_request(e),
     }
@@ -623,7 +773,7 @@ pub async fn upstream(
 
 /// Mirror of `config::Limits` WITHOUT serde defaults: a partial body is a
 /// 422, never a silent reset of the omitted fields.
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct LimitsReq {
     max_wait_secs: u64,
     heartbeat_secs: u64,
@@ -637,36 +787,26 @@ pub struct LimitsReq {
 admin_section!(
     limits,
     LimitsReq,
+    "/api/settings/limits",
+    "`POST /api/settings/limits` (admin) — patience, timeouts and the \
+     in-flight cap. Every field is required.",
     |cand: &mut StoredConfig, req: LimitsReq| {
         cand.limits = crate::config::Limits {
-            max_wait_secs: req.max_wait_secs,
             heartbeat_secs: req.heartbeat_secs,
-            models_ttl_secs: req.models_ttl_secs,
-            stream_idle_secs: req.stream_idle_secs,
-            request_timeout_secs: req.request_timeout_secs,
             max_inflight: req.max_inflight,
+            max_wait_secs: req.max_wait_secs,
+            models_ttl_secs: req.models_ttl_secs,
+            request_timeout_secs: req.request_timeout_secs,
+            stream_idle_secs: req.stream_idle_secs,
             strict_passthrough: req.strict_passthrough,
         };
     }
 );
 
-#[derive(Deserialize)]
-pub struct PricingReq {
-    ref_price_in: f64,
-    ref_price_out: f64,
-}
-
-admin_section!(
-    pricing,
-    PricingReq,
-    |cand: &mut StoredConfig, req: PricingReq| {
-        cand.pricing.ref_price_in = req.ref_price_in;
-        cand.pricing.ref_price_out = req.ref_price_out;
-    }
-);
-
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct HistoryReq {
+    /// Retention in days; 0 = keep forever. Must be 0 or >= the default
+    /// window.
     days: u64,
     default_window_days: u64,
     slo_target_percent: f64,
@@ -675,6 +815,9 @@ pub struct HistoryReq {
 admin_section!(
     history,
     HistoryReq,
+    "/api/settings/history",
+    "`POST /api/settings/history` (admin) — retention plus the dashboard's \
+     default window and SLO target. Shrinking retention prunes on disk.",
     |cand: &mut StoredConfig, req: HistoryReq| {
         cand.history.days = req.days;
         cand.dashboard.default_window_days = req.default_window_days;
@@ -682,22 +825,28 @@ admin_section!(
     }
 );
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct GovernorReq {
     enabled: Option<bool>,
     set_override: Option<GovernorOverride>,
+    /// Model id whose pinned cap to drop.
     remove_override: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct GovernorOverride {
     model: String,
+    /// Max in-flight requests for this model, 1-10000.
     cap: usize,
 }
 
 admin_section!(
     governor_cfg,
     GovernorReq,
+    "/api/settings/governor",
+    "`POST /api/settings/governor` (admin) — the per-model concurrency gate: \
+     the adaptive switch and operator-pinned caps. Fields are independent; \
+     omitted ones are left alone.",
     |cand: &mut StoredConfig, req: GovernorReq| {
         if let Some(e) = req.enabled {
             cand.governor.enabled = e;
@@ -711,30 +860,36 @@ admin_section!(
     }
 );
 
-#[derive(Deserialize)]
+/// Exactly one of `add` / `remove` / `reset_password` / `set_role`.
+#[derive(Deserialize, ToSchema)]
 pub struct UsersReq {
     add: Option<AddUser>,
+    /// Username to delete. Their NIM keys leave the pool and their client
+    /// keys are revoked.
     remove: Option<String>,
     reset_password: Option<ResetPassword>,
     set_role: Option<SetRole>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct AddUser {
     username: String,
+    /// At least 10 characters.
     password: String,
+    /// `admin` or `user` — `superuser` is never assignable.
     role: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ResetPassword {
     username: String,
     new_password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SetRole {
     username: String,
+    /// `admin` or `user`.
     role: String,
 }
 
@@ -750,10 +905,24 @@ fn parse_role(s: &str) -> Option<Role> {
 /// passwords, change roles. Deleting a user pulls their NIM keys from the
 /// pool and revokes their client keys — their harnesses stop; that's the
 /// point. The superuser can never be deleted or demoted.
+#[utoipa::path(
+    post,
+    path = "/api/settings/users",
+    tag = "settings",
+    request_body = UsersReq,
+    responses(
+        (status = 200, description = "Applied", body = OkResponse),
+        (status = 400, description = "Weak password, unknown user, bad role, or more than \
+            one action", body = ApiError),
+        (status = 401, description = "No session, or the caller's user was deleted", body = ApiError),
+        (status = 403, description = "Not an admin, or a write against the superuser \
+            (undeletable, immutable role, password only via /account)", body = ApiError),
+    ),
+)]
 pub async fn users(
     State(state): State<Arc<AppState>>,
     Extension(Identity(username)): Extension<Identity>,
-    axum::Json(req): axum::Json<UsersReq>,
+    ApiJson(req): ApiJson<UsersReq>,
 ) -> Response {
     // Hash outside the store lock (PBKDF2 is deliberately slow).
     let new_hash = match (&req.add, &req.reset_password) {
@@ -806,6 +975,7 @@ pub async fn users(
                 username: add.username.trim().to_owned(),
                 password_hash: new_hash.expect("hashed above"),
                 role,
+                locale: None,
             });
         }
         (None, Some(target), None, None) => {
@@ -851,17 +1021,153 @@ pub async fn users(
         Ok(()) => {
             // Header-credential memo may hold a deleted/reset user.
             state.admin.clear_scraper_memo();
-            ok_json(serde_json::json!({"ok": true}))
+            ok_json()
         }
         Err(e) => bad_request(e),
     }
 }
 
-#[derive(Deserialize)]
-pub struct AccountReq {
+pub(crate) struct AccountPasswordReq {
     current_password: String,
+    /// At least 10 characters.
     new_password: String,
 }
+
+pub(crate) enum AccountBody {
+    Password(AccountPasswordReq),
+    Locale(Option<String>),
+    InvalidLocale,
+    InvalidAction,
+}
+
+impl<'de> Deserialize<'de> for AccountBody {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AccountVisitor;
+
+        impl<'de> Visitor<'de> for AccountVisitor {
+            type Value = AccountBody;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a password change or locale preference object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut current_password = None;
+                let mut new_password = None;
+                let mut action = None;
+                let mut locale = None;
+                let mut current_password_seen = false;
+                let mut new_password_seen = false;
+                let mut action_seen = false;
+                let mut locale_seen = false;
+                let mut unknown_seen = false;
+
+                while let Some(field) = map.next_key::<String>()? {
+                    match field.as_str() {
+                        "current_password" => {
+                            if current_password_seen {
+                                return Err(de::Error::duplicate_field("current_password"));
+                            }
+                            current_password_seen = true;
+                            current_password = Some(map.next_value()?);
+                        }
+                        "new_password" => {
+                            if new_password_seen {
+                                return Err(de::Error::duplicate_field("new_password"));
+                            }
+                            new_password_seen = true;
+                            new_password = Some(map.next_value()?);
+                        }
+                        "action" => {
+                            if action_seen {
+                                return Err(de::Error::duplicate_field("action"));
+                            }
+                            action_seen = true;
+                            action = Some(map.next_value::<serde_json::Value>()?);
+                        }
+                        "locale" => {
+                            if locale_seen {
+                                return Err(de::Error::duplicate_field("locale"));
+                            }
+                            locale_seen = true;
+                            locale = Some(map.next_value::<serde_json::Value>()?);
+                        }
+                        _ => {
+                            unknown_seen = true;
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                if current_password_seen || new_password_seen {
+                    return Ok(AccountBody::Password(AccountPasswordReq {
+                        current_password: current_password
+                            .ok_or_else(|| de::Error::missing_field("current_password"))?,
+                        new_password: new_password
+                            .ok_or_else(|| de::Error::missing_field("new_password"))?,
+                    }));
+                }
+                if action_seen || locale_seen {
+                    if unknown_seen
+                        || !action_seen
+                        || !locale_seen
+                        || action.as_ref().and_then(serde_json::Value::as_str) != Some("locale")
+                    {
+                        return Ok(AccountBody::InvalidAction);
+                    }
+                    return match locale.expect("locale field checked above") {
+                        serde_json::Value::Null => Ok(AccountBody::Locale(None)),
+                        serde_json::Value::String(locale) => Ok(AccountBody::Locale(Some(locale))),
+                        _ => Ok(AccountBody::InvalidLocale),
+                    };
+                }
+                Err(de::Error::missing_field("current_password"))
+            }
+        }
+
+        deserializer.deserialize_map(AccountVisitor)
+    }
+}
+
+/// OpenAPI union for the unchanged password body and the locale set/clear
+/// action. utoipa 5.5 collapses an untagged mixed enum to its first variant,
+/// so this small schema-only type spells the two native JSON object shapes.
+pub struct AccountReq;
+
+impl utoipa::PartialSchema for AccountReq {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        use utoipa::openapi::schema::{AdditionalProperties, Object, OneOf, SchemaType, Type};
+
+        let string = || Object::builder().schema_type(Type::String);
+        let password = Object::builder()
+            .property("current_password", string())
+            .required("current_password")
+            .property(
+                "new_password",
+                string().description(Some("At least 10 characters.")),
+            )
+            .required("new_password");
+        let action = string().enum_values(Some(["locale"]));
+        let nullable_locale =
+            Object::builder().schema_type(SchemaType::from_iter([Type::String, Type::Null]));
+        let locale = Object::builder()
+            .property("action", action)
+            .required("action")
+            .property("locale", nullable_locale)
+            .required("locale")
+            .additional_properties(Some(AdditionalProperties::FreeForm(false)));
+
+        OneOf::builder().item(password).item(locale).into()
+    }
+}
+
+impl ToSchema for AccountReq {}
 
 /// Why an own-password change could not be applied to the candidate store.
 #[derive(Debug, PartialEq)]
@@ -891,16 +1197,74 @@ fn apply_password_change(
     Ok(())
 }
 
-/// `POST /api/settings/account` — own password change; always re-verifies
-/// the current password regardless of the session. Existing sessions die
-/// (the cookie binds a password-hash fragment); the response carries a fresh
-/// cookie so THIS session survives.
+/// `POST /api/settings/account` — change the caller's password or locale preference.
+/// Password changes always re-verify the current password and return a fresh
+/// cookie; locale changes preserve the existing session.
+#[utoipa::path(
+    post,
+    path = "/api/settings/account",
+    tag = "settings",
+    request_body = AccountReq,
+    responses(
+        (status = 200, description = "Password changed with a fresh session cookie and other \
+            sessions invalidated, or locale preference applied without changing the session.",
+            body = OkResponse),
+        (status = 400, description = "Request failed with weak_password, invalid_action, \
+            invalid_locale, locale_not_installed, or invalid_config", body = ApiError),
+        (status = 401, description = "No session, or the caller's user was deleted", body = ApiError),
+        (status = 403, description = "The current password is wrong", body = ApiError),
+        (status = 409, description = "An admin reset the password while this request was in \
+            flight; the reset wins", body = ApiError),
+        (status = 422, description = "Invalid JSON request body", body = ApiError),
+    ),
+)]
 pub async fn account(
     State(state): State<Arc<AppState>>,
     Extension(Identity(username)): Extension<Identity>,
     headers: HeaderMap,
-    axum::Json(req): axum::Json<AccountReq>,
+    ApiJson(req): ApiJson<AccountBody>,
 ) -> Response {
+    let req = match req {
+        AccountBody::InvalidAction => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_action",
+                "account action must be locale",
+            )
+        }
+        AccountBody::InvalidLocale => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_locale",
+                "locale is not valid",
+            )
+        }
+        AccountBody::Locale(locale) => {
+            let locale = match locale {
+                None => None,
+                Some(locale) => match crate::presentation::installed_locale(&locale) {
+                    Ok(locale) => Some(locale),
+                    Err(error) => return locale_error_response(error),
+                },
+            };
+            let result = {
+                let mut guard = state.store.lock().unwrap();
+                let Some(user) = guard.users.iter().find(|user| user.username == username) else {
+                    return stale_session();
+                };
+                let mut cand = guard.clone();
+                cand.user_mut(&user.username)
+                    .expect("candidate cloned from store")
+                    .locale = locale;
+                commit(&state, &mut guard, cand)
+            };
+            return match result {
+                Ok(()) => ok_json(),
+                Err(e) => bad_request(e),
+            };
+        }
+        AccountBody::Password(req) => req,
+    };
     if req.new_password.len() < 10 {
         return json_error(
             StatusCode::BAD_REQUEST,
@@ -966,10 +1330,83 @@ pub async fn account(
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, cookie)],
-                axum::Json(serde_json::json!({"ok": true})),
+                axum::Json(OkResponse::new()),
             )
                 .into_response()
         }
+        Err(e) => bad_request(e),
+    }
+}
+
+fn locale_error_response(error: crate::presentation::LocaleError) -> Response {
+    match error {
+        crate::presentation::LocaleError::Invalid => json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_locale",
+            "locale is not valid",
+        ),
+        crate::presentation::LocaleError::NotInstalled(locale) => json_error(
+            StatusCode::BAD_REQUEST,
+            "locale_not_installed",
+            format!("locale {locale} is not installed"),
+        ),
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SetServerLocale {
+    pub locale: String,
+}
+
+/// `POST /api/settings/locale` — change the persisted server default. Admin
+/// and superuser roles share the existing server-settings authority.
+#[utoipa::path(
+    post,
+    path = "/api/settings/locale",
+    tag = "settings",
+    request_body = SetServerLocale,
+    responses(
+        (status = 200, description = "Applied", body = OkResponse),
+        (status = 400, description = "Invalid or uninstalled locale", body = ApiError),
+        (status = 401, description = "No session, or the caller's user was deleted", body = ApiError),
+        (status = 403, description = "Server settings require an admin", body = ApiError),
+        (status = 422, description = "Invalid JSON request body", body = ApiError),
+    ),
+)]
+pub async fn locale(
+    State(state): State<Arc<AppState>>,
+    Extension(Identity(username)): Extension<Identity>,
+    req: Request,
+) -> Response {
+    {
+        let guard = state.store.lock().unwrap();
+        match role_of(&guard, &username) {
+            Some(role) if role.is_admin() => {}
+            Some(_) => return forbidden("server settings require an admin"),
+            None => return stale_session(),
+        }
+    }
+    let ApiJson(req) = match ApiJson::<SetServerLocale>::from_request(req, &state).await {
+        Ok(req) => req,
+        Err(response) => return response,
+    };
+    let locale = match crate::presentation::installed_locale(&req.locale) {
+        Ok(locale) => locale,
+        Err(error) => return locale_error_response(error),
+    };
+    let result = {
+        let mut guard = state.store.lock().unwrap();
+        match role_of(&guard, &username) {
+            Some(role) if role.is_admin() => {}
+            Some(_) => return forbidden("server settings require an admin"),
+            None => return stale_session(),
+        }
+        let mut cand = guard.clone();
+        cand.default_locale = locale;
+        commit(&state, &mut guard, cand)
+    };
+    match result {
+        Ok(()) => ok_json(),
         Err(e) => bad_request(e),
     }
 }
@@ -980,16 +1417,26 @@ pub async fn account(
 /// user turn the proxy into an SSRF probe of internal hosts (the response
 /// distinguishes reachable/rejected/unreachable). An admin testing a new
 /// upstream saves it first, then validates. `req.base_url` is ignored.
+#[utoipa::path(
+    post,
+    path = "/api/settings/validate-key",
+    tag = "settings",
+    request_body = ValidateKeyReq,
+    responses(
+        (status = 200, description = "Probe finished against the CONFIGURED upstream; any \
+            `base_url` in the body is ignored (SSRF guard)", body = ValidateKeyResponse),
+        (status = 401, description = "No session", body = ApiError),
+    ),
+)]
 pub async fn validate_key(
     State(state): State<Arc<AppState>>,
-    axum::Json(req): axum::Json<ValidateKeyReq>,
+    ApiJson(req): ApiJson<ValidateKeyReq>,
 ) -> Response {
     let base = state.store.lock().unwrap().upstream.base_url.clone();
     let base = base.trim().trim_end_matches('/').to_owned();
-    axum::Json(match probe_key(&state.http, &base, req.key.trim()).await {
-        Ok(models) => serde_json::json!({"ok": true, "models": models}),
-        Err(e) => serde_json::json!({"ok": false, "error": e}),
-    })
+    axum::Json(ValidateKeyResponse::probed(
+        probe_key(&state.http, &base, req.key.trim()).await,
+    ))
     .into_response()
 }
 
@@ -1003,6 +1450,7 @@ mod tests {
             username: username.into(),
             password_hash: hash.into(),
             role: Role::User,
+            locale: None,
         });
         sc
     }

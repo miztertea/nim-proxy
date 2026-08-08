@@ -1,0 +1,1 @@
+{"format":"nimproxy-history","v":1,"kind":"sample","timestamp":1000,"boot_id":"boot-redacted","capacity":{"capacity_rpm":80,"enabled_keys":2,"key_rpms":[40,40]},"state":[{"kind":"counter","metric":"nimproxy_requests_total","labels":{"client":"redacted-client","model":"redacted-model","path":"redacted-path","status":"redacted-status"},"value":1.0}]}

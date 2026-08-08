@@ -47,7 +47,7 @@ struct Lane {
     rpm: usize,
     /// Timestamps of requests sent within the last WINDOW.
     sent: Mutex<VecDeque<Instant>>,
-    /// Lane is benched until this instant (set after an upstream 429/5xx).
+    /// Lane is in cooldown until this instant (set after an upstream 429/5xx).
     cooldown_until: Mutex<Instant>,
 }
 
@@ -244,7 +244,7 @@ impl Pool {
         }
     }
 
-    /// Bench a lane after the upstream told us to back off.
+    /// Put a lane in cooldown after the upstream told us to back off.
     pub fn penalize(&self, lane: usize, backoff: Duration) {
         let until = Instant::now() + backoff;
         let mut cd = self.lanes[lane].cooldown_until.lock().unwrap();
@@ -403,7 +403,11 @@ mod tests {
         let pool = Pool::new(keys(2, 10));
         pool.penalize(0, Duration::from_secs(30));
         let rebuilt = pool.rebuild(keys(2, 10));
-        assert_eq!(take(&rebuilt, Some(0)), 1, "benched lane stays benched");
+        assert_eq!(
+            take(&rebuilt, Some(0)),
+            1,
+            "lane in cooldown stays in cooldown"
+        );
     }
 
     #[test]

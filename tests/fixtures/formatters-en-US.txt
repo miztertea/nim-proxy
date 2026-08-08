@@ -1,0 +1,125 @@
+fmt	NaN	–
+fmt	Infinity	–
+fmt	-Infinity	–
+fmt	0	0
+fmt	0.004	0
+fmt	0.05	0.05
+fmt	0.5	0.5
+fmt	1	1
+fmt	1.5	1.5
+fmt	9.99	9.99
+fmt	10	10
+fmt	10.04	10
+fmt	99.9	99.9
+fmt	100	100
+fmt	999	999
+fmt	1000	1,000
+fmt	9999	9,999
+fmt	10000	10K
+fmt	12345	12.3K
+fmt	999999	1M
+fmt	1000000	1M
+fmt	1234567	1.2M
+fmt	1000000000	1B
+fmt	1234567890	1.2B
+fmt	-1	-1
+fmt	-1234	-1,234
+fmt	-1000000	-1M
+fmt	1000000000000	1T
+secs	NaN	–
+secs	0	0 ms
+secs	0.0004	0 ms
+secs	0.001	1 ms
+secs	0.5	500 ms
+secs	0.999	999 ms
+secs	1	1.0 sec
+secs	1.04	1.0 sec
+secs	59.9	59.9 sec
+secs	89.9	89.9 sec
+secs	90	2 min
+secs	3599	60 min
+secs	3600	60 min
+secs	86399	1,440 min
+ago	0	0s
+ago	1	1s
+ago	59	59s
+ago	60	1m
+ago	61	1m
+ago	3599	59m
+ago	3600	1h 0m
+ago	3661	1h 1m
+ago	86399	23h 59m
+ago	86400	1d 0h
+ago	90061	1d 1h
+ago	8640000	100d 0h
+scopeDate	0	Jan 1
+scopeDate	1000000000	Sep 9
+scopeDate	1751328000	Jul 1
+scopeDate	1751331600	Jul 1
+scopeDate	1755216000	Aug 15
+scopeDate	1767225600	Jan 1
+scopeDate	1767270896	Jan 1
+scopeTime	0	Jan 1, 12:00 AM
+scopeTime	1000000000	Sep 9, 01:46 AM
+scopeTime	1751328000	Jul 1, 12:00 AM
+scopeTime	1751331600	Jul 1, 01:00 AM
+scopeTime	1755216000	Aug 15, 12:00 AM
+scopeTime	1767225600	Jan 1, 12:00 AM
+scopeTime	1767270896	Jan 1, 12:34 PM
+axisLabel.hours	0	12:00 AM
+axisLabel.hours	1000000000	01:46 AM
+axisLabel.hours	1751328000	12:00 AM
+axisLabel.hours	1751331600	01:00 AM
+axisLabel.hours	1755216000	12:00 AM
+axisLabel.hours	1767225600	12:00 AM
+axisLabel.hours	1767270896	12:34 PM
+axisLabel.days	0	Jan 1
+axisLabel.days	1000000000	Sep 9
+axisLabel.days	1751328000	Jul 1
+axisLabel.days	1751331600	Jul 1
+axisLabel.days	1755216000	Aug 15
+axisLabel.days	1767225600	Jan 1
+axisLabel.days	1767270896	Jan 1
+stamp	0	1/1/1970, 12:00:00 AM
+stamp	1000000000	9/9/2001, 1:46:40 AM
+stamp	1751328000	7/1/2025, 12:00:00 AM
+stamp	1751331600	7/1/2025, 1:00:00 AM
+stamp	1755216000	8/15/2025, 12:00:00 AM
+stamp	1767225600	1/1/2026, 12:00:00 AM
+stamp	1767270896	1/1/2026, 12:34:56 PM
+pctOf.0	0	0%
+pctOf.1	0	0%
+pctOf.2	0	0%
+pctOf.3	0	0%
+pctOf.0	0.005	1%
+pctOf.1	0.005	0.5%
+pctOf.2	0.005	0.5%
+pctOf.3	0.005	0.5%
+pctOf.0	0.05	5%
+pctOf.1	0.05	5%
+pctOf.2	0.05	5%
+pctOf.3	0.05	5%
+pctOf.0	0.5	50%
+pctOf.1	0.5	50%
+pctOf.2	0.5	50%
+pctOf.3	0.5	50%
+pctOf.0	0.947	95%
+pctOf.1	0.947	94.7%
+pctOf.2	0.947	94.7%
+pctOf.3	0.947	94.7%
+pctOf.0	0.9995	100%
+pctOf.1	0.9995	100%
+pctOf.2	0.9995	99.95%
+pctOf.3	0.9995	99.95%
+pctOf.0	0.99999	100%
+pctOf.1	0.99999	100%
+pctOf.2	0.99999	100%
+pctOf.3	0.99999	99.999%
+pctOf.0	1	100%
+pctOf.1	1	100%
+pctOf.2	1	100%
+pctOf.3	1	100%
+stamp.nonfinite	NaN	–
+scopeDate.nonfinite	NaN	–
+stamp.nonfinite	Infinity	–
+scopeDate.nonfinite	Infinity	–

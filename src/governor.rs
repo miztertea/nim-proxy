@@ -5,7 +5,7 @@
 //! orthogonal to the per-key RPM limit ("ResourceExhausted: Worker local
 //! total request limit reached (32/32)"). It is **model-scoped and shared
 //! across all keys**, so failing over to another key can't help — the old
-//! behavior of benching the lane just burned healthy key capacity. Instead,
+//! behavior of cooling down the lane just burned healthy key capacity. Instead,
 //! worker exhaustion backs off the *model*:
 //!
 //! - Every model starts ungoverned (no cap, zero config).
@@ -30,7 +30,7 @@ use metrics::{counter, gauge};
 /// How often a waiter re-checks for a free permit.
 pub const POLL: Duration = Duration::from_millis(250);
 /// Post-exhaustion pause on the model: workers free up as generations
-/// finish, so short — this is a drain gap, not a lane-style bench.
+/// finish, so short — this is a drain gap, not a lane-style cooldown.
 const EXHAUST_BACKOFF: Duration = Duration::from_secs(2);
 /// Additive increase: +1 concurrency per stable minute.
 const GROW_INTERVAL: Duration = Duration::from_secs(60);
@@ -39,7 +39,7 @@ const DISSOLVE_AFTER: Duration = Duration::from_secs(30 * 60);
 
 /// The worker-exhaustion signature in an upstream error body. Must be
 /// checked *before* generic retry handling: this failure is model-scoped,
-/// never a reason to bench the lane that carried it.
+/// never a reason to cool down the lane that carried it.
 pub fn is_worker_exhausted(body: &str) -> bool {
     body.contains("Worker local total request limit")
 }

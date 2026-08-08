@@ -31,6 +31,9 @@ dispatch run carries the release end-to-end itself.
 - Bump `version` in `Cargo.toml` and sync `Cargo.lock`
   (`cargo update --package nim-proxy`). The boot banner and dashboard status
   report `CARGO_PKG_VERSION`; the workflow releases exactly this version.
+- Regenerate `openapi.json` (`UPDATE_OPENAPI=1 cargo test --test openapi`) and
+  commit it. The spec's `info.version` is `CARGO_PKG_VERSION`, so a bump makes
+  it stale and CI's spec-drift check fails until it is regenerated.
 - `CHANGELOG.md`: promote `[Unreleased]` to `[X.Y.Z] - <date>`, leave a fresh
   empty `[Unreleased]`, and update the compare/tag links in the footer.
 - Update the supported-versions table in `SECURITY.md` to the new minor.

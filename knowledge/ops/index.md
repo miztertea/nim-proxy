@@ -11,3 +11,4 @@ description: Deploying, configuring, sharing, and capacity planning.
 - [configure-env](configure-env.md)
 - [sharing-with-friends](sharing-with-friends.md)
 - [capacity-math](capacity-math.md)
+- [nim-response-capture](nim-response-capture.md)

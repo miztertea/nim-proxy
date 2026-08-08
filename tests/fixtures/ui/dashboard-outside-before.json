@@ -1,0 +1,27 @@
+{
+  "config_revision": 7,
+  "diagnostics": {
+    "excluded_epochs": 0,
+    "excluded_records": 0,
+    "normalized_series": 1,
+    "skipped_metric_lines": 0,
+    "valid_checkpoints": 0,
+    "valid_samples": 1
+  },
+  "history_revision": 11,
+  "latest": [],
+  "points": [],
+  "totals": [],
+  "window": {
+    "available_from": 1697411600,
+    "available_to": 1700003600,
+    "complete": false,
+    "default_window_days": 30,
+    "effective_from": null,
+    "effective_to": null,
+    "following_now": false,
+    "requested_from": 1697000000,
+    "requested_to": 1697003600,
+    "retention_days": 30
+  }
+}

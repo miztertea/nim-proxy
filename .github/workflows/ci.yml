@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 # Least privilege by default; jobs opt into more only if they need it.
 permissions:
@@ -19,41 +20,336 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    name: change routing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      stable: ${{ steps.filter.outputs.stable }}
+      presentation: ${{ steps.filter.outputs.presentation }}
+      coverage: ${{ steps.filter.outputs.coverage }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Route changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: step-security/paths-filter@9098a7821b83402dbe267c0c801e7d580ce74f92 # v4.0.2
+        with:
+          predicate-quantifier: every
+          filters: |
+            stable:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!knowledge/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!.github/CODEOWNERS'
+              - '!scripts/check_agent_guide.py'
+              - '!fuzz/**'
+              - '!deny.toml'
+              - '!.github/dependabot.yml'
+              - '!Dockerfile'
+              - '!.dockerignore'
+              - '!docker-compose*.yml'
+              - '!src/web/**'
+              - '!scripts/render_check.js'
+              - '!scripts/formatter_fixture.js'
+              - '!scripts/check_i18n.py'
+              - '!scripts/locale_v1.py'
+              - '!scripts/gen_pseudolocale.py'
+              - '!tests/fixtures/locales/**'
+              - '!tests/fixtures/formatters-en-US.txt'
+            presentation:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!knowledge/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!.github/CODEOWNERS'
+              - '!scripts/check_agent_guide.py'
+              - '!fuzz/**'
+              - '!deny.toml'
+              - '!.github/dependabot.yml'
+              - '!Cargo.toml'
+              - '!Cargo.lock'
+              - '!rust-toolchain.toml'
+              - '!Dockerfile'
+              - '!.dockerignore'
+              - '!docker-compose*.yml'
+              - '!src/dispatch.rs'
+              - '!src/governor.rs'
+              - '!src/history.rs'
+              - '!src/history/**'
+              - '!src/lib.rs'
+              - '!src/observation.rs'
+              - '!src/pool.rs'
+              - '!openapi.json'
+              - '!tests/e2e.rs'
+              - '!tests/openapi.rs'
+              - '!tests/support/**'
+              - '!tests/fixtures/api/**'
+              - '!tests/fixtures/history-v1/**'
+              - '!tests/fixtures/nim-observations/**'
+            coverage:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!knowledge/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!.github/CODEOWNERS'
+              - '!scripts/check_agent_guide.py'
+              - '!fuzz/**'
+              - '!deny.toml'
+              - '!.github/dependabot.yml'
+              - '!Cargo.toml'
+              - '!Cargo.lock'
+              - '!rust-toolchain.toml'
+              - '!Dockerfile'
+              - '!.dockerignore'
+              - '!docker-compose*.yml'
+              - '!src/web/**'
+              - '!scripts/render_check.js'
+              - '!scripts/formatter_fixture.js'
+              - '!scripts/check_i18n.py'
+              - '!scripts/locale_v1.py'
+              - '!scripts/gen_pseudolocale.py'
+              - '!tests/fixtures/locales/**'
+              - '!tests/fixtures/formatters-en-US.txt'
+            docker:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!knowledge/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!.github/CODEOWNERS'
+              - '!scripts/check_agent_guide.py'
+              - '!fuzz/**'
+              - '!deny.toml'
+              - '!.github/dependabot.yml'
+              - '!src/web/**'
+              - '!scripts/render_check.js'
+              - '!scripts/formatter_fixture.js'
+              - '!scripts/check_i18n.py'
+              - '!scripts/locale_v1.py'
+              - '!scripts/gen_pseudolocale.py'
+              - '!tests/fixtures/locales/**'
+              - '!tests/fixtures/formatters-en-US.txt'
+
   check:
     name: fmt, clippy, tests
+    needs: changes
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
+      - name: Require successful change routing
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Agent guide contract
+        run: |
+          python3 scripts/check_agent_guide.py --selftest
+          python3 scripts/check_agent_guide.py
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master (toolchain via input)
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true' ||
+          needs.changes.outputs.presentation == 'true'
         with:
           toolchain: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true' ||
+          needs.changes.outputs.presentation == 'true'
       - name: Format
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true'
         run: cargo fmt --check
       - name: Clippy
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true'
         run: cargo clippy --all-targets -- -D warnings
       - name: Tests (unit + integration)
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true'
         run: cargo test
-      - name: Dashboard JS syntax
+      # openapi.json is generated from the handlers. Regenerate it here and
+      # fail on any difference, so the committed spec cannot drift from the
+      # code that serves the requests — `cargo test` alone would catch it, but
+      # only if the contributor remembered to commit the regenerated file.
+      - name: OpenAPI spec is in sync
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true'
         run: |
-          python3 - <<'PY' > "$RUNNER_TEMP/dash.js"
-          import re, pathlib
-          html = pathlib.Path("src/dashboard.html").read_text()
-          m = re.search(r"<script>\n(.*)</script>", html, re.S)
-          assert m, "no <script> block found in src/dashboard.html"
-          print(m.group(1))
-          PY
-          node --check "$RUNNER_TEMP/dash.js"
+          UPDATE_OPENAPI=1 cargo test --test openapi
+          git diff --exit-code -- openapi.json \
+            || { echo "::error::openapi.json is stale — run 'UPDATE_OPENAPI=1 cargo test --test openapi' and commit it"; exit 1; }
+      - name: Rust-owned UI fixtures are in sync
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.stable == 'true'
+        # Fixture bytes are serialized from the production response types. The
+        # update command is deliberate; a diff after it catches an omitted
+        # generated fixture in the same way the OpenAPI gate catches its spec.
+        run: |
+          UPDATE_UI_FIXTURES=1 cargo test api::tests::ui_fixtures --lib
+          git add --intent-to-add -- tests/fixtures/ui
+          git diff --exit-code -- tests/fixtures/ui \
+            || { echo "::error::UI fixtures are stale — run 'UPDATE_UI_FIXTURES=1 cargo test api::tests::ui_fixtures --lib' and commit tests/fixtures/ui"; exit 1; }
+      - name: Embedded presentation source boundaries and JS syntax
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        # cargo test asserts on served HTML text and never parses the
+        # JavaScript. These checks also keep executable/style source external
+        # to HTML and reject every external-origin dependency.
+        run: |
+          node scripts/render_check.js --asset-selftest
+          node scripts/render_check.js --assets-only
+          node scripts/render_check.js --served-page-selftest
+          node scripts/render_check.js --catalog-startup-selftest
+          node scripts/render_check.js --syntax-selftest
+          node scripts/render_check.js --syntax-only
+          node scripts/render_check.js --interaction-selftest
+      - name: Formatter output is unchanged
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        # Pins number/duration/date/percent output against a golden fixture.
+        # TZ and locale are fixed because these formatters read the catalog
+        # locale and the system zone; an unpinned run encodes the runner.
+        env:
+          TZ: UTC
+          LC_ALL: en_US.UTF-8
+        run: node scripts/formatter_fixture.js --check
+      - name: i18n lint self-test
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        # Same reason as locale-v1's below, and this one was missing while the
+        # lint shipped three separate blind spots. Every case here is a real
+        # false negative that once reported `i18n OK`.
+        run: python3 scripts/check_i18n.py --selftest
+      - name: i18n catalog and untagged-string lint
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        run: python3 scripts/check_i18n.py
+      - name: locale-v1 self-test
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        # Proves every check can fail before trusting any of them.
+        run: python3 scripts/locale_v1.py --selftest
+      - name: locale-v1 validation
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        run: |
+          python3 scripts/locale_v1.py --update-public
+          git diff --exit-code -- tests/fixtures/locales/public-en-US.json \
+            || { echo "::error::public-en-US.json is stale — run 'python3 scripts/locale_v1.py --update-public' and commit it"; exit 1; }
+          python3 scripts/locale_v1.py --all
+      - name: Pseudolocale is current
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        # en-XA is generated, never hand-edited; a stale one silently stops
+        # testing the strings that changed.
+        run: python3 scripts/gen_pseudolocale.py --check
+      - name: Dashboard renders and survives being driven
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.base_ref == 'main' ||
+          contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+          needs.changes.outputs.presentation == 'true'
+        # `node --check` above proves the scripts parse; this starts the real
+        # binary and requests its served page/assets, replays captured API
+        # payloads through CDP, walks every tab, and hovers every chart. Any
+        # missing/external initial asset or uncaught page error fails. The
+        # bug that motivated it threw on hover and made a healthy proxy report
+        # "Disconnected" — green on every other check in this job.
+        # --escape-probe additionally catches a render helper escaping a
+        # catalog value that was already escaped at load, which is invisible
+        # in English and in en-XA.
+        # Both embedded pages. setup.html was proved by hand three separate
+        # times and the gap written up as "known" each time, which is more work
+        # than one committed check and leaves nothing behind.
+        run: |
+          node scripts/render_check.js
+          node scripts/render_check.js --all-states
+          node scripts/render_check.js --escape-probe
+          node scripts/render_check.js --page setup
+          node scripts/render_check.js --page setup --escape-probe
+          node scripts/render_check.js --page login
+          node scripts/render_check.js --page dashboard --startup-probe bootstrap-failure
+          node scripts/render_check.js --page dashboard --startup-probe delayed-catalog
+          node scripts/render_check.js --page setup --startup-probe catalog-failure
+          node scripts/render_check.js --page setup --startup-probe delayed-catalog
+          node scripts/render_check.js --page login --startup-probe malformed-catalog
+          node scripts/render_check.js --page login --startup-probe delayed-catalog
+          node scripts/render_check.js --page dashboard --startup-probe css-failure
+          node scripts/render_check.js --page setup --startup-probe css-failure
+          node scripts/render_check.js --page login --startup-probe css-failure
+          node scripts/render_check.js --page dashboard --startup-probe app-script-failure
+          node scripts/render_check.js --page dashboard --startup-probe locale-precedence
+          node scripts/render_check.js --page dashboard --startup-probe locale-precedence --precedence-case default
+          node scripts/render_check.js --cleanup-selftest
 
   coverage:
     name: coverage
+    needs: changes
+    if: >-
+      needs.changes.result == 'success' &&
+      (github.event_name != 'pull_request' ||
+       github.base_ref == 'main' ||
+       contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+       needs.changes.outputs.coverage == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Harden runner
@@ -84,6 +380,13 @@ jobs:
 
   msrv:
     name: msrv
+    needs: changes
+    if: >-
+      needs.changes.result == 'success' &&
+      (github.event_name != 'pull_request' ||
+       github.base_ref == 'main' ||
+       contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+       needs.changes.outputs.stable == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Harden runner
@@ -232,6 +535,13 @@ jobs:
 
   docker:
     name: docker build
+    needs: changes
+    if: >-
+      needs.changes.result == 'success' &&
+      (github.event_name != 'pull_request' ||
+       github.base_ref == 'main' ||
+       contains(github.event.pull_request.labels.*.name, 'ci:full') ||
+       needs.changes.outputs.docker == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Harden runner

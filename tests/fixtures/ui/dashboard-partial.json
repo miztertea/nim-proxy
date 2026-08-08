@@ -1,0 +1,2170 @@
+{
+  "config_revision": 7,
+  "diagnostics": {
+    "excluded_epochs": 1,
+    "excluded_records": 1,
+    "normalized_series": 1,
+    "skipped_metric_lines": 1,
+    "valid_checkpoints": 0,
+    "valid_samples": 1
+  },
+  "history_revision": 11,
+  "latest": [
+    {
+      "labels": {},
+      "metric": "nimproxy_active_requests",
+      "value": 2.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_queue_depth",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_model_inflight",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_model_limit",
+      "value": 8.0
+    }
+  ],
+  "points": [
+    {
+      "capacity": {
+        "average_rpm": 80.0,
+        "latest_rpms": [
+          40,
+          40
+        ]
+      },
+      "duration_seconds": 45000,
+      "from": 1699913600,
+      "to": 1699958600,
+      "values": [
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/alpha",
+            "path": "/v1/chat/completions",
+            "status": "200"
+          },
+          "metric": "nimproxy_requests_total",
+          "value": 15.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/zeta",
+            "path": "/v1/chat/completions",
+            "status": "504"
+          },
+          "metric": "nimproxy_requests_total",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_prompt_tokens_total",
+          "value": 600.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_completion_tokens_total",
+          "value": 150.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_reasoning_tokens_total",
+          "value": 30.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha",
+            "reason": "stop"
+          },
+          "metric": "nimproxy_finish_reason_total",
+          "value": 12.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "stream": "true"
+          },
+          "metric": "nimproxy_stream_requests_total",
+          "value": 10.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tool_calls_total",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "mode": "auto"
+          },
+          "metric": "nimproxy_tool_choice_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_json_mode_total",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "result": "sticky"
+          },
+          "metric": "nimproxy_affinity_total",
+          "value": 12.0
+        },
+        {
+          "labels": {
+            "result": "spill"
+          },
+          "metric": "nimproxy_affinity_total",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "lane": "0"
+          },
+          "metric": "nimproxy_lane_requests_total",
+          "value": 16.0
+        },
+        {
+          "labels": {
+            "lane": "0",
+            "status": "429"
+          },
+          "metric": "nimproxy_lane_cooldown_total",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_worker_exhausted_total",
+          "value": 0.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_shed_total",
+          "value": 0.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_unauthorized_total",
+          "value": 0.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_login_failures_total",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_tools_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_tools_sum",
+          "value": 7.5
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_messages_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_messages_sum",
+          "value": 20.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_temperature_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_temperature_sum",
+          "value": 3.5
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_max_tokens_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_max_tokens_sum",
+          "value": 5120.0
+        },
+        {
+          "labels": {
+            "field": "prompt_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "completion_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "total_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "cached_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "reasoning_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "0.05",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "0.1",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "0.25",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "0.5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "1",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "2",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "10",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "30",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "60",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_sum",
+          "value": 1.5
+        },
+        {
+          "labels": {
+            "le": "1",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "2",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "5",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "10",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "20",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "40",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "80",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "160",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "320",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_sum",
+          "value": 30.0
+        },
+        {
+          "labels": {
+            "le": "0.005",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "0.01",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "0.02",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "0.04",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "0.08",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "0.16",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "0.32",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_sum",
+          "value": 0.11599999999999999
+        },
+        {
+          "labels": {
+            "le": "0.25",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "0.5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "1",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "2",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "10",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "30",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "60",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "120",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "300",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_sum",
+          "value": 5.6
+        },
+        {
+          "labels": {
+            "le": "0.001"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "0.05"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "0.25"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "1"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "5"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "15"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "60"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "180"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "600"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_queue_wait_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_queue_wait_seconds_sum",
+          "value": 2.6205
+        }
+      ]
+    },
+    {
+      "capacity": {
+        "average_rpm": 80.0,
+        "latest_rpms": [
+          40,
+          40
+        ]
+      },
+      "duration_seconds": 45000,
+      "from": 1699958600,
+      "to": 1700003600,
+      "values": [
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/alpha",
+            "path": "/v1/chat/completions",
+            "status": "200"
+          },
+          "metric": "nimproxy_requests_total",
+          "value": 15.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/zeta",
+            "path": "/v1/chat/completions",
+            "status": "504"
+          },
+          "metric": "nimproxy_requests_total",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_prompt_tokens_total",
+          "value": 600.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_completion_tokens_total",
+          "value": 150.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_reasoning_tokens_total",
+          "value": 30.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha",
+            "reason": "stop"
+          },
+          "metric": "nimproxy_finish_reason_total",
+          "value": 13.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client",
+            "stream": "true"
+          },
+          "metric": "nimproxy_stream_requests_total",
+          "value": 10.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tool_calls_total",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "mode": "auto"
+          },
+          "metric": "nimproxy_tool_choice_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_json_mode_total",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "result": "sticky"
+          },
+          "metric": "nimproxy_affinity_total",
+          "value": 12.0
+        },
+        {
+          "labels": {
+            "result": "spill"
+          },
+          "metric": "nimproxy_affinity_total",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "lane": "0"
+          },
+          "metric": "nimproxy_lane_requests_total",
+          "value": 17.0
+        },
+        {
+          "labels": {
+            "lane": "0",
+            "status": "429"
+          },
+          "metric": "nimproxy_lane_cooldown_total",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_worker_exhausted_total",
+          "value": 1.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_shed_total",
+          "value": 1.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_unauthorized_total",
+          "value": 1.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_login_failures_total",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_tools_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_tools_sum",
+          "value": 7.5
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_messages_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_messages_sum",
+          "value": 20.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_temperature_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_temperature_sum",
+          "value": 3.5
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_max_tokens_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "client": "fixture-client"
+          },
+          "metric": "nimproxy_request_max_tokens_sum",
+          "value": 5120.0
+        },
+        {
+          "labels": {
+            "field": "prompt_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "completion_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "total_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "cached_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "field": "reasoning_tokens",
+            "result": "measured"
+          },
+          "metric": "nimproxy_usage_observations_total",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "0.05",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.1",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.25",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "1",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "2",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "10",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "30",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "60",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_ttft_seconds_sum",
+          "value": 43.5
+        },
+        {
+          "labels": {
+            "le": "1",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "2",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "5",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "10",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "20",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "40",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "80",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "160",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "320",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha",
+            "source": "usage"
+          },
+          "metric": "nimproxy_tokens_per_second_sum",
+          "value": 880.0
+        },
+        {
+          "labels": {
+            "le": "0.005",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.01",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.02",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.04",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.08",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.16",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "0.32",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_tpot_seconds_sum",
+          "value": 1.8599999999999999
+        },
+        {
+          "labels": {
+            "le": "0.25",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "1",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "2",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "5",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "10",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "30",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "60",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "120",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 4.0
+        },
+        {
+          "labels": {
+            "le": "300",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf",
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "model": "fixture/alpha"
+          },
+          "metric": "nimproxy_upstream_seconds_sum",
+          "value": 417.0
+        },
+        {
+          "labels": {
+            "le": "0.001"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.05"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "0.25"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "1"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "5"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 0.0
+        },
+        {
+          "labels": {
+            "le": "15"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 1.0
+        },
+        {
+          "labels": {
+            "le": "60"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 2.0
+        },
+        {
+          "labels": {
+            "le": "180"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 3.0
+        },
+        {
+          "labels": {
+            "le": "600"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {
+            "le": "+Inf"
+          },
+          "metric": "nimproxy_queue_wait_seconds_bucket",
+          "value": 5.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_queue_wait_seconds_count",
+          "value": 5.0
+        },
+        {
+          "labels": {},
+          "metric": "nimproxy_queue_wait_seconds_sum",
+          "value": 930.0
+        }
+      ]
+    }
+  ],
+  "totals": [
+    {
+      "labels": {
+        "client": "fixture-client",
+        "model": "fixture/alpha",
+        "path": "/v1/chat/completions",
+        "status": "200"
+      },
+      "metric": "nimproxy_requests_total",
+      "value": 30.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client",
+        "model": "fixture/zeta",
+        "path": "/v1/chat/completions",
+        "status": "504"
+      },
+      "metric": "nimproxy_requests_total",
+      "value": 3.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_prompt_tokens_total",
+      "value": 1200.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_completion_tokens_total",
+      "value": 300.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_reasoning_tokens_total",
+      "value": 60.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha",
+        "reason": "stop"
+      },
+      "metric": "nimproxy_finish_reason_total",
+      "value": 25.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client",
+        "stream": "true"
+      },
+      "metric": "nimproxy_stream_requests_total",
+      "value": 20.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tool_calls_total",
+      "value": 8.0
+    },
+    {
+      "labels": {
+        "mode": "auto"
+      },
+      "metric": "nimproxy_tool_choice_total",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_json_mode_total",
+      "value": 4.0
+    },
+    {
+      "labels": {
+        "result": "sticky"
+      },
+      "metric": "nimproxy_affinity_total",
+      "value": 24.0
+    },
+    {
+      "labels": {
+        "result": "spill"
+      },
+      "metric": "nimproxy_affinity_total",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "lane": "0"
+      },
+      "metric": "nimproxy_lane_requests_total",
+      "value": 33.0
+    },
+    {
+      "labels": {
+        "lane": "0",
+        "status": "429"
+      },
+      "metric": "nimproxy_lane_cooldown_total",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_worker_exhausted_total",
+      "value": 1.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_shed_total",
+      "value": 1.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_unauthorized_total",
+      "value": 1.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_login_failures_total",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_tools_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_tools_sum",
+      "value": 15.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_messages_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_messages_sum",
+      "value": 40.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_temperature_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_temperature_sum",
+      "value": 7.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_max_tokens_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "client": "fixture-client"
+      },
+      "metric": "nimproxy_request_max_tokens_sum",
+      "value": 10240.0
+    },
+    {
+      "labels": {
+        "field": "prompt_tokens",
+        "result": "measured"
+      },
+      "metric": "nimproxy_usage_observations_total",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "field": "completion_tokens",
+        "result": "measured"
+      },
+      "metric": "nimproxy_usage_observations_total",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "field": "total_tokens",
+        "result": "measured"
+      },
+      "metric": "nimproxy_usage_observations_total",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "field": "cached_tokens",
+        "result": "measured"
+      },
+      "metric": "nimproxy_usage_observations_total",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "field": "reasoning_tokens",
+        "result": "measured"
+      },
+      "metric": "nimproxy_usage_observations_total",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "le": "0.05",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "le": "0.1",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "le": "0.25",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 3.0
+    },
+    {
+      "labels": {
+        "le": "0.5",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 4.0
+    },
+    {
+      "labels": {
+        "le": "1",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 5.0
+    },
+    {
+      "labels": {
+        "le": "2",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 6.0
+    },
+    {
+      "labels": {
+        "le": "5",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 7.0
+    },
+    {
+      "labels": {
+        "le": "10",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 8.0
+    },
+    {
+      "labels": {
+        "le": "30",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "le": "60",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "le": "+Inf",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_ttft_seconds_sum",
+      "value": 45.0
+    },
+    {
+      "labels": {
+        "le": "1",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "le": "2",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "le": "5",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 3.0
+    },
+    {
+      "labels": {
+        "le": "10",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 4.0
+    },
+    {
+      "labels": {
+        "le": "20",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 5.0
+    },
+    {
+      "labels": {
+        "le": "40",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 6.0
+    },
+    {
+      "labels": {
+        "le": "80",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 7.0
+    },
+    {
+      "labels": {
+        "le": "160",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 8.0
+    },
+    {
+      "labels": {
+        "le": "320",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 9.0
+    },
+    {
+      "labels": {
+        "le": "+Inf",
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha",
+        "source": "usage"
+      },
+      "metric": "nimproxy_tokens_per_second_sum",
+      "value": 910.0
+    },
+    {
+      "labels": {
+        "le": "0.005",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "le": "0.01",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "le": "0.02",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 3.0
+    },
+    {
+      "labels": {
+        "le": "0.04",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 4.0
+    },
+    {
+      "labels": {
+        "le": "0.08",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 5.0
+    },
+    {
+      "labels": {
+        "le": "0.16",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 6.0
+    },
+    {
+      "labels": {
+        "le": "0.32",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 7.0
+    },
+    {
+      "labels": {
+        "le": "+Inf",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_tpot_seconds_sum",
+      "value": 1.976
+    },
+    {
+      "labels": {
+        "le": "0.25",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "le": "0.5",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "le": "1",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 3.0
+    },
+    {
+      "labels": {
+        "le": "2",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 4.0
+    },
+    {
+      "labels": {
+        "le": "5",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 5.0
+    },
+    {
+      "labels": {
+        "le": "10",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 6.0
+    },
+    {
+      "labels": {
+        "le": "30",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 7.0
+    },
+    {
+      "labels": {
+        "le": "60",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 8.0
+    },
+    {
+      "labels": {
+        "le": "120",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 9.0
+    },
+    {
+      "labels": {
+        "le": "300",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "le": "+Inf",
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_count",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "model": "fixture/alpha"
+      },
+      "metric": "nimproxy_upstream_seconds_sum",
+      "value": 422.6
+    },
+    {
+      "labels": {
+        "le": "0.001"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 1.0
+    },
+    {
+      "labels": {
+        "le": "0.05"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 2.0
+    },
+    {
+      "labels": {
+        "le": "0.25"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 3.0
+    },
+    {
+      "labels": {
+        "le": "1"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 4.0
+    },
+    {
+      "labels": {
+        "le": "5"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 5.0
+    },
+    {
+      "labels": {
+        "le": "15"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 6.0
+    },
+    {
+      "labels": {
+        "le": "60"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 7.0
+    },
+    {
+      "labels": {
+        "le": "180"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 8.0
+    },
+    {
+      "labels": {
+        "le": "600"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {
+        "le": "+Inf"
+      },
+      "metric": "nimproxy_queue_wait_seconds_bucket",
+      "value": 10.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_queue_wait_seconds_count",
+      "value": 10.0
+    },
+    {
+      "labels": {},
+      "metric": "nimproxy_queue_wait_seconds_sum",
+      "value": 932.6205
+    }
+  ],
+  "window": {
+    "available_from": 1699913600,
+    "available_to": 1700003600,
+    "complete": false,
+    "default_window_days": 30,
+    "effective_from": 1699913600,
+    "effective_to": 1700003600,
+    "following_now": false,
+    "requested_from": 1697411600,
+    "requested_to": 1700003600,
+    "retention_days": 30
+  }
+}

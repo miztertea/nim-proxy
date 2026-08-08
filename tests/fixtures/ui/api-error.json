@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid_history",
+    "message": "invalid history fixture",
+    "type": "proxy_error"
+  }
+}

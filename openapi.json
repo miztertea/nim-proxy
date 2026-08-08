@@ -1,0 +1,2315 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "nim-proxy dashboard API",
+    "description": "The operator surface of nim-proxy: the settings store, user and key management, and the metrics history the dashboard renders. This document is generated from the handlers; regenerate it with `UPDATE_OPENAPI=1 cargo test --test openapi`.\n\nNot covered: the OpenAI-compatible `/v1` passthrough (that contract is the upstream's, not nim-proxy's), the HTML page routes, the form-encoded `/login` and `/logout` browser flow, plain-text `/health`, and the Prometheus exposition at `/metrics`.",
+    "contact": {
+      "name": "nim-proxy",
+      "url": "https://github.com/miztertea/nim-proxy"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://github.com/miztertea/nim-proxy/blob/main/LICENSE"
+    },
+    "version": "0.6.6"
+  },
+  "paths": {
+    "/api/config": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`GET /api/config` — the Settings page's data source, filtered by role\nBEFORE serialization: a user-role response simply contains no server\nsettings and no other users' key rows, so DOM tampering reveals nothing.",
+        "operationId": "api_config",
+        "responses": {
+          "200": {
+            "description": "Settings visible to the caller's role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "api_dashboard",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Window start, unix seconds. Defaults to `to - default_window_days`.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Window end, unix seconds. Omitting it means \"follow now\".",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "points",
+            "in": "query",
+            "description": "Rollup buckets, clamped to 2..=1000. Defaults to 288.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rolled-up history for the window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`from` is not before `to`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dashboard/now": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "api_dashboard_now",
+        "responses": {
+          "200": {
+            "description": "Live registry values plus the configuration they were sampled under",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardNowResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locale-bootstrap": {
+      "get": {
+        "tags": [
+          "localization"
+        ],
+        "operationId": "api_locale_bootstrap",
+        "responses": {
+          "200": {
+            "description": "Installed locales and the server default",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocaleBootstrap"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/settings/account": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/account` — change the caller's password or locale preference.\nPassword changes always re-verify the current password and return a fresh\ncookie; locale changes preserve the existing session.",
+        "operationId": "account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed with a fresh session cookie and other sessions invalidated, or locale preference applied without changing the session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request failed with weak_password, invalid_action, invalid_locale, locale_not_installed, or invalid_config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The current password is wrong",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An admin reset the password while this request was in flight; the reset wins",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid JSON request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/clients": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/clients` — client-key create/revoke for any role\n(own keys; admins revoke any); the open/keyed mode toggle is admin-only.\nA created secret is returned exactly once and stored only as a digest.",
+        "operationId": "clients",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientsReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied. On `add`, `secret` is the plaintext key — the only time it is ever served.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No such client key, more than one action, or an unknown mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Revoking someone else's key, or a non-admin changing the mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/governor": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/governor` (admin) — the per-model concurrency gate: the adaptive switch and operator-pinned caps. Fields are independent; omitted ones are left alone.",
+        "operationId": "governor_cfg",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GovernorReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied, persisted, and swapped into the live runtime config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The store validator rejected the result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Server settings require an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field is missing or the wrong type — a partial body is never a silent reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/history": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/history` (admin) — retention plus the dashboard's default window and SLO target. Shrinking retention prunes on disk.",
+        "operationId": "history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied, persisted, and swapped into the live runtime config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The store validator rejected the result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Server settings require an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field is missing or the wrong type — a partial body is never a silent reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/limits": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/limits` (admin) — patience, timeouts and the in-flight cap. Every field is required.",
+        "operationId": "limits",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitsReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied, persisted, and swapped into the live runtime config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The store validator rejected the result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Server settings require an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field is missing or the wrong type — a partial body is never a silent reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/locale": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/locale` — change the persisted server default. Admin\nand superuser roles share the existing server-settings authority.",
+        "operationId": "locale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetServerLocale"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or uninstalled locale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Server settings require an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid JSON request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/nim-keys": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/nim-keys` — any role may add keys (owner = caller)\nand manage their OWN keys; admins manage any key. The superuser's last\nenabled key is protected by `validate` (the pool-floor invariant).",
+        "operationId": "nim_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NimKeysReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied; the pool was rebuilt with rate-state carryover",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No such key, more than one action, or a store the validator rejects (e.g. removing the pool floor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the key's owner and not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/upstream": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/upstream` (admin) — also flushes the model-catalog\ncache and the per-model no-inject memory, which are upstream-specific.",
+        "operationId": "upstream",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpstreamReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied; the model catalog cache and the per-model no-inject memory were flushed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an http(s) URL, or a link-local address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Server settings require an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/users": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/users` (admin) — create/delete users, reset\npasswords, change roles. Deleting a user pulls their NIM keys from the\npool and revokes their client keys — their harnesses stop; that's the\npoint. The superuser can never be deleted or demoted.",
+        "operationId": "users",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsersReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Weak password, unknown user, bad role, or more than one action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller's user was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an admin, or a write against the superuser (undeletable, immutable role, password only via /account)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/validate-key": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "`POST /api/settings/validate-key` — authenticated twin of the setup\nprobe. The upstream is ALWAYS the configured `base_url`, never a\ncaller-supplied one: a request-supplied target would let any logged-in\nuser turn the proxy into an SSRF probe of internal hosts (the response\ndistinguishes reachable/rejected/unreachable). An admin testing a new\nupstream saves it first, then validates. `req.base_url` is ignored.",
+        "operationId": "validate_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateKeyReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Probe finished against the CONFIGURED upstream; any `base_url` in the body is ignored (SSRF guard)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateKeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/setup": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "`POST /setup` — one atomic claim: create the superuser, record the\ninitial NIM keys, persist, and mint a session. No half-configured server\nstate exists at any point; an abandoned wizard leaves nothing behind.",
+        "operationId": "setup_submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Claimed. Sets the session cookie; `client_key` carries the minted secret, which is never retrievable again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Weak password or a config the store rejects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup is already complete or another caller claimed the proxy first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/setup/validate-key": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "`POST /setup/validate-key` — pre-auth key probe for the wizard, bounded\nby the shared login throttle plus a fixed delay (probe abuse control).",
+        "operationId": "setup_validate_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateKeyReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Probe finished; `ok` says whether the key worked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`base_url` is not an allowed upstream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup is already complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Probe throttle (shared with the login throttle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountReq": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "current_password",
+              "new_password"
+            ],
+            "properties": {
+              "current_password": {
+                "type": "string"
+              },
+              "new_password": {
+                "type": "string",
+                "description": "At least 10 characters."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "action",
+              "locale"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "locale"
+                ]
+              },
+              "locale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AddClient": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "AddNimKey": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "rpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Requests per minute for this key's lane; defaults to 40 (NIM's free\ntier).",
+            "minimum": 0
+          }
+        }
+      },
+      "AddUser": {
+        "type": "object",
+        "required": [
+          "username",
+          "password",
+          "role"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "At least 10 characters."
+          },
+          "role": {
+            "type": "string",
+            "description": "`admin` or `user` — `superuser` is never assignable."
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "description": "The single error envelope every JSON endpoint answers failures with —\nthe same shape `/v1` uses, so one client-side branch handles both.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      },
+      "ApiErrorBody": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "type"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable reason, e.g. `invalid_config`, `forbidden`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Operator-facing explanation; safe to show in the UI."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `proxy_error` — the error came from nim-proxy, not upstream.",
+            "example": "proxy_error"
+          }
+        }
+      },
+      "CapacityRollup": {
+        "type": "object",
+        "description": "ASCII-ordered: served inside `/api/dashboard` (see `src/api.rs`).",
+        "required": [
+          "average_rpm",
+          "latest_rpms"
+        ],
+        "properties": {
+          "average_rpm": {
+            "type": "number",
+            "format": "double"
+          },
+          "latest_rpms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "ClientKeyRow": {
+        "type": "object",
+        "description": "A stored client key. The secret itself is never served back — only the\nmasked tail kept for display.",
+        "required": [
+          "last4",
+          "name",
+          "owner"
+        ],
+        "properties": {
+          "last4": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          }
+        }
+      },
+      "ClientsReq": {
+        "type": "object",
+        "description": "Exactly one of `add` / `remove` / `mode` per request.",
+        "properties": {
+          "add": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AddClient"
+              }
+            ]
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`open` or `keyed` — whether `/v1` requires a client key (admin only)."
+          },
+          "remove": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the client key to revoke."
+          }
+        }
+      },
+      "ClientsResponse": {
+        "type": "object",
+        "description": "`POST /api/settings/clients`. `secret` appears only on `add`, and only\nthis once — the store keeps a SHA-256 digest, never the secret.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigResponse": {
+        "type": "object",
+        "description": "The Settings page's data source. `server` and `users` are absent — not\nnull — for non-admin callers: the filtering happens before serialization,\nso DOM tampering reveals nothing.",
+        "required": [
+          "client_keys",
+          "locale",
+          "mode",
+          "nim_keys",
+          "pool",
+          "role",
+          "username"
+        ],
+        "properties": {
+          "client_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientKeyRow"
+            }
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "nim_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NimKeyRow"
+            }
+          },
+          "pool": {
+            "$ref": "#/components/schemas/PoolSummary"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerSettings",
+            "description": "Admin-only; omitted entirely for the `user` role."
+          },
+          "username": {
+            "type": "string"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRow"
+            },
+            "description": "Admin-only; omitted entirely for the `user` role."
+          }
+        }
+      },
+      "CreateClientKey": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardCfg": {
+        "type": "object",
+        "properties": {
+          "default_window_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "slo_target_percent": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "DashboardNowResponse": {
+        "type": "object",
+        "description": "The \"Now\" strip: live registry values plus the configuration they were\nsampled under. Deliberately not a slice of history — it is this instant.",
+        "required": [
+          "auth",
+          "capacity_rpm",
+          "config_revision",
+          "default_window_days",
+          "history_revision",
+          "lanes",
+          "metrics",
+          "retention_days",
+          "rpms",
+          "sampled_at",
+          "slo_target_percent",
+          "started",
+          "tail",
+          "version"
+        ],
+        "properties": {
+          "auth": {
+            "type": "boolean",
+            "description": "True when `/v1` requires a client key (keyed mode)."
+          },
+          "available_from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "available_to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "capacity_rpm": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "config_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "default_window_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "history_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "lanes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            }
+          },
+          "retention_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rpms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "sampled_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "slo_target_percent": {
+            "type": "number",
+            "format": "double"
+          },
+          "started": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix time this process started.",
+            "minimum": 0
+          },
+          "tail": {
+            "$ref": "#/components/schemas/Tail",
+            "description": "Counters accumulated since the last persisted sample."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardResponse": {
+        "type": "object",
+        "description": "Rolled-up history for one analytical window. `config_revision` and\n`history_revision` let the dashboard skip a redraw when nothing moved.",
+        "required": [
+          "config_revision",
+          "diagnostics",
+          "history_revision",
+          "latest",
+          "points",
+          "totals",
+          "window"
+        ],
+        "properties": {
+          "config_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/HistoryDiagnostics"
+          },
+          "history_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "latest": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "description": "Latest value of each gauge in the window."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RollupPoint"
+            }
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "description": "Counter deltas summed across the window."
+          },
+          "window": {
+            "$ref": "#/components/schemas/DashboardWindow"
+          }
+        }
+      },
+      "DashboardWindow": {
+        "type": "object",
+        "description": "What was asked for, what could be served, and what exists on disk —\nkept separate so the UI can say \"you asked for 30d, I have 3d\".",
+        "required": [
+          "complete",
+          "default_window_days",
+          "following_now",
+          "requested_from",
+          "requested_to",
+          "retention_days"
+        ],
+        "properties": {
+          "available_from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "available_to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "default_window_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "effective_from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "effective_to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "following_now": {
+            "type": "boolean",
+            "description": "True when the caller sent no `to`, i.e. the window tracks now."
+          },
+          "requested_from": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "requested_to": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retention_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "GovernorCfg": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Operator-pinned per-model concurrency caps. Ordered (not a `HashMap`)\nso both `config.json` and `/api/config` serialize deterministically —\na hash-ordered map made two saves of the same config differ.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GovernorOverride": {
+        "type": "object",
+        "required": [
+          "model",
+          "cap"
+        ],
+        "properties": {
+          "cap": {
+            "type": "integer",
+            "description": "Max in-flight requests for this model, 1-10000.",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      },
+      "GovernorReq": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "remove_override": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model id whose pinned cap to drop."
+          },
+          "set_override": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GovernorOverride"
+              }
+            ]
+          }
+        }
+      },
+      "HistoryDiagnostics": {
+        "type": "object",
+        "description": "ASCII-ordered: served inside `/api/dashboard` (see `src/api.rs`).",
+        "required": [
+          "excluded_epochs",
+          "excluded_records",
+          "normalized_series",
+          "skipped_metric_lines",
+          "valid_checkpoints",
+          "valid_samples"
+        ],
+        "properties": {
+          "excluded_epochs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "excluded_records": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "normalized_series": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_metric_lines": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "valid_checkpoints": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "valid_samples": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "HistoryReq": {
+        "type": "object",
+        "required": [
+          "days",
+          "default_window_days",
+          "slo_target_percent"
+        ],
+        "properties": {
+          "days": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Retention in days; 0 = keep forever. Must be 0 or >= the default\nwindow.",
+            "minimum": 0
+          },
+          "default_window_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "slo_target_percent": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "HistorySettings": {
+        "type": "object",
+        "description": "Retention setting plus the live state of the history file.",
+        "required": [
+          "compaction_pending",
+          "days",
+          "file_bytes",
+          "persistence"
+        ],
+        "properties": {
+          "available_from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "compaction_pending": {
+            "type": "boolean"
+          },
+          "days": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Retention in days; 0 = keep forever.",
+            "minimum": 0
+          },
+          "file_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "persistence": {
+            "type": "string"
+          }
+        }
+      },
+      "Limits": {
+        "type": "object",
+        "description": "Fields are declared in ASCII order because this struct is served verbatim\ninside `/api/config`, where declaration order is the wire order — see the\nmodule docs in `src/api.rs`.",
+        "properties": {
+          "heartbeat_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_inflight": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_wait_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "models_ttl_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "request_timeout_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stream_idle_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "strict_passthrough": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LimitsReq": {
+        "type": "object",
+        "description": "Mirror of `config::Limits` WITHOUT serde defaults: a partial body is a\n422, never a silent reset of the omitted fields.",
+        "required": [
+          "max_wait_secs",
+          "heartbeat_secs",
+          "models_ttl_secs",
+          "stream_idle_secs",
+          "request_timeout_secs",
+          "max_inflight",
+          "strict_passthrough"
+        ],
+        "properties": {
+          "heartbeat_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_inflight": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_wait_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "models_ttl_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "request_timeout_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stream_idle_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "strict_passthrough": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LocaleBootstrap": {
+        "type": "object",
+        "description": "Public startup data: the installed presentation locales and the\npersisted server default.",
+        "required": [
+          "installed_locales",
+          "server_default"
+        ],
+        "properties": {
+          "installed_locales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "server_default": {
+            "type": "string"
+          }
+        }
+      },
+      "MetricValue": {
+        "type": "object",
+        "description": "One metric series at one instant. Fields are declared in ASCII order:\nthis type is served inside `/api/dashboard`, where declaration order is\nthe wire order — see the module docs in `src/api.rs`.",
+        "required": [
+          "labels",
+          "metric",
+          "value"
+        ],
+        "properties": {
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "metric": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "MintedClientKey": {
+        "type": "object",
+        "required": [
+          "name",
+          "secret"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "Mode": {
+        "type": "string",
+        "description": "Whether `/v1` requires a client API key. `Keyed` with zero keys rejects\neverything — fail closed; the dashboard prompts to create a key.",
+        "enum": [
+          "open",
+          "keyed"
+        ]
+      },
+      "NimKeyRow": {
+        "type": "object",
+        "description": "A stored NIM key plus its live lane state. `lane`, `in_window` and\n`cooldown_ms` are null for a disabled key (it holds no lane).",
+        "required": [
+          "enabled",
+          "fingerprint",
+          "guarded",
+          "last4",
+          "owner",
+          "rpm"
+        ],
+        "properties": {
+          "cooldown_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "First 8 hex chars of SHA-256(key) — the key's public identifier."
+          },
+          "guarded": {
+            "type": "boolean",
+            "description": "True for the superuser's only enabled key: the pool floor, which\n`config::validate` refuses to remove or disable."
+          },
+          "in_window": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "lane": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "last4": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "rpm": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "NimKeysReq": {
+        "type": "object",
+        "description": "Exactly one of `add` / `remove` / `set` per request.",
+        "properties": {
+          "add": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AddNimKey"
+              }
+            ]
+          },
+          "remove": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fingerprint of the key to remove."
+          },
+          "set": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SetNimKey"
+              }
+            ]
+          }
+        }
+      },
+      "OkResponse": {
+        "type": "object",
+        "description": "A settings write that applied. Success carries no data: the dashboard\nre-reads `/api/config` rather than trusting an echo.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Always `true`; failures are an [`ApiError`] with a 4xx status."
+          }
+        }
+      },
+      "PoolSummary": {
+        "type": "object",
+        "description": "Pool aggregate — visible to every role, since it carries no ownership.",
+        "required": [
+          "capacity_rpm",
+          "enabled"
+        ],
+        "properties": {
+          "capacity_rpm": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ResetPassword": {
+        "type": "object",
+        "required": [
+          "username",
+          "new_password"
+        ],
+        "properties": {
+          "new_password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "superuser",
+          "admin",
+          "user"
+        ]
+      },
+      "RollupPoint": {
+        "type": "object",
+        "description": "ASCII-ordered: served inside `/api/dashboard` (see `src/api.rs`).",
+        "required": [
+          "duration_seconds",
+          "from",
+          "to",
+          "values"
+        ],
+        "properties": {
+          "capacity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CapacityRollup",
+                "description": "Absent for a bucket sampled before capacity was recorded."
+              }
+            ]
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "from": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "to": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            }
+          }
+        }
+      },
+      "ServerSettings": {
+        "type": "object",
+        "description": "Admin-only server settings, mirroring the stored config sections.",
+        "required": [
+          "base_url",
+          "dashboard",
+          "default_locale",
+          "governor",
+          "history",
+          "limits"
+        ],
+        "properties": {
+          "base_url": {
+            "type": "string"
+          },
+          "dashboard": {
+            "$ref": "#/components/schemas/DashboardCfg"
+          },
+          "default_locale": {
+            "type": "string"
+          },
+          "governor": {
+            "$ref": "#/components/schemas/GovernorCfg"
+          },
+          "history": {
+            "$ref": "#/components/schemas/HistorySettings"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          }
+        }
+      },
+      "SetNimKey": {
+        "type": "object",
+        "required": [
+          "fingerprint"
+        ],
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "rpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "SetRole": {
+        "type": "object",
+        "required": [
+          "username",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`admin` or `user`."
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "SetServerLocale": {
+        "type": "object",
+        "required": [
+          "locale"
+        ],
+        "properties": {
+          "locale": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupKey": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "rpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "SetupReq": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "create_client_key": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CreateClientKey",
+                "description": "Mint a first client key with the claim (the wizard sends this by\ndefault) so a fresh keyed-mode proxy can serve /v1 immediately."
+              }
+            ]
+          },
+          "nim_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupKey"
+            }
+          },
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupResponse": {
+        "type": "object",
+        "description": "The first-run claim. `client_key` is present when the wizard asked for a\nfirst client key — the one and only time that secret leaves the server.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "client_key": {
+            "$ref": "#/components/schemas/MintedClientKey"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Tail": {
+        "type": "object",
+        "description": "ASCII-ordered: served inside `/api/dashboard/now` (see `src/api.rs`).",
+        "required": [
+          "base_history_revision",
+          "to",
+          "totals"
+        ],
+        "properties": {
+          "base_history_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "to": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            }
+          }
+        }
+      },
+      "UpstreamReq": {
+        "type": "object",
+        "required": [
+          "base_url"
+        ],
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "description": "`http(s)://host[:port]`; link-local addresses are refused (cloud\nmetadata endpoints have no legitimate NIM use)."
+          }
+        }
+      },
+      "UserRow": {
+        "type": "object",
+        "description": "A user row with how much of the pool they own.",
+        "required": [
+          "client_keys",
+          "nim_keys",
+          "role",
+          "username"
+        ],
+        "properties": {
+          "client_keys": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nim_keys": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "UsersReq": {
+        "type": "object",
+        "description": "Exactly one of `add` / `remove` / `reset_password` / `set_role`.",
+        "properties": {
+          "add": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AddUser"
+              }
+            ]
+          },
+          "remove": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Username to delete. Their NIM keys leave the pool and their client\nkeys are revoked."
+          },
+          "reset_password": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResetPassword"
+              }
+            ]
+          },
+          "set_role": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SetRole"
+              }
+            ]
+          }
+        }
+      },
+      "ValidateKeyReq": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only honored by `/setup/validate-key` (pre-claim, no upstream is\nconfigured yet). The authenticated twin ignores it — see\n[`validate_key`]."
+          },
+          "key": {
+            "type": "string",
+            "description": "The NIM key to probe."
+          }
+        }
+      },
+      "ValidateKeyResponse": {
+        "type": "object",
+        "description": "`POST /api/settings/validate-key` and `POST /setup/validate-key`.\n`models` is the size of the upstream catalog the key could read;\n`error` explains a refusal. Exactly one of the two is present.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "models": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "basic_auth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Dashboard username and password, for non-browser clients such as a Prometheus scraper. `Authorization: Bearer <user>:<password>` is accepted equivalently."
+      },
+      "session_cookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "nimproxy_session",
+        "description": "HMAC-signed session cookie minted by POST /login. The signing key is regenerated every boot, so a restart invalidates all sessions."
+      }
+    }
+  },
+  "security": [
+    {
+      "session_cookie": []
+    },
+    {
+      "basic_auth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "dashboard",
+      "description": "Read-only telemetry the operator console renders."
+    },
+    {
+      "name": "settings",
+      "description": "The config store's only writers. Every write is validate -> persist -> swap; a failed disk write applies nothing."
+    },
+    {
+      "name": "setup",
+      "description": "First-run claim. **Unauthenticated** — these routes sit outside the session guard because no user exists yet. They answer 404 the moment a superuser exists, so the window is exactly one claim wide."
+    }
+  ]
+}

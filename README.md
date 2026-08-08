@@ -5,7 +5,7 @@
 # nim-proxy
 
 **A tiny, rate-limit-aware OpenAI-compatible proxy for the [NVIDIA NIM API](https://build.nvidia.com).**
-One job: obey the NIM speed limit so your agent harness never sees it.
+One job: obey the NIM speed limit so your client never sees it.
 
 [![CI](https://github.com/miztertea/nim-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/miztertea/nim-proxy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/miztertea/nim-proxy)](https://github.com/miztertea/nim-proxy/releases/latest)
@@ -20,7 +20,7 @@ One job: obey the NIM speed limit so your agent harness never sees it.
 
 ---
 
-NIM's free tier has no credits and no token caps — just a ~40 requests-per-minute limit per API key. When an agent harness (OpenCode, Codex, n8n, anything that speaks the OpenAI API) hits that limit, the upstream returns a 429 and most harnesses simply abort the task. nim-proxy sits in between and makes the limit invisible:
+NIM's free tier has no credits and no token caps — just a ~40 requests-per-minute limit per API key. When a client (OpenCode, Codex, n8n, or anything else that speaks the OpenAI API) hits that limit, the upstream returns a 429 and most clients simply abort the task. nim-proxy sits in between and makes the limit invisible:
 
 ```
 OpenCode ─┐
@@ -31,7 +31,7 @@ n8n       ┘    │
                ├─ pins each conversation to one key (prefix-cache affinity)
                ├─ rides out 429/5xx with retries + Retry-After
                ├─ adapts to NIM's per-model worker-concurrency ceiling
-               ├─ keeps harness connections alive with SSE heartbeats
+               ├─ keeps client connections alive with SSE heartbeats
                ├─ answers /v1/models from cache (catalog polls cost nothing)
                └─ dashboard + Prometheus metrics for everything above
 ```
@@ -58,17 +58,17 @@ With a checkout you can use compose (`docker compose up -d`), build from source 
     |_|\_|___|_|  |_| |_| |_|_\\___/_/\_\  |_|
 ```
 
-**3. Claim it.** Open `http://localhost:8000/` — a fresh install runs the **first-run wizard**: create the superuser account, add at least one NIM key (validated live against the upstream), and finish. By default the wizard also mints your first **client API key** (`npk_…`) and ends on a connect panel with the base URL and key ready to copy — so your harness works immediately.
+**3. Claim it.** Open `http://localhost:8000/` — a fresh install runs the **first-run wizard**: create the superuser account, add at least one NIM key (validated live against the upstream), and finish. By default the wizard also mints your first **client API key** (`npk_…`) and ends on a connect panel with the base URL and key ready to copy — so your client works immediately.
 
 <div align="center"><img src="docs/assets/setup-wizard.png" alt="First-run setup wizard" width="460"></div>
 
 > **The first visitor to a fresh install becomes the superuser** — finish the wizard as soon as the proxy is reachable (the boot log says so too). Until setup completes, `/v1` is closed (503) and browsers are sent to `/setup`.
 
-**4. Point your harness at it.** Base URL `http://localhost:8000/v1`, API key = the `npk_…` key from the wizard. Recipes below.
+**4. Point your client at it.** Base URL `http://localhost:8000/v1`, API key = the `npk_…` key from the wizard. Recipes below.
 
 ## Client recipes
 
-Model IDs pass through verbatim — use any ID from the [NIM catalog](https://build.nvidia.com/models) (or `curl localhost:8000/v1/models`). In `keyed` mode (the default) clients authenticate with a client API key (`npk_…`) minted in the wizard or in Settings; in `open` mode no client key is needed.
+Model IDs pass through verbatim — use any ID from the [NIM catalog](https://build.nvidia.com/models) (or `curl localhost:8000/v1/models`). In **API key required** mode (stored as `keyed`, the default), clients authenticate with a client API key (`npk_…`) minted in the wizard or in Settings. In **Open (no authentication)** mode (stored as `open`), no client key is needed.
 
 **OpenCode** — `opencode.json`:
 
@@ -130,10 +130,11 @@ header retain the proxy's normal patient behavior.
 
 ## The dashboard
 
-Served at `GET /` — a single embedded HTML file with no Grafana or frontend
-build. Because the proxy sits in the request path for every harness and model,
+Served at `GET /` — a compile-time embedded page with same-origin CSS,
+JavaScript, and catalogs, but no Grafana or frontend build. Because the proxy
+sits in the request path for every client and model,
 it doubles as a **benchmarking and agent-observability tool**: it sees how
-tool-heavy each harness is, how deep its conversations run, how it tunes
+tool-heavy each client is, how deep its conversations run, how it tunes
 sampling, where models truncate, and how much "thinking" a reasoning model
 burns — all from counts and sizes, never message content.
 
@@ -141,26 +142,26 @@ burns — all from counts and sizes, never message content.
 
 Five persona-aligned tabs, each ordered at-a-glance → trends → detail:
 
-- **Overview** — the one-screen landing: dollars saved, capacity and success-rate ring gauges, request/token/savings sparklines, a health strip, and top models & harnesses.
+- **Overview** — the one-screen landing: capacity and success-rate ring gauges, request and token sparklines, a health strip, and top models & clients.
 - **Models** — ranked model cards, TTFT / generation-speed / inter-token-latency / upstream-latency charts, tokens-per-minute, tool-call volume, truncation and reasoning-share breakdowns, and a head-to-head scorecard.
-- **Clients** — what each agent is *doing*: tool intensity, conversation depth, sampling fingerprint, requested output budget, streaming-vs-buffered mix, and a per-harness leaderboard.
-- **Reliability** — availability against the configured SLO (99.9% by default) with an error budget, requests-by-outcome over time, where time goes (queue / first token / generation), an error taxonomy, an hour-of-day heatmap, and a model-pressure card when the governor engages.
-- **Capacity** — a **Now** saturation bar, historical utilization against the capacity configured at each sample, an exact peak-RPM shortfall, per-lane utilization meters, and 429s-per-minute by lane.
+- **Clients** — what each agent is *doing*: tool intensity, conversation depth, sampling fingerprint, requested output budget, streaming-vs-buffered mix, and a per-client leaderboard.
+- **Reliability** — availability against the configured SLO (99.9% by default) with an error budget, requests-by-outcome over time, a latency breakdown (queue / first token / generation), an error taxonomy, an hour-of-day heatmap, and a model-limits card when the governor engages.
+- **Capacity** — a **Now** saturation bar, historical utilization against the capacity configured at each sample, an exact peak-RPM shortfall, per-key utilization meters, and 429s-per-minute by key.
 
 <div align="center"><img src="docs/assets/dashboard-reliability.png" alt="Reliability tab" width="850"></div>
 
 Every line chart has a hover crosshair with a per-series tooltip; every table is click-to-sort and survives the 3-second live refresh.
 
 **Time ranges & history.** Persisted server history drives every analytical
-tab. The default view follows now across the configured dashboard window
+tab. The default view follows now across the configured default time range
 (30 days by default), so a new server grows naturally from its first sample
 instead of opening on an empty recent slice. The same global selection follows
 you through Overview, Models, Clients, Reliability, and Capacity. Presets
-include 1h/6h/24h/7d/30d and **All retained**; a custom range or the pause
-control freezes the analytical window while current operational values marked
+include 1h/6h/24h/7d/30d and **All time**; a custom range or the pause
+control freezes the analytical time range while current operational values marked
 **Now** keep refreshing. Exact totals do not depend on chart point density.
 
-The dashboard window and data retention are separate Server settings. Both
+The default time range and data retention are separate Server settings. Both
 default to 30 days; retention may be longer than the default view, and `0`
 means unlimited. A finite retention window cannot be shorter than the default
 view. Real history size depends on metric and label cardinality—the old
@@ -168,9 +169,9 @@ fixed-size estimate was wrong—so monitor the displayed history-file size for
 your workload.
 
 **Settings.** Everything app-level is managed here: NIM keys (per-key rpm,
-enable/disable), client API keys, the open/keyed API mode, upstream URL,
-limits, pricing, default dashboard window, history retention, availability
-SLO, the model-pressure governor, and users. Saves validate, persist, and apply
+enable/disable), client API keys, the API authentication mode, upstream URL,
+limits, default time range, history retention, availability SLO, model
+limits, and users. Saves validate, persist, and apply
 live. The config file itself is read at boot; an out-of-band edit to
 `DATA_DIR/config.json` requires a restart.
 
@@ -178,14 +179,14 @@ live. The config file itself is read at boot; an out-of-band edit to
 
 ## How it works
 
-- **One lane per key.** Each API key gets an exact sliding-window limiter (40 requests per rolling 60 s — matching NIM's limiter, not a burstable token bucket — plus a 1 s jitter margin so boundary-timed requests can't land inside the upstream's window).
-- **One queue for all clients.** Any number of harnesses share the lane pool through a global FIFO dispatcher: slots are granted strictly in arrival order, no client can starve another, and a client that disconnects while queued returns its slot.
-- **Sticky conversations, spread bursts.** Each conversation prefers the same lane every turn, keeping any server-side [prefix cache](https://docs.nvidia.com/nim/large-language-models/latest/kv-cache-reuse.html) warm on one key. When that lane is full the request spills to the least-loaded ready lane — the API is stateless, so crossing keys is always safe, just potentially a cold cache.
+- **One rate window per key.** Each API key gets an exact sliding-window limiter (40 requests per rolling 60 s — matching NIM's limiter, not a burstable token bucket — plus a 1 s jitter margin so boundary-timed requests can't land inside the upstream's window).
+- **One queue for all clients.** Any number of clients share the key pool through a global FIFO dispatcher: slots are granted strictly in arrival order, no client can starve another, and a client that disconnects while queued returns its slot.
+- **Sticky conversations, spread bursts.** Each conversation prefers the same key every turn, keeping any server-side [prefix cache](https://docs.nvidia.com/nim/large-language-models/latest/kv-cache-reuse.html) warm. When that key is full the request spills to the least-loaded ready key — the API is stateless, so crossing keys is always safe, just potentially a cold cache.
 - **Heartbeats instead of failures.** For streaming requests the proxy commits to `200 text/event-stream` immediately and emits SSE comment lines (`: heartbeat` — ignored by every OpenAI client) while it waits for a slot or rides out upstream 429/500/502/503/504 with `Retry-After` honored and instant failover between keys. Streams that stall mid-generation are cut after the `stream_idle` limit.
-- **Optional absolute deadlines.** `X-Nim-Proxy-Deadline-Ms` bounds the whole request independently of heartbeats or socket activity. Expiry cancels queue/retry/upstream work and releases its lane, model, and in-flight ownership.
+- **Optional absolute deadlines.** `X-Nim-Proxy-Deadline-Ms` bounds the whole request independently of heartbeats or socket activity. Expiry cancels queue/retry/upstream work and releases its key, model, and in-flight ownership.
 - **Model-pressure aware.** NIM caps per-model worker concurrency independently of the 40 RPM key limit; the proxy detects that specific exhaustion, backs off the affected *model* adaptively (never wasting healthy key capacity on failover), and surfaces it on the dashboard — see [architecture: governor](knowledge/architecture/governor.md).
 - **Pass-through with one exception.** Bodies are forwarded untouched, except: streaming chat requests get `stream_options: {"include_usage": true}` injected so token accounting is exact rather than estimated. If a model rejects the field, the proxy retries untouched and never injects for that model again. `strict_passthrough` in Settings disables injection entirely.
-- **Local answers where possible.** `GET /v1/models` is cached (10 min default, single-flight refresh), so harness catalog polls don't burn rate budget.
+- **Local answers where possible.** `GET /v1/models` is cached (10 min default, single-flight refresh), so client catalog polls don't burn rate budget.
 
 ## Configuration
 
@@ -197,7 +198,7 @@ Environment variables cover container-level concerns only:
 | Variable | Default | Purpose |
 |---|---|---|
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Bind address and port |
-| `DATA_DIR` | `data` (`/data` in Docker) | Where the config store and `history.jsonl` live; must be writable (an unwritable dir is a hard boot error) |
+| `DATA_DIR` | `data` (`/data` in Docker) | Where the config store and canonical `history-v1.jsonl` live; must be writable (an unwritable dir is a hard boot error) |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-Proto` and mark the session cookie `Secure` (set behind a TLS-terminating reverse proxy) |
 | `RUST_LOG` | `nim_proxy=info` | Log filter |
 
@@ -207,15 +208,15 @@ deployment is ready for LAN/public reachability. This is a Compose setting,
 not an environment variable consumed by nim-proxy.
 
 Everything else is a Settings control: NIM keys (per-key rpm, enable/disable,
-ownership), the upstream base URL, client API keys and the open/keyed API
-mode, limits (`max_wait`, `heartbeat`, `stream_idle`, `request_timeout`,
-`models_ttl`, `max_inflight`, `strict_passthrough`), reference pricing,
-default dashboard window, history retention, availability SLO, the
-model-pressure governor, and users & roles.
+ownership), the upstream base URL, client API keys and the API authentication
+mode (`keyed`/`open` in stored config), limits (`max_wait`, `heartbeat`,
+`stream_idle`, `request_timeout`, `models_ttl`, `max_inflight`,
+`strict_passthrough`), default time range, history retention, availability SLO,
+model limits, and users & roles.
 
 ## Security & deployment
 
-The proxy **fails closed**. Before setup, the data plane is closed (`/v1` → `503 setup_required`) and browsers are sent to the wizard. After setup, the dashboard and all observability **always** require a logged-in user; the `/v1` API is either `keyed` or `open` (a Settings toggle). Credentials live in the config store on the data volume (`config.json`, mode 0600) — not in env vars.
+The proxy **fails closed**. Before setup, the data plane is closed (`/v1` → `503 setup_required`) and browsers are sent to the wizard. After setup, the dashboard and all observability **always** require a logged-in user; `/v1` is either **API key required** (`keyed`) or **Open (no authentication)** (`open`). Credentials live in the config store on the data volume (`config.json`, mode 0600) — not in env vars.
 
 ### Users & roles
 
@@ -229,10 +230,10 @@ That last role is the shared-pool model: a friend adds their NIM key to the pool
 
 Login is username + password → a signed, HttpOnly, SameSite=Strict session cookie. Changing or resetting a password logs that user's other sessions out instantly; deleting a user kills their sessions, pulls their NIM keys from the pool, and revokes their client keys. Passwords are PBKDF2-HMAC-SHA256 (600k iterations). Forgot a password? Any admin resets it (except the superuser's — that one only rotates via its own Account page). Locked out entirely? Stop the container, empty the `"users"` array in `config.json` on the volume, restart — the wizard re-creates the superuser and keys/settings survive.
 
-### The `/v1` API: keyed or open
+### `/v1` API authentication
 
-- **`keyed`** (default) — clients send `Authorization: Bearer <npk_…>`. Each user mints their own client keys; a key's 128-bit secret is shown **exactly once** (only its SHA-256 digest + last-4 are stored). Keyed with zero keys rejects everything (fail closed). Unknown keys get an OpenAI-style 401; comparison is constant-time.
-- **`open`** — `/v1` is unauthenticated. Only for loopback or a fully private network. This toggle affects **only `/v1`** — the dashboard is never open.
+- **API key required** (`keyed`, default) — clients send `Authorization: Bearer <npk_…>`. Each user mints their own client keys; a key's 128-bit secret is shown **exactly once** (only its SHA-256 digest + last-4 are stored). This mode with zero client keys rejects everything (fail closed). Unknown keys get an OpenAI-style 401; comparison is constant-time.
+- **Open (no authentication)** (`open`) — `/v1` is unauthenticated. Only for loopback or a fully private network. This toggle affects **only `/v1`** — the dashboard is never open.
 
 The compose file publishes `127.0.0.1:8000:8000` by default so a bare
 bring-up can't leak. Set `PUBLISH_HOST=0.0.0.0` in `.env` when intentional
@@ -251,12 +252,28 @@ scrape_configs:
 
 `/health` stays public (load-balancer / Docker probe; exposes nothing).
 
+### The dashboard API
+
+The routes the dashboard and the setup wizard call are described by
+[`openapi.json`](openapi.json) at the repo root — 16 operations covering 14
+`/api/*` routes plus the two unauthenticated `/setup` ones. The public
+`GET /api/locale-bootstrap` operation and both setup operations explicitly
+waive the document-level authentication requirement; the other 13 `/api/*`
+operations require operator authentication. The spec is
+**generated from the handlers** (`utoipa`) and CI fails on any drift, so it
+cannot describe a version of the API that no longer exists. Point any offline
+viewer or client generator at it; nothing is served at runtime, which keeps
+the Content-Security-Policy strict and the image a single static binary.
+
+The OpenAI-compatible `/v1` surface is deliberately not in there — that
+contract is NVIDIA NIM's, and nim-proxy passes it through.
+
 ### Deployment patterns
 
 | Pattern | How |
 |---|---|
-| **Local self-host** | Keep the default loopback port publish; switch the API mode to `open` in Settings if you don't want client keys. |
-| **VPS / bare metal** | A TLS-terminating reverse proxy (nginx/Caddy) in front; keep the API `keyed`. Set `TRUST_PROXY=true` so the session cookie is marked `Secure`. |
+| **Local self-host** | Keep the default loopback port publish; switch to **Open (no authentication)** in Settings if you don't want client keys. |
+| **VPS / bare metal** | A TLS-terminating reverse proxy (nginx/Caddy) in front; keep **API key required**. Set `TRUST_PROXY=true` so the session cookie is marked `Secure`. |
 | **PaaS (ECS / Railway / Fly)** | The platform edge terminates TLS. Set `TRUST_PROXY=true`. Complete the wizard as soon as the instance is reachable. |
 
 **TLS is not built in** — passwords and keys must travel over HTTPS, so terminate TLS at a reverse proxy or platform edge for any exposed deployment. Additional hardening in place: a strict `Content-Security-Policy` and anti-framing/sniffing headers on all responses, a failed-login throttle, and an in-flight cap (`max_inflight`) that sheds floods with a 503.
@@ -289,7 +306,8 @@ The build and release path is hardened to the OpenSSF baseline (scored weekly by
 | `nimproxy_finish_reason_total` | model, reason | How generations end; `length` = truncation |
 | `nimproxy_tool_calls_total` | model | Tool calls emitted |
 | `nimproxy_reasoning_tokens_total` | model | Reasoning ("thinking") tokens, from `usage` details |
-| `nimproxy_stream_requests_total` | client, stream | Requests per harness, streaming vs buffered |
+| `nimproxy_usage_observations_total` | field, result | Usage-field quality: measured, estimated, unavailable, or invalid |
+| `nimproxy_stream_requests_total` | client, stream | Requests per client, streaming vs buffered |
 | `nimproxy_request_messages` | client | Conversation depth per request (histogram) |
 | `nimproxy_request_tools` | client | Tools offered per request (histogram) |
 | `nimproxy_request_max_tokens` | client | Requested output cap (histogram) |
@@ -299,7 +317,7 @@ The build and release path is hardened to the OpenSSF baseline (scored weekly by
 | `nimproxy_queue_wait_seconds` | — | Time waiting for a rate-limit slot |
 | `nimproxy_queue_depth` / `nimproxy_active_requests` | — | Live load gauges |
 | `nimproxy_lane_requests_total` | lane | Requests per key lane |
-| `nimproxy_lane_benched_total` | lane, status | Upstream 429/5xx/connect per lane |
+| `nimproxy_lane_cooldown_total` | lane, status | Upstream 429/5xx/connect per lane |
 | `nimproxy_affinity_total` | result | Conversation routing: `sticky` / `spill` / `none` |
 | `nimproxy_unauthorized_total` | — | Rejected API requests |
 | `nimproxy_login_failures_total` | — | Failed dashboard logins |
@@ -332,10 +350,34 @@ python3 scripts/loadtest.py --clients 100 --requests 3
 
 It exits non-zero on any client-visible failure or a single upstream rate violation, and reports worker exhaustions + peak per-model concurrency. See [`knowledge/testing/test-strategy.md`](knowledge/testing/test-strategy.md) for the full strategy and [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 
+## Upgrading to 0.6.6
+
+Back up the data volume before upgrading; it contains `config.json`, NIM API
+keys, password hashes, and client API-key digests. Then pull and restart as
+usual (`docker compose pull && docker compose up -d`, or replace the image in
+your existing `docker run` deployment).
+
+0.6.6 intentionally starts dashboard history over in the canonical
+`DATA_DIR/history-v1.jsonl` format. It does not read, rename, truncate, migrate,
+or delete the experimental `DATA_DIR/history.jsonl`; the old file remains
+available for rollback and may be removed manually after you no longer need
+it. Historical charts begin with post-upgrade data.
+
+Also update dashboards, alerts, or recording rules from
+`nimproxy_lane_benched_total` to `nimproxy_lane_cooldown_total`. Pricing
+settings and estimated-savings fields are removed; an existing `pricing`
+config block is ignored. The config store remains schema v1; the new server
+locale defaults to `en-US`, and each user's optional locale defaults to no
+override.
+
+The 0.6.6 interface ships in `en-US` only. Locale preference and server-default
+API contracts are present for forward compatibility, but the only installed
+production locale is `en-US`; the generated `en-XA` pseudolocale is test-only.
+
 ## FAQ & limitations
 
 - **Is this against NVIDIA's ToS? It's designed not to be.** The proxy never exceeds any key's rate limit — that's its entire purpose. Keys are issued per developer account; whether you pool keys with friends is between you and [NVIDIA's terms](https://www.nvidia.com/en-us/agreements/) — the proxy just guarantees each key behaves.
-- **Non-streaming requests can't be heartbeated** (no wire format for it) — they wait silently through pacing/retries up to the `max_wait` limit. Agent harnesses stream, so this rarely matters.
+- **Non-streaming requests can't be heartbeated** (no wire format for it) — they wait silently through pacing/retries up to the `max_wait` limit. Agent clients normally stream, so this rarely matters.
 - **One instance per key set.** Rate state is in-memory; two replicas sharing keys would each assume the full 40 RPM. Run one instance (it comfortably saturates far more keys than you can register).
 - **Rate windows reset on restart.** A restart right after heavy traffic can draw a burst of 429s — the retry machinery absorbs them invisibly.
 - **Dashboard history is sample-precise, not event-precise.** Following,

@@ -7,6 +7,140 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-08-01
+
+> **Breaking upgrade:** v0.6.6 intentionally starts dashboard history over,
+> renames one Prometheus series, and removes the pricing contract. Back up the
+> data volume before upgrading.
+
+### Upgrade notes
+
+- Canonical history now lives at `DATA_DIR/history-v1.jsonl`. The proxy does
+  not read, rename, truncate, migrate, or delete the experimental
+  `DATA_DIR/history.jsonl`; historical charts begin with post-upgrade data.
+  Keep the old file for rollback or remove it manually after it is no longer
+  needed.
+- Rename dashboards, alerts, and recording rules from
+  `nimproxy_lane_benched_total` to
+  `nimproxy_lane_cooldown_total`. Every other pre-existing `nimproxy_*`
+  series keeps its name.
+- Pricing settings and estimated-savings fields are removed:
+  `POST /api/settings/pricing`, `server.pricing`,
+  `price_in`/`price_out`, and the `pricing` config block no longer have
+  product meaning. Existing config stores still load; an orphan `pricing`
+  block is ignored.
+- The config store remains schema v1. Locale fields are additive: the server
+  default is `en-US`, while each user's optional preference defaults to no
+  override. No config migration framework or version bump is introduced.
+- v0.6.6 ships only the `en-US` production catalog. The `en-XA`
+  pseudolocale is generated only for tests, and valid but uninstalled locale
+  preferences are rejected.
+
+### Added
+
+- **A complete canonical English presentation source.** The 443-message
+  `src/web/locales/en-US.json` catalog owns repository text across the
+  dashboard, Settings, setup, login, dialogs, validation, empty/error states,
+  and accessibility labels. Model ids, client names, publisher names, API
+  errors, persisted enums, credentials, and metric values remain unlocalized
+  data.
+- **Localization foundation without runtime translation.** Public setup/login
+  pages receive an exact public catalog projection; the full catalog remains
+  operator-authenticated. A typed public `GET /api/locale-bootstrap`
+  operation, server default, and per-user preference establish the forward
+  contract while `Intl` owns numbers, dates, durations, sorting, and plural
+  categories. Validators enforce id parity, source freshness, placeholders,
+  markup boundaries, frozen protocol tokens, and retired vocabulary.
+- **A generated OpenAPI 3.1 contract.** `openapi.json` describes 16
+  operations: 14 `/api/*` operations and the two setup POST operations.
+  Locale bootstrap and both setup operations explicitly waive the
+  document-level authentication requirement; the other 13 `/api/*`
+  operations require operator authentication. The upstream-owned `/v1`
+  surface, browser pages/assets, login forms, health, and Prometheus exposition
+  remain deliberately outside this spec.
+- **Explicit presentation and HTTP trust boundaries.** Public setup/login
+  assets contain no operator catalog or private data. Dashboard, Settings, and
+  operator assets share the post-setup session gate, which runs before locale
+  lookup. Every live method/path contract is checked across phase,
+  authentication, role, ownership, content type, side effects, and OpenAPI
+  membership.
+- **A split, compile-time presentation layer.** HTML, CSS, JavaScript, and
+  catalogs remain framework-free and build-free, are embedded in the Rust
+  binary, and are served from same-origin routes. Browser startup fails closed
+  until bootstrap, authenticated config where required, and the selected
+  catalog have resolved.
+- **Committed browser and layout gates.** Rust-owned response fixtures drive 69
+  named interaction states across all pages and Settings surfaces. Semantic,
+  keyboard/focus, hostile-catalog, pseudolocale, responsive, cleanup, and
+  full-document visual checks now run against bytes served by the real binary.
+- **Canonical `nimproxy-history/v1`.** Typed boot, full-sample, and compact
+  checkpoint records preserve five-minute anchors, restart boundaries,
+  contemporaneous capacity, exact totals, query-scoped completeness, and
+  atomic time-based retention without rewriting a full unchanged registry
+  snapshot every five minutes.
+- **Evidence-backed NIM response observations.** Sanitized buffered and SSE
+  fixtures pin optional usage, finish, tool-call, framing, and invalid-field
+  behavior without retaining prompts or completions. The bounded
+  `nimproxy_usage_observations_total{field,result}` counter distinguishes
+  `measured`, `estimated`, `unavailable`, and `invalid` instead of
+  presenting absence as zero.
+
+### Changed
+
+- Dashboard and setup terminology now uses standard proxy, load-balancer,
+  authentication, and operations language. `Harness` becomes **Client**;
+  dashboard `window` becomes **time range**; presentation `lane` becomes
+  **key**; `Conversation stickiness` becomes **Session affinity**;
+  `Model-pressure governor` becomes **Model limits**; and
+  `Where time goes` becomes **Latency breakdown**. Machine identifiers,
+  route names, DOM hooks, config keys, and all metrics except the deliberate
+  cooldown rename remain unchanged.
+- Control-plane success and error bodies are typed Rust values with stable
+  machine-readable rejection codes. JSON media-type, size, syntax/data,
+  query, method, and route failures now use the same fail-closed boundary as
+  handlers. ASCII-sorted member order remains a tested wire contract.
+- The operator console now uses native landmarks, headings, buttons, tables,
+  labels, and a focus-managed one-time-secret dialog. Responsive Settings
+  layouts preserve usable form controls and long machine values from 390px
+  through desktop widths.
+- Presentation text now flows through context-owning sinks: native DOM text
+  and allowlisted text attributes receive catalog ids, while fixed-markup
+  builders receive inert descriptors that resolve and escape only at the HTML
+  boundary. Catalog text cannot enter URLs, styles, events, scripts, CSS, or
+  raw SVG.
+- External font and icon dependencies are gone. The embedded UI uses system
+  fonts and local SVG/text primitives under a same-origin Content Security
+  Policy, keeping the product a single rootless `FROM scratch` binary.
+- History reads valid physical segments without sorting or repairing bytes,
+  exposes partial/unavailable ranges honestly, and compacts only after
+  preserving the owning boot and full-sample boundary needed for exact retained
+  totals.
+
+### Fixed
+
+- A 2xx status is classified consistently across availability, charts, and
+  error taxonomy instead of treating only literal HTTP 200 as success.
+- Dashboard catalog values no longer double-escape, and setup/runtime catalog
+  writes enforce the same text-attribute allowlist and structured-message
+  boundary.
+- Chart hover no longer collides with a local date binding and falsely marks a
+  healthy proxy disconnected.
+- Client disconnects release queued and streaming ownership promptly, including
+  the in-flight slot held while an upstream stream is blocked.
+- Optional NIM usage values are independently range- and relationship-checked.
+  Invalid children no longer erase valid siblings, missing reasoning usage no
+  longer implies measured zero, and observation never rewrites proxied response
+  bytes.
+- Empty, whitespace-only, or future-version canonical history refuses startup;
+  recoverable supported-v1 damage is retained as evidence and cannot silently
+  become a complete dashboard range.
+
+### Removed
+
+- The estimated-savings feature and its pricing API/config/dashboard fields.
+- Runtime Google Fonts and third-party icon requests.
+- Compatibility aliases or import paths for experimental history formats.
+
 ## [0.6.5] - 2026-07-28
 
 ### Fixed
@@ -508,7 +642,8 @@ Initial rate-limit-aware proxy.
 - **Distroless image**: a static musl binary shipped `FROM scratch` (~3.5 MB,
   TLS roots compiled in), running non-root with hardened compose defaults.
 
-[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/miztertea/nim-proxy/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/miztertea/nim-proxy/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/miztertea/nim-proxy/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/miztertea/nim-proxy/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/miztertea/nim-proxy/compare/v0.6.2...v0.6.3

@@ -6,8 +6,13 @@
 
 mod support;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+
+use reqwest::header::CONTENT_TYPE;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use support::{
     chat_body, complete_setup, expect_refuses_to_start, login, login_as, metrics, read_sse,
@@ -25,6 +30,1352 @@ fn no_redirect_client() -> reqwest::Client {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap()
+}
+
+fn usage_observation_counter_lines(exposition: &str) -> BTreeSet<String> {
+    let rows: Vec<_> = exposition
+        .lines()
+        .filter(|line| line.starts_with("nimproxy_usage_observations_total{"))
+        .collect();
+    let unique_rows: BTreeSet<_> = rows.iter().copied().collect();
+    assert_eq!(
+        unique_rows.len(),
+        rows.len(),
+        "usage observation exposition must not duplicate a series: {rows:?}"
+    );
+    for row in &rows {
+        let (labels, value) = row
+            .strip_prefix("nimproxy_usage_observations_total{")
+            .and_then(|row| row.split_once("} "))
+            .expect("usage observation counter has labels and an integer value");
+        let labels: Vec<_> = labels.split(',').collect();
+        assert_eq!(
+            labels.len(),
+            2,
+            "usage observation label count is closed: {row}"
+        );
+        let field = labels[0]
+            .strip_prefix("field=\"")
+            .and_then(|field| field.strip_suffix('"'))
+            .expect("field is the first, quoted label");
+        let result = labels[1]
+            .strip_prefix("result=\"")
+            .and_then(|result| result.strip_suffix('"'))
+            .expect("result is the second, quoted label");
+        assert!(
+            matches!(
+                field,
+                "prompt_tokens"
+                    | "completion_tokens"
+                    | "total_tokens"
+                    | "cached_tokens"
+                    | "reasoning_tokens"
+            ),
+            "usage observation field is closed: {row}"
+        );
+        assert!(
+            matches!(result, "measured" | "estimated" | "unavailable" | "invalid"),
+            "usage observation result is closed: {row}"
+        );
+        value
+            .parse::<u64>()
+            .expect("usage observation counter value is an unsigned integer");
+    }
+    unique_rows.into_iter().map(str::to_owned).collect()
+}
+
+async fn assert_exact_api_error(
+    response: reqwest::Response,
+    status: reqwest::StatusCode,
+    code: &str,
+    message: &str,
+) {
+    assert_eq!(response.status(), status);
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|content_type| content_type.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(
+        response.bytes().await.unwrap().as_ref(),
+        format!(r#"{{"error":{{"code":"{code}","message":"{message}","type":"proxy_error"}}}}"#)
+            .as_bytes()
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContractActor {
+    BeforeSetup,
+    Anonymous,
+    User,
+    Admin,
+    Superuser,
+}
+
+impl ContractActor {
+    const ALL: [Self; 5] = [
+        Self::BeforeSetup,
+        Self::Anonymous,
+        Self::User,
+        Self::Admin,
+        Self::Superuser,
+    ];
+
+    fn index(self) -> usize {
+        match self {
+            Self::BeforeSetup => 0,
+            Self::Anonymous => 1,
+            Self::User => 2,
+            Self::Admin => 3,
+            Self::Superuser => 4,
+        }
+    }
+
+    fn username(self) -> &'static str {
+        match self {
+            Self::User => "matrix-user",
+            Self::Admin => "matrix-admin",
+            Self::BeforeSetup | Self::Anonymous | Self::Superuser => support::TEST_USER,
+        }
+    }
+
+    fn ordinal(self) -> usize {
+        self.index() + 1
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContractAccess {
+    Client,
+    Public,
+    OperatorAny,
+    OperatorAdmin,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContractPhase {
+    Always,
+    PreSetup,
+    PostSetup,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContractRequest {
+    None,
+    Json,
+    Form,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContractSideEffect {
+    None,
+    SessionCookie,
+    DurableConfig,
+    DurableConfigIdempotent,
+    DurableConfigAndSession,
+    Upstream,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ContractExpectation {
+    status: u16,
+    error: Option<&'static str>,
+}
+
+const fn contract_expectation(status: u16, error: Option<&'static str>) -> ContractExpectation {
+    ContractExpectation { status, error }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RouteBehavior {
+    access: ContractAccess,
+    accept_html: bool,
+    expectations: [ContractExpectation; 5],
+    method: &'static str,
+    name: &'static str,
+    phase: ContractPhase,
+    request: ContractRequest,
+    side_effect: ContractSideEffect,
+    success_content_type: Option<&'static str>,
+    success_status: u16,
+    path: &'static str,
+}
+
+fn configured_contract_expectations(
+    success_status: u16,
+    ordinary_user_status: u16,
+) -> [ContractExpectation; 5] {
+    [
+        contract_expectation(503, Some("setup_required")),
+        contract_expectation(401, Some("unauthorized")),
+        contract_expectation(
+            ordinary_user_status,
+            (ordinary_user_status == 403).then_some("forbidden"),
+        ),
+        contract_expectation(success_status, None),
+        contract_expectation(success_status, None),
+    ]
+}
+
+fn contract_config_bytes(proxy: &support::Proxy) -> Option<Vec<u8>> {
+    match std::fs::read(proxy.data_dir.join("config.json")) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => panic!("route-contract:durable-read: config.json: {error}"),
+    }
+}
+
+fn assert_contract_durable_change(
+    before: &Option<Vec<u8>>,
+    after: &Option<Vec<u8>>,
+    context: &str,
+) {
+    assert!(
+        after.is_some(),
+        "route-contract:durable-bytes: successful {context} removed config.json"
+    );
+    assert_ne!(
+        after, before,
+        "route-contract:durable-bytes: successful {context} did not change config.json"
+    );
+}
+
+fn contract_upstream_calls(mock: &support::MockNim) -> usize {
+    mock.state.hit_count() + mock.state.models_hits.load(Ordering::SeqCst)
+}
+
+fn contract_body(
+    row: &RouteBehavior,
+    actor: ContractActor,
+    mock: &support::MockNim,
+) -> Option<String> {
+    let suffix = match actor {
+        ContractActor::BeforeSetup => "before",
+        ContractActor::Anonymous => "anonymous",
+        ContractActor::User => "user",
+        ContractActor::Admin => "admin",
+        ContractActor::Superuser => "superuser",
+    };
+    let value = match row.name {
+        "api-settings-nim-keys" => {
+            serde_json::json!({"add": {"key": format!("matrix-nim-{suffix}"), "rpm": 41}})
+        }
+        "api-settings-clients" => {
+            serde_json::json!({"add": {"name": format!("matrix-client-{suffix}")}})
+        }
+        "api-settings-limits" => serde_json::json!({
+            "heartbeat_secs": 1,
+            "max_inflight": 512 + actor.ordinal(),
+            "max_wait_secs": 31,
+            "models_ttl_secs": 300,
+            "request_timeout_secs": 300,
+            "stream_idle_secs": 300,
+            "strict_passthrough": false
+        }),
+        "api-settings-history" => serde_json::json!({
+            "days": 60 + actor.ordinal(),
+            "default_window_days": 30,
+            "slo_target_percent": 99.8
+        }),
+        "api-settings-governor" => {
+            serde_json::json!({"enabled": matches!(actor, ContractActor::Superuser)})
+        }
+        "api-settings-users" => serde_json::json!({
+            "add": {
+                "password": "matrix-password-1",
+                "role": "user",
+                "username": format!("created-{suffix}")
+            }
+        }),
+        "api-settings-validate-key" => serde_json::json!({"key": "probe-key"}),
+        "api-settings-upstream" => {
+            serde_json::json!({"base_url": format!("{}/matrix-{suffix}", mock.url)})
+        }
+        "api-settings-locale" => serde_json::json!({"locale": "en-US"}),
+        "api-settings-account" => serde_json::json!({
+            "current_password": TEST_PASSWORD,
+            "new_password": format!("matrix-new-password-{suffix}")
+        }),
+        "v1-wildcard" => serde_json::json!({
+            "messages": [{"content": format!("route contract {suffix}"), "role": "user"}],
+            "model": "mock/model-a",
+            "stream": false
+        }),
+        "login-post" => {
+            return Some(format!(
+                "username={}&password={}",
+                actor.username(),
+                TEST_PASSWORD
+            ));
+        }
+        "setup-post" => serde_json::json!({
+            "base_url": mock.url,
+            "nim_keys": [{"key": "matrix-setup-key", "rpm": 40}],
+            "password": "matrix-setup-password",
+            "username": "matrix-root"
+        }),
+        "setup-validate-key" => {
+            serde_json::json!({"base_url": mock.url, "key": "probe-key"})
+        }
+        _ => return None,
+    };
+    Some(serde_json::to_string(&value).unwrap())
+}
+
+async fn send_contract_request(
+    row: &RouteBehavior,
+    actor: ContractActor,
+    proxy: &support::Proxy,
+    cookie: Option<&str>,
+    mock: &support::MockNim,
+) -> reqwest::Response {
+    let mut request = match row.method {
+        "GET" => no_redirect_client().get(proxy.url(row.path)),
+        "POST" => no_redirect_client().post(proxy.url(row.path)),
+        other => panic!("route-contract:request: unsupported method {other}"),
+    };
+    if row.accept_html {
+        request = request.header("accept", "text/html");
+    }
+    if let Some(cookie) = cookie {
+        request = request.header("cookie", cookie);
+    }
+    if let Some(body) = contract_body(row, actor, mock) {
+        request = match row.request {
+            ContractRequest::Json => request.header(CONTENT_TYPE, "application/json"),
+            ContractRequest::Form => {
+                request.header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            }
+            ContractRequest::None => {
+                panic!(
+                    "route-contract:request: {} unexpectedly has a body",
+                    row.name
+                )
+            }
+        }
+        .body(body);
+    }
+    request.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn route_contract_behavior_matrix() {
+    let rows = vec![
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "health",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/plain; charset=utf-8"),
+            success_status: 200,
+            path: "/health",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "asset-public-css",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/css; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/public/public.css",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "asset-public-setup-js",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/javascript; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/public/setup.js",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "asset-public-login-js",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/javascript; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/public/login.js",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "asset-public-locale",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/assets/public/locales/en-US.json",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "api-locale-bootstrap",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/locale-bootstrap",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "asset-operator-css",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/css; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/operator/operator.css",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "asset-operator-shared-js",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/javascript; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/operator/shared.js",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "asset-operator-dashboard-js",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/javascript; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/operator/dashboard.js",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "asset-operator-settings-js",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/javascript; charset=utf-8"),
+            success_status: 200,
+            path: "/assets/operator/settings.js",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "asset-operator-locale",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/assets/operator/locales/en-US.json",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: true,
+            expectations: [
+                contract_expectation(302, None),
+                contract_expectation(302, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "root-page",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/html; charset=utf-8"),
+            success_status: 200,
+            path: "/",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: true,
+            expectations: [
+                contract_expectation(302, None),
+                contract_expectation(302, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "GET",
+            name: "dash-page",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/html; charset=utf-8"),
+            success_status: 200,
+            path: "/dash",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "metrics",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/plain; charset=utf-8"),
+            success_status: 200,
+            path: "/metrics",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "api-dashboard",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/dashboard",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "api-dashboard-now",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/dashboard/now",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "GET",
+            name: "api-config",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/config",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "POST",
+            name: "api-settings-nim-keys",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/nim-keys",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "POST",
+            name: "api-settings-clients",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/clients",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAdmin,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 403),
+            method: "POST",
+            name: "api-settings-limits",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/limits",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAdmin,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 403),
+            method: "POST",
+            name: "api-settings-history",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/history",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAdmin,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 403),
+            method: "POST",
+            name: "api-settings-governor",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/governor",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAdmin,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 403),
+            method: "POST",
+            name: "api-settings-users",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/users",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "POST",
+            name: "api-settings-validate-key",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::Upstream,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/validate-key",
+        },
+        RouteBehavior {
+            access: ContractAccess::Client,
+            accept_html: false,
+            expectations: [
+                contract_expectation(503, Some("setup_required")),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+                contract_expectation(200, None),
+            ],
+            method: "POST",
+            name: "v1-wildcard",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::Upstream,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/v1/chat/completions",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAdmin,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 403),
+            method: "POST",
+            name: "api-settings-upstream",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfig,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/upstream",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: true,
+            expectations: [
+                contract_expectation(302, None),
+                contract_expectation(200, None),
+                contract_expectation(302, None),
+                contract_expectation(302, None),
+                contract_expectation(302, None),
+            ],
+            method: "GET",
+            name: "login-get",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/html; charset=utf-8"),
+            success_status: 200,
+            path: "/login",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: true,
+            expectations: [
+                contract_expectation(302, None),
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+            ],
+            method: "POST",
+            name: "login-post",
+            phase: ContractPhase::Always,
+            request: ContractRequest::Form,
+            side_effect: ContractSideEffect::SessionCookie,
+            success_content_type: None,
+            success_status: 303,
+            path: "/login",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: true,
+            expectations: [
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+                contract_expectation(303, None),
+            ],
+            method: "POST",
+            name: "logout",
+            phase: ContractPhase::Always,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::SessionCookie,
+            success_content_type: None,
+            success_status: 303,
+            path: "/logout",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: true,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(404, None),
+                contract_expectation(404, None),
+                contract_expectation(404, None),
+                contract_expectation(404, None),
+            ],
+            method: "GET",
+            name: "setup-get",
+            phase: ContractPhase::PreSetup,
+            request: ContractRequest::None,
+            side_effect: ContractSideEffect::None,
+            success_content_type: Some("text/html; charset=utf-8"),
+            success_status: 200,
+            path: "/setup",
+        },
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(409, Some("setup_complete")),
+                contract_expectation(409, Some("setup_complete")),
+                contract_expectation(409, Some("setup_complete")),
+                contract_expectation(409, Some("setup_complete")),
+            ],
+            method: "POST",
+            name: "setup-validate-key",
+            phase: ContractPhase::PreSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::Upstream,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/setup/validate-key",
+        },
+        RouteBehavior {
+            access: ContractAccess::OperatorAdmin,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 403),
+            method: "POST",
+            name: "api-settings-locale",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfigIdempotent,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/locale",
+        },
+        // Password rotation invalidates every prior cookie for that actor, so
+        // keep this after all other authenticated probes.
+        RouteBehavior {
+            access: ContractAccess::OperatorAny,
+            accept_html: false,
+            expectations: configured_contract_expectations(200, 200),
+            method: "POST",
+            name: "api-settings-account",
+            phase: ContractPhase::PostSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfigAndSession,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/api/settings/account",
+        },
+        // Keep the successful claim last: it intentionally closes the
+        // before-setup fixture for every subsequent request.
+        RouteBehavior {
+            access: ContractAccess::Public,
+            accept_html: false,
+            expectations: [
+                contract_expectation(200, None),
+                contract_expectation(409, Some("setup_complete")),
+                contract_expectation(409, Some("setup_complete")),
+                contract_expectation(409, Some("setup_complete")),
+                contract_expectation(409, Some("setup_complete")),
+            ],
+            method: "POST",
+            name: "setup-post",
+            phase: ContractPhase::PreSetup,
+            request: ContractRequest::Json,
+            side_effect: ContractSideEffect::DurableConfigAndSession,
+            success_content_type: Some("application/json"),
+            success_status: 200,
+            path: "/setup",
+        },
+    ];
+
+    assert_eq!(rows.len(), 34, "route-contract:inventory");
+
+    let mock = start_mock().await;
+    let before_setup = start_proxy_fresh().await;
+    let configured = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            extra_users: vec![
+                ("matrix-user".into(), "user".into()),
+                ("matrix-admin".into(), "admin".into()),
+            ],
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+    let user_cookie = login_as(&configured, "matrix-user").await;
+    let admin_cookie = login_as(&configured, "matrix-admin").await;
+    let superuser_cookie = login(&configured).await;
+
+    for row in &rows {
+        for actor in ContractActor::ALL {
+            let (proxy, cookie) = match actor {
+                ContractActor::BeforeSetup => (&before_setup, None),
+                ContractActor::Anonymous => (&configured, None),
+                ContractActor::User => (&configured, Some(user_cookie.as_str())),
+                ContractActor::Admin => (&configured, Some(admin_cookie.as_str())),
+                ContractActor::Superuser => (&configured, Some(superuser_cookie.as_str())),
+            };
+            let expected = row.expectations[actor.index()];
+            let config_before = contract_config_bytes(proxy);
+            let upstream_before = contract_upstream_calls(&mock);
+            let response = send_contract_request(row, actor, proxy, cookie, &mock).await;
+            let actual_status = response.status().as_u16();
+            assert_eq!(
+                actual_status, expected.status,
+                "route-contract:phase/auth: {} {} actor={actor:?} access={:?} phase={:?}",
+                row.method, row.path, row.access, row.phase
+            );
+
+            let succeeded = actual_status == row.success_status;
+            if succeeded {
+                if let Some(content_type) = row.success_content_type {
+                    assert_eq!(
+                        response
+                            .headers()
+                            .get(CONTENT_TYPE)
+                            .and_then(|value| value.to_str().ok()),
+                        Some(content_type),
+                        "route-contract:success-content-type: {} {} actor={actor:?}",
+                        row.method,
+                        row.path
+                    );
+                }
+            }
+
+            let response_content_type = response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
+            let has_session_cookie = response.headers().contains_key("set-cookie");
+            let body = response.bytes().await.unwrap();
+            if let Some(error) = expected.error {
+                assert_eq!(
+                    response_content_type.as_deref(),
+                    Some("application/json"),
+                    "route-contract:error-content-type: {} {} actor={actor:?}",
+                    row.method,
+                    row.path
+                );
+                let value: serde_json::Value = serde_json::from_slice(&body).unwrap_or_else(|e| {
+                    panic!(
+                        "route-contract:error: {} {} actor={actor:?} was not JSON: {e}",
+                        row.method, row.path
+                    )
+                });
+                assert_eq!(
+                    value["error"]["code"], error,
+                    "route-contract:error: {} {} actor={actor:?}",
+                    row.method, row.path
+                );
+            }
+
+            let config_after = contract_config_bytes(proxy);
+            let upstream_after = contract_upstream_calls(&mock);
+            match row.side_effect {
+                ContractSideEffect::None => {
+                    assert_eq!(
+                        config_after, config_before,
+                        "route-contract:durable-bytes: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                    assert_eq!(
+                        upstream_after, upstream_before,
+                        "route-contract:side-effect: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                }
+                ContractSideEffect::SessionCookie => {
+                    assert_eq!(
+                        config_after, config_before,
+                        "route-contract:durable-bytes: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                    assert_eq!(
+                        has_session_cookie, succeeded,
+                        "route-contract:session: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                    assert_eq!(
+                        upstream_after, upstream_before,
+                        "route-contract:side-effect: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                }
+                ContractSideEffect::DurableConfig => {
+                    if succeeded {
+                        assert_contract_durable_change(
+                            &config_before,
+                            &config_after,
+                            &format!("{} {} actor={actor:?}", row.method, row.path),
+                        );
+                    } else {
+                        assert_eq!(
+                            config_after, config_before,
+                            "route-contract:durable-bytes: rejected {} {} actor={actor:?}",
+                            row.method, row.path
+                        );
+                    }
+                    assert_eq!(
+                        upstream_after, upstream_before,
+                        "route-contract:side-effect: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                }
+                ContractSideEffect::DurableConfigIdempotent => {
+                    if succeeded {
+                        assert!(
+                            config_after.is_some(),
+                            "route-contract:durable-bytes: successful {} {} actor={actor:?} removed config.json",
+                            row.method,
+                            row.path
+                        );
+                    } else {
+                        assert_eq!(
+                            config_after, config_before,
+                            "route-contract:durable-bytes: rejected {} {} actor={actor:?}",
+                            row.method, row.path
+                        );
+                    }
+                    assert_eq!(
+                        upstream_after, upstream_before,
+                        "route-contract:side-effect: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                }
+                ContractSideEffect::DurableConfigAndSession => {
+                    if succeeded {
+                        assert_contract_durable_change(
+                            &config_before,
+                            &config_after,
+                            &format!("{} {} actor={actor:?}", row.method, row.path),
+                        );
+                    } else {
+                        assert_eq!(
+                            config_after, config_before,
+                            "route-contract:durable-bytes: rejected {} {} actor={actor:?}",
+                            row.method, row.path
+                        );
+                    }
+                    assert_eq!(
+                        has_session_cookie, succeeded,
+                        "route-contract:session: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                    assert_eq!(
+                        upstream_after, upstream_before,
+                        "route-contract:side-effect: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                }
+                ContractSideEffect::Upstream => {
+                    assert_eq!(
+                        upstream_after,
+                        upstream_before + usize::from(succeeded),
+                        "route-contract:side-effect: {} {} actor={actor:?}",
+                        row.method,
+                        row.path
+                    );
+                    assert_eq!(
+                        config_after, config_before,
+                        "route-contract:durable-bytes: {} {} actor={actor:?}",
+                        row.method, row.path
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ClientAuthBehavior {
+    bearer: Option<&'static str>,
+    error: Option<&'static str>,
+    status: u16,
+    upstream: bool,
+}
+
+#[tokio::test]
+async fn route_contract_client_auth_matrix() {
+    let mock = start_mock().await;
+    let before_setup = start_proxy_fresh().await;
+    let keyed_proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            clients: vec![("matrix-client".into(), "matrix-secret".into())],
+            open: false,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+    let rows = [
+        (
+            &before_setup,
+            ClientAuthBehavior {
+                bearer: None,
+                error: Some("setup_required"),
+                status: 503,
+                upstream: false,
+            },
+        ),
+        (
+            &keyed_proxy,
+            ClientAuthBehavior {
+                bearer: None,
+                error: Some("unauthorized"),
+                status: 401,
+                upstream: false,
+            },
+        ),
+        (
+            &keyed_proxy,
+            ClientAuthBehavior {
+                bearer: Some("wrong-secret"),
+                error: Some("unauthorized"),
+                status: 401,
+                upstream: false,
+            },
+        ),
+        (
+            &keyed_proxy,
+            ClientAuthBehavior {
+                bearer: Some("matrix-secret"),
+                error: None,
+                status: 200,
+                upstream: true,
+            },
+        ),
+    ];
+
+    for (proxy, row) in rows {
+        let config_before = contract_config_bytes(proxy);
+        let upstream_before = contract_upstream_calls(&mock);
+        let mut request = no_redirect_client()
+            .post(proxy.url("/v1/chat/completions"))
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&chat_body("route-contract-client-auth", false)).unwrap());
+        if let Some(bearer) = row.bearer {
+            request = request.bearer_auth(bearer);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            row.status,
+            "route-contract:client-auth: {row:?}"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json"),
+            "route-contract:client-auth-content-type: {row:?}"
+        );
+        let body: serde_json::Value = response.json().await.unwrap();
+        if let Some(error) = row.error {
+            assert_eq!(
+                body["error"]["code"], error,
+                "route-contract:client-auth: {row:?}"
+            );
+        }
+        assert_eq!(
+            contract_upstream_calls(&mock),
+            upstream_before + usize::from(row.upstream),
+            "route-contract:client-auth-side-effect: {row:?}"
+        );
+        assert_eq!(
+            contract_config_bytes(proxy),
+            config_before,
+            "route-contract:client-auth-durable-bytes: {row:?}"
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContractOwnership {
+    Own,
+    Other,
+}
+
+#[derive(Debug)]
+struct OwnershipBehavior {
+    body: serde_json::Value,
+    durable_change: bool,
+    ownership: ContractOwnership,
+    path: &'static str,
+    status: u16,
+}
+
+#[tokio::test]
+async fn route_contract_ownership_matrix() {
+    let mock = start_mock().await;
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            clients: vec![("root-client".into(), "root-secret".into())],
+            extra_users: vec![("matrix-user".into(), "user".into())],
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+    let root_cookie = login(&proxy).await;
+    let user_cookie = login_as(&proxy, "matrix-user").await;
+
+    let root_nim_fingerprint = api_config(&proxy, &root_cookie).await["nim_keys"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, body) = post_json(
+        &proxy,
+        &user_cookie,
+        "/api/settings/nim-keys",
+        serde_json::json!({"add": {"key": "matrix-user-nim", "rpm": 40}}),
+    )
+    .await;
+    assert_eq!(status, 200, "ownership fixture add failed: {body}");
+    let user_nim_fingerprint = api_config(&proxy, &user_cookie).await["nim_keys"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, body) = post_json(
+        &proxy,
+        &user_cookie,
+        "/api/settings/clients",
+        serde_json::json!({"add": {"name": "user-client"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "ownership fixture add failed: {body}");
+
+    let rows = vec![
+        OwnershipBehavior {
+            body: serde_json::json!({
+                "set": {"fingerprint": user_nim_fingerprint, "rpm": 42}
+            }),
+            durable_change: true,
+            ownership: ContractOwnership::Own,
+            path: "/api/settings/nim-keys",
+            status: 200,
+        },
+        OwnershipBehavior {
+            body: serde_json::json!({
+                "set": {"fingerprint": root_nim_fingerprint, "rpm": 42}
+            }),
+            durable_change: false,
+            ownership: ContractOwnership::Other,
+            path: "/api/settings/nim-keys",
+            status: 403,
+        },
+        OwnershipBehavior {
+            body: serde_json::json!({"remove": "user-client"}),
+            durable_change: true,
+            ownership: ContractOwnership::Own,
+            path: "/api/settings/clients",
+            status: 200,
+        },
+        OwnershipBehavior {
+            body: serde_json::json!({"remove": "root-client"}),
+            durable_change: false,
+            ownership: ContractOwnership::Other,
+            path: "/api/settings/clients",
+            status: 403,
+        },
+    ];
+
+    for row in rows {
+        let before = contract_config_bytes(&proxy);
+        let (status, body) = post_json(&proxy, &user_cookie, row.path, row.body).await;
+        assert_eq!(
+            status.as_u16(),
+            row.status,
+            "route-contract:ownership: {:?} {}: {body}",
+            row.ownership,
+            row.path
+        );
+        let after = contract_config_bytes(&proxy);
+        if row.durable_change {
+            assert_contract_durable_change(
+                &before,
+                &after,
+                &format!("{:?} {}", row.ownership, row.path),
+            );
+        } else {
+            assert_eq!(
+                after, before,
+                "route-contract:durable-bytes: {:?} {}",
+                row.ownership, row.path
+            );
+            assert_eq!(
+                body["error"]["code"], "forbidden",
+                "route-contract:ownership: {:?} {}",
+                row.ownership, row.path
+            );
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "route-contract:durable-bytes")]
+fn route_contract_durable_self_test_names_missing_post_write_file() {
+    assert_contract_durable_change(
+        &Some(b"before".to_vec()),
+        &None,
+        "self-test configured writer",
+    );
+}
+
+/// Send only headers for an over-limit body. `Expect: 100-continue` keeps the
+/// client from streaming 64 MiB into a setup route that must reject its closed
+/// phase before body buffering; the request limit still sees the declared size.
+async fn assert_closed_setup_rejects_oversized_body(proxy: &support::Proxy, path: &str) {
+    const MAX_RESPONSE_BYTES: u64 = 4 * 1024;
+
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", proxy.port))
+        .await
+        .unwrap();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n",
+        64 * 1024 * 1024 + 1,
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let mut response = Vec::new();
+    let mut bounded = stream.take(MAX_RESPONSE_BYTES + 1);
+    tokio::time::timeout(Duration::from_secs(2), bounded.read_to_end(&mut response))
+        .await
+        .expect("closed setup route should respond without the oversized body")
+        .unwrap();
+    assert!(
+        response.len() <= MAX_RESPONSE_BYTES as usize,
+        "closed setup response exceeded {MAX_RESPONSE_BYTES} bytes"
+    );
+    let response = String::from_utf8(response).unwrap();
+    let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(headers.starts_with("HTTP/1.1 409"), "{headers}");
+    assert!(
+        headers.contains("content-type: application/json"),
+        "{headers}"
+    );
+    assert_eq!(
+        body,
+        r#"{"error":{"code":"setup_complete","message":"setup is already complete","type":"proxy_error"}}"#
+    );
 }
 
 /// A keyed-`/v1` fixture: one client key (name, secret), otherwise defaults.
@@ -112,6 +1463,642 @@ async fn wait_for_persisted_chat_total(
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CanonicalFixtureKind {
+    Boot,
+    Sample,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CanonicalFixtureStateKind {
+    Counter,
+}
+
+#[derive(serde::Serialize)]
+struct CanonicalFixtureCapacity {
+    capacity_rpm: usize,
+    enabled_keys: usize,
+    key_rpms: [usize; 3],
+}
+
+#[derive(serde::Serialize)]
+struct CanonicalFixtureState {
+    kind: CanonicalFixtureStateKind,
+    metric: &'static str,
+    labels: BTreeMap<String, String>,
+    value: f64,
+}
+
+#[derive(serde::Serialize)]
+struct CanonicalFixtureRow {
+    format: &'static str,
+    v: u8,
+    kind: CanonicalFixtureKind,
+    timestamp: u64,
+    boot_id: &'static str,
+    capacity: CanonicalFixtureCapacity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<Vec<CanonicalFixtureState>>,
+}
+
+fn canonical_history_row(
+    kind: CanonicalFixtureKind,
+    timestamp: u64,
+    value: Option<f64>,
+) -> CanonicalFixtureRow {
+    let labels = [("client".to_owned(), "retention-seed".to_owned())]
+        .into_iter()
+        .collect();
+    CanonicalFixtureRow {
+        format: "nimproxy-history",
+        v: 1,
+        kind,
+        timestamp,
+        boot_id: "seed-boot",
+        capacity: CanonicalFixtureCapacity {
+            capacity_rpm: 120,
+            enabled_keys: 3,
+            key_rpms: [40, 40, 40],
+        },
+        state: value.map(|value| {
+            vec![CanonicalFixtureState {
+                kind: CanonicalFixtureStateKind::Counter,
+                metric: "nimproxy_seeded_requests_total",
+                labels,
+                value,
+            }]
+        }),
+    }
+}
+
+struct RetentionFixture {
+    data_dir: std::path::PathBuf,
+    canonical: std::path::PathBuf,
+    now: u64,
+    cutoff: u64,
+    seed_boot_timestamp: u64,
+    ancient_seed_sample_timestamp: u64,
+}
+
+fn retention_fixture(upstream: &str) -> RetentionFixture {
+    const HORIZON_DAYS: u64 = 30;
+    const HORIZON_SECONDS: u64 = HORIZON_DAYS * 86_400;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let cutoff = now.saturating_sub(HORIZON_SECONDS);
+    let seed_boot_timestamp = now.saturating_sub(HORIZON_SECONDS * 3);
+    let ancient_seed_sample_timestamp = now.saturating_sub(HORIZON_SECONDS * 3 - 1);
+    let data_dir = scratch_data_dir();
+    let mut config = StoreOpts::default().json(upstream);
+    config["history"] = serde_json::json!({"days": HORIZON_DAYS});
+    std::fs::write(
+        data_dir.join("config.json"),
+        serde_json::to_vec_pretty(&config).unwrap(),
+    )
+    .unwrap();
+
+    let seed = [
+        canonical_history_row(CanonicalFixtureKind::Boot, seed_boot_timestamp, None),
+        canonical_history_row(
+            CanonicalFixtureKind::Sample,
+            ancient_seed_sample_timestamp,
+            Some(1.0),
+        ),
+        canonical_history_row(
+            CanonicalFixtureKind::Sample,
+            cutoff.saturating_sub(1),
+            Some(2.0),
+        ),
+        canonical_history_row(
+            CanonicalFixtureKind::Sample,
+            cutoff.saturating_add(600),
+            Some(3.0),
+        ),
+    ];
+    let mut seed_bytes = Vec::new();
+    for row in seed {
+        let line = serde_json::to_vec(&row).unwrap();
+        seed_bytes.extend(line);
+        seed_bytes.push(b'\n');
+    }
+    // Readiness validates this raw seed with the private production codec;
+    // reopening the same directory validates every later replacement again.
+    let canonical = data_dir.join("history-v1.jsonl");
+    std::fs::write(&canonical, seed_bytes).unwrap();
+
+    RetentionFixture {
+        data_dir,
+        canonical,
+        now,
+        cutoff,
+        seed_boot_timestamp,
+        ancient_seed_sample_timestamp,
+    }
+}
+
+fn read_canonical_history(path: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .expect("history-retention: canonical history remains readable")
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let row: serde_json::Value = serde_json::from_str(line)
+                .expect("history-retention: canonical row remains valid JSON");
+            assert_eq!(row["format"], "nimproxy-history");
+            assert_eq!(row["v"], 1);
+            assert!(row["kind"].is_string());
+            assert!(row["timestamp"].is_u64());
+            assert!(row["boot_id"].is_string());
+            assert!(row["capacity"].is_object());
+            row
+        })
+        .collect()
+}
+
+fn idle_metric_snapshot(metrics: &str) -> Vec<&str> {
+    let mut rows: Vec<_> = metrics
+        .lines()
+        .filter(|line| {
+            line.starts_with("nimproxy_requests_total")
+                || line.starts_with("nimproxy_lane_requests_total")
+                || line.starts_with("nimproxy_queue_wait_seconds_count")
+                || line.starts_with("nimproxy_queue_wait_seconds_sum")
+        })
+        .collect();
+    rows.sort_unstable();
+    rows
+}
+
+async fn wait_for_idle_checkpoint(
+    canonical: &std::path::Path,
+    row_count: usize,
+    sample_count: usize,
+    checkpoint_count: usize,
+) -> Vec<serde_json::Value> {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let rows = read_canonical_history(canonical);
+        let samples = rows.iter().filter(|row| row["kind"] == "sample").count();
+        let checkpoints = rows
+            .iter()
+            .filter(|row| row["kind"] == "checkpoint")
+            .count();
+        if checkpoints > checkpoint_count {
+            assert_eq!(
+                samples, sample_count,
+                "history-retention:idle-samples: an idle interval added a full sample instead of a checkpoint"
+            );
+            assert_eq!(
+                checkpoints,
+                checkpoint_count + 1,
+                "history-retention:idle-checkpoints: idle cadence added more than one checkpoint"
+            );
+            assert_eq!(
+                rows.len(),
+                row_count + 1,
+                "history-retention:idle-rows: idle cadence added more than one canonical row"
+            );
+            return rows;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "history-retention:idle-checkpoint: sampler did not persist a checkpoint"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn wait_for_retention_compaction(
+    proxy: &support::Proxy,
+    cookie: &str,
+    canonical: &std::path::Path,
+    ancient_seed_sample_timestamp: u64,
+) {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let configured = api_config(proxy, cookie).await;
+        let compacted_rows = read_canonical_history(canonical);
+        if configured["server"]["history"]["compaction_pending"] == false
+            && !compacted_rows
+                .iter()
+                .any(|row| row["timestamp"] == ancient_seed_sample_timestamp)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "history-retention:compaction-idle: canonical retention did not settle before idle cadence"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn assert_retained_history_invariants(
+    rows: &[serde_json::Value],
+    proxy: &support::Proxy,
+    fixture: &RetentionFixture,
+) {
+    let has_timestamp = |timestamp| rows.iter().any(|row| row["timestamp"] == timestamp);
+    assert!(
+        rows.windows(2).all(|pair| {
+            pair[0]["timestamp"].as_u64().unwrap() <= pair[1]["timestamp"].as_u64().unwrap()
+        }),
+        "history-retention:physical-order: canonical rows retain physical timestamp order"
+    );
+    assert!(
+        has_timestamp(fixture.cutoff.saturating_sub(1)),
+        "history-retention:baseline: the preceding full-sample baseline is retained"
+    );
+    assert!(
+        rows.iter().any(|row| {
+            row["kind"] == "boot"
+                && row["boot_id"] == "seed-boot"
+                && row["timestamp"] == fixture.seed_boot_timestamp
+        }),
+        "history-retention:owning-boot: the baseline's owning boot is retained"
+    );
+    assert!(
+        has_timestamp(fixture.cutoff.saturating_add(600)),
+        "history-retention:horizon: the configured retained horizon is present"
+    );
+    assert!(
+        rows.iter().any(|row| row["boot_id"] != "seed-boot"),
+        "history-retention:fresh-epoch: a fresh process epoch is retained"
+    );
+    assert!(
+        !has_timestamp(fixture.ancient_seed_sample_timestamp),
+        "history-retention:expired: rows older than the required baseline are removed"
+    );
+    assert!(
+        !proxy.data_dir.join("history.jsonl").exists(),
+        "history-retention:legacy: canonical retention does not create the legacy path"
+    );
+}
+
+async fn exercise_history_retention_restarts() {
+    let mock = start_mock().await;
+    let fixture = retention_fixture(&mock.url);
+    let query_to = fixture.now.saturating_add(60);
+
+    let mut proxy = start_proxy_in(fixture.data_dir.clone(), &[("HISTORY_SAMPLE_SECS", "1")]).await;
+    let mut cookie = login(&proxy).await;
+    let initial = dashboard_range(&proxy, &cookie, fixture.cutoff, query_to, 1000).await;
+    send_successful_chats(&proxy, 1).await;
+    let _ = wait_for_persisted_chat_total(
+        &proxy,
+        &cookie,
+        initial["history_revision"].as_u64().unwrap(),
+        1.0,
+    )
+    .await;
+    let before_restart = dashboard_range(&proxy, &cookie, fixture.cutoff, query_to, 1000).await;
+    let before_idle_metrics_text = metrics(&proxy).await;
+    let before_idle_metrics = idle_metric_snapshot(&before_idle_metrics_text);
+    wait_for_retention_compaction(
+        &proxy,
+        &cookie,
+        &fixture.canonical,
+        fixture.ancient_seed_sample_timestamp,
+    )
+    .await;
+    let before_idle_rows = read_canonical_history(&fixture.canonical);
+    let before_idle_samples = before_idle_rows
+        .iter()
+        .filter(|row| row["kind"] == "sample")
+        .count();
+    let before_idle_checkpoints = before_idle_rows
+        .iter()
+        .filter(|row| row["kind"] == "checkpoint")
+        .count();
+    let idle_rows = wait_for_idle_checkpoint(
+        &fixture.canonical,
+        before_idle_rows.len(),
+        before_idle_samples,
+        before_idle_checkpoints,
+    )
+    .await;
+    let after_idle_metrics_text = metrics(&proxy).await;
+    assert_eq!(
+        idle_metric_snapshot(&after_idle_metrics_text),
+        before_idle_metrics,
+        "history-retention:idle-metrics: requests and scheduling do not advance without traffic"
+    );
+
+    proxy = restart(proxy, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+    cookie = login(&proxy).await;
+    let after_restart = dashboard_range(&proxy, &cookie, fixture.cutoff, query_to, 1000).await;
+    assert_eq!(
+        after_restart["totals"], before_restart["totals"],
+        "history-retention:restart-totals: retained counter totals survive restart"
+    );
+    assert_eq!(
+        after_restart["window"]["complete"], before_restart["window"]["complete"],
+        "history-retention:restart-complete: retained-window completeness survives restart"
+    );
+    assert_eq!(
+        after_restart["window"]["available_from"], before_restart["window"]["available_from"],
+        "history-retention:restart-bounds: retained-window lower bound survives restart"
+    );
+
+    let rows = read_canonical_history(&fixture.canonical);
+    assert_retained_history_invariants(&rows, &proxy, &fixture);
+    assert!(
+        idle_rows.iter().any(|row| row["kind"] == "checkpoint"),
+        "history-retention:idle-checkpoint: idle cadence persists checkpoints"
+    );
+}
+
+#[tokio::test]
+async fn history_retention_survives_restart() {
+    exercise_history_retention_restarts().await;
+}
+
+/// Long-form release proof for bounded canonical retention. The seed spans
+/// more than two retention horizons without waiting for wall-clock history.
+#[tokio::test]
+#[ignore]
+async fn release_restart_and_idle_history() {
+    const RELEASE_CYCLES: u64 = 3;
+
+    let mock = start_mock().await;
+    let fixture = retention_fixture(&mock.url);
+    let query_to = fixture.now.saturating_add(60);
+    let mut proxy = start_proxy_in(fixture.data_dir.clone(), &[("HISTORY_SAMPLE_SECS", "1")]).await;
+    let mut cookie = login(&proxy).await;
+    let initial = dashboard_range(&proxy, &cookie, fixture.cutoff, query_to, 1000).await;
+    send_successful_chats(&proxy, 1).await;
+    let _ = wait_for_persisted_chat_total(
+        &proxy,
+        &cookie,
+        initial["history_revision"].as_u64().unwrap(),
+        1.0,
+    )
+    .await;
+    wait_for_retention_compaction(
+        &proxy,
+        &cookie,
+        &fixture.canonical,
+        fixture.ancient_seed_sample_timestamp,
+    )
+    .await;
+
+    let retained_before_restarts =
+        dashboard_range(&proxy, &cookie, fixture.cutoff, query_to, 1000).await;
+    let pre_idle_bytes = std::fs::metadata(&fixture.canonical)
+        .expect("release-restart-idle-history:pre-idle-bytes: canonical history remains present")
+        .len();
+    let mut checkpoint_byte_allowance = None;
+
+    for cycle in 0..RELEASE_CYCLES {
+        let before_rows = read_canonical_history(&fixture.canonical);
+        let before_samples = before_rows
+            .iter()
+            .filter(|row| row["kind"] == "sample")
+            .count();
+        let before_checkpoints = before_rows
+            .iter()
+            .filter(|row| row["kind"] == "checkpoint")
+            .count();
+        let before_bytes = std::fs::metadata(&fixture.canonical)
+            .expect("release-restart-idle-history:checkpoint-before-bytes: canonical history remains present")
+            .len();
+        let before_metrics_text = metrics(&proxy).await;
+        let before_metrics = idle_metric_snapshot(&before_metrics_text);
+        assert!(
+            [
+                "nimproxy_requests_total",
+                "nimproxy_lane_requests_total",
+                "nimproxy_queue_wait_seconds_count",
+                "nimproxy_queue_wait_seconds_sum",
+            ]
+            .iter()
+            .all(|metric| before_metrics.iter().any(|row| row.starts_with(metric))),
+            "release-restart-idle-history:idle-metric-rows: cycle {cycle} lacks a selected metric row"
+        );
+
+        let _ = wait_for_idle_checkpoint(
+            &fixture.canonical,
+            before_rows.len(),
+            before_samples,
+            before_checkpoints,
+        )
+        .await;
+        let after_bytes = std::fs::metadata(&fixture.canonical)
+            .expect("release-restart-idle-history:checkpoint-after-bytes: canonical history remains present")
+            .len();
+        let after_metrics_text = metrics(&proxy).await;
+        assert_eq!(
+            idle_metric_snapshot(&after_metrics_text),
+            before_metrics,
+            "release-restart-idle-history:idle-metrics: cycle {cycle} changed request or scheduling metrics without traffic"
+        );
+
+        let checkpoint_delta = after_bytes.checked_sub(before_bytes).expect(
+            "release-restart-idle-history:checkpoint-byte-delta: canonical bytes shrank during an idle checkpoint",
+        );
+        if cycle == 0 {
+            assert_eq!(
+                before_bytes, pre_idle_bytes,
+                "release-restart-idle-history:pre-idle-base: first idle cycle did not start at the recorded base"
+            );
+            assert!(
+                checkpoint_delta > 0,
+                "release-restart-idle-history:checkpoint-byte-allowance-positive: first checkpoint must establish a positive allowance"
+            );
+            checkpoint_byte_allowance = Some(checkpoint_delta);
+        } else {
+            assert!(
+                checkpoint_delta
+                    <= checkpoint_byte_allowance.expect(
+                        "release-restart-idle-history:checkpoint-byte-allowance: first cycle did not establish an allowance",
+                    ),
+                "release-restart-idle-history:checkpoint-byte-allowance: cycle {cycle} exceeded the first checkpoint allowance"
+            );
+        }
+    }
+
+    let post_idle_bytes = std::fs::metadata(&fixture.canonical)
+        .expect("release-restart-idle-history:post-idle-bytes: canonical history remains present")
+        .len();
+    let mut restart_byte_allowance = None;
+    let mut restart_boot_ids = BTreeSet::new();
+    let kind_counts = |rows: &[serde_json::Value]| {
+        ["boot", "sample", "checkpoint"]
+            .map(|kind| rows.iter().filter(|row| row["kind"] == kind).count())
+    };
+
+    for cycle in 0..RELEASE_CYCLES {
+        let before_rows = read_canonical_history(&fixture.canonical);
+        let before_file_bytes = std::fs::read(&fixture.canonical).expect(
+            "release-restart-idle-history:restart-before-bytes: canonical history remains readable",
+        );
+        let before_bytes = u64::try_from(before_file_bytes.len()).expect(
+            "release-restart-idle-history:restart-before-byte-length: canonical byte length exceeds u64",
+        );
+        if cycle == 0 {
+            assert_eq!(
+                before_bytes, post_idle_bytes,
+                "release-restart-idle-history:post-idle-base: first restart did not start at the post-idle byte snapshot"
+            );
+        }
+        let before_boot_ids: BTreeSet<_> = before_rows
+            .iter()
+            .filter(|row| row["kind"] == "boot")
+            .map(|row| {
+                row["boot_id"]
+                    .as_str()
+                    .expect("release-restart-idle-history:restart-boot-id: boot id is a string")
+                    .to_owned()
+            })
+            .collect();
+        let before_kind_counts = kind_counts(&before_rows);
+
+        proxy = restart(proxy, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+        let after_rows = read_canonical_history(&fixture.canonical);
+        let after_file_bytes = std::fs::read(&fixture.canonical).expect(
+            "release-restart-idle-history:restart-after-bytes: canonical history remains readable",
+        );
+        let after_bytes = u64::try_from(after_file_bytes.len()).expect(
+            "release-restart-idle-history:restart-after-byte-length: canonical byte length exceeds u64",
+        );
+        assert!(
+            after_file_bytes.starts_with(&before_file_bytes),
+            "release-restart-idle-history:restart-byte-prefix: cycle {cycle} changed pre-restart canonical bytes"
+        );
+        let expected_row_count = before_rows
+            .len()
+            .checked_add(2)
+            .expect("release-restart-idle-history:restart-row-kind-counts: row count overflowed");
+        assert_eq!(
+            after_rows.len(), expected_row_count,
+            "release-restart-idle-history:restart-row-kind-counts: cycle {cycle} did not append exactly two rows"
+        );
+        assert_eq!(
+            &after_rows[..before_rows.len()],
+            before_rows.as_slice(),
+            "release-restart-idle-history:restart-prefix: cycle {cycle} changed pre-restart canonical rows"
+        );
+        let tail = &after_rows[before_rows.len()..];
+        assert_eq!(
+            tail.iter()
+                .map(|row| row["kind"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["boot", "sample"],
+            "release-restart-idle-history:restart-row-kinds: cycle {cycle} tail is not boot then sample"
+        );
+        assert_eq!(
+            kind_counts(&after_rows),
+            [
+                before_kind_counts[0]
+                    .checked_add(1)
+                    .expect("release-restart-idle-history:restart-row-kind-counts: boot count overflowed"),
+                before_kind_counts[1]
+                    .checked_add(1)
+                    .expect("release-restart-idle-history:restart-row-kind-counts: sample count overflowed"),
+                before_kind_counts[2],
+            ],
+            "release-restart-idle-history:restart-row-kind-counts: cycle {cycle} did not add exactly one boot, one sample, and zero checkpoints"
+        );
+
+        let boot_id = tail[0]["boot_id"]
+            .as_str()
+            .expect("release-restart-idle-history:restart-boot-id: boot id is a string");
+        assert_eq!(
+            tail[1]["boot_id"], boot_id,
+            "release-restart-idle-history:restart-boot-id: cycle {cycle} boot and sample ids differ"
+        );
+        assert!(
+            !before_boot_ids.contains(boot_id),
+            "release-restart-idle-history:restart-boot-id: cycle {cycle} reused a pre-restart boot id"
+        );
+        assert!(
+            restart_boot_ids.insert(boot_id.to_owned()),
+            "release-restart-idle-history:restart-boot-id: cycle {cycle} reused a release restart boot id"
+        );
+
+        let restart_delta = after_bytes.checked_sub(before_bytes).expect(
+            "release-restart-idle-history:restart-byte-delta: canonical bytes shrank during restart",
+        );
+        if cycle == 0 {
+            assert!(
+                restart_delta > 0,
+                "release-restart-idle-history:restart-byte-allowance-positive: first restart must establish a positive allowance"
+            );
+            restart_byte_allowance = Some(restart_delta);
+        } else {
+            assert!(
+                restart_delta
+                    <= restart_byte_allowance.expect(
+                        "release-restart-idle-history:restart-byte-allowance: first restart did not establish an allowance",
+                    ),
+                "release-restart-idle-history:restart-byte-allowance: cycle {cycle} exceeded the first restart allowance"
+            );
+        }
+
+        cookie = login(&proxy).await;
+        let configured = api_config(&proxy, &cookie).await;
+        assert_eq!(
+            configured["server"]["history"]["compaction_pending"], false,
+            "release-restart-idle-history:restart-compaction: cycle {cycle} left unclassified compaction work"
+        );
+        let after_restart = dashboard_range(&proxy, &cookie, fixture.cutoff, query_to, 1000).await;
+        assert_eq!(
+            after_restart["totals"], retained_before_restarts["totals"],
+            "release-restart-idle-history:restart-totals: cycle {cycle} changed retained totals"
+        );
+        assert_eq!(
+            after_restart["window"]["complete"],
+            retained_before_restarts["window"]["complete"],
+            "release-restart-idle-history:restart-complete: cycle {cycle} changed retained completeness"
+        );
+        assert_eq!(
+            after_restart["window"]["available_from"],
+            retained_before_restarts["window"]["available_from"],
+            "release-restart-idle-history:restart-bounds: cycle {cycle} changed retained lower bound"
+        );
+    }
+
+    assert_eq!(
+        restart_boot_ids.len(),
+        usize::try_from(RELEASE_CYCLES)
+            .expect("release-restart-idle-history:restart-epoch-count: cycle count fits usize"),
+        "release-restart-idle-history:restart-epoch-count: every restart produced a unique boot id"
+    );
+    let checkpoint_byte_allowance = checkpoint_byte_allowance.expect(
+        "release-restart-idle-history:checkpoint-byte-allowance: first checkpoint did not establish an allowance",
+    );
+    let restart_byte_allowance = restart_byte_allowance.expect(
+        "release-restart-idle-history:restart-byte-allowance: first restart did not establish an allowance",
+    );
+    let final_byte_bound = pre_idle_bytes
+        .checked_add(
+            checkpoint_byte_allowance
+                .checked_mul(RELEASE_CYCLES)
+                .expect("release-restart-idle-history:final-byte-bound: checkpoint multiplication overflowed"),
+        )
+        .and_then(|bound| {
+            restart_byte_allowance
+                .checked_mul(RELEASE_CYCLES)
+                .and_then(|restart_bytes| bound.checked_add(restart_bytes))
+        })
+        .expect("release-restart-idle-history:final-byte-bound: allowance arithmetic overflowed");
+    let final_bytes = std::fs::metadata(&fixture.canonical)
+        .expect("release-restart-idle-history:final-bytes: canonical history remains present")
+        .len();
+    assert!(
+        final_bytes <= final_byte_bound,
+        "release-restart-idle-history:final-byte-bound: final canonical bytes {final_bytes} exceed independent bound {final_byte_bound}"
+    );
+
+    let rows = read_canonical_history(&fixture.canonical);
+    assert_retained_history_invariants(&rows, &proxy, &fixture);
 }
 
 #[tokio::test]
@@ -595,6 +2582,95 @@ async fn models_catalog_is_cached_and_auth_gated() {
 }
 
 #[tokio::test]
+async fn observation_preserves_upstream_bytes() {
+    // Mutation caught: the old side-band reader accepts an invalid reasoning
+    // value (3 > completion 2) and records it, instead of omitting it while
+    // preserving every upstream byte at the proxy boundary.
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+
+    for fixture in [
+        include_str!("fixtures/nim-observations/buffered-basic.json"),
+        include_str!("fixtures/nim-observations/buffered-tools.json"),
+        include_str!("fixtures/nim-observations/streamed-basic.json"),
+        include_str!("fixtures/nim-observations/streamed-tools.json"),
+    ] {
+        let evidence: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let body = evidence["body"].as_str().unwrap().to_owned();
+        let content_type = evidence["content_type"].as_str().unwrap().to_owned();
+        let stream = evidence["transport"] == "sse";
+        mock.state.push(Behavior::ExactResponse {
+            content_type: content_type.clone(),
+            body: body.clone(),
+        });
+        let response = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body(evidence["case"].as_str().unwrap(), stream))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            evidence["status"].as_u64().unwrap() as u16
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            content_type
+        );
+        // Streaming already has a fixed local connection frame; the fixture
+        // bytes must follow it unchanged. Buffered responses are pure relay.
+        let expected_proxy_bytes = if stream {
+            format!(": connected\n\n{body}")
+        } else {
+            body.clone()
+        };
+        assert_eq!(
+            response.bytes().await.unwrap().as_ref(),
+            expected_proxy_bytes.as_bytes(),
+            "observation must preserve the literal {} bytes in the established proxy frame",
+            evidence["case"].as_str().unwrap()
+        );
+    }
+
+    let invalid_reasoning = r#"{"choices":[{"index":0,"message":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"completion_tokens_details":{"reasoning_tokens":3}}}"#;
+    mock.state.push(Behavior::ExactResponse {
+        content_type: "application/json".to_owned(),
+        body: invalid_reasoning.to_owned(),
+    });
+
+    let response = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("observation byte boundary", false))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "observation must not change status");
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        "application/json",
+        "observation must not change content type"
+    );
+    assert_eq!(
+        response.bytes().await.unwrap().as_ref(),
+        invalid_reasoning.as_bytes(),
+        "observation must relay the exact upstream bytes"
+    );
+
+    assert!(
+        !metrics(&proxy)
+            .await
+            .lines()
+            .any(|line| line.starts_with("nimproxy_reasoning_tokens_total{")),
+        "invalid reasoning must be omitted instead of accepted by the old side-band reader"
+    );
+}
+
+#[tokio::test]
 async fn usage_injection_asks_for_usage_and_backs_off_on_rejection() {
     // Default: stream_options injected.
     let mock = start_mock().await;
@@ -719,6 +2795,278 @@ async fn metrics_report_traffic_tokens_and_affinity() {
         "exact usage counted: {metrics}"
     );
     assert!(metrics.contains("nimproxy_affinity_total"));
+}
+
+#[tokio::test]
+async fn dashboard_observation_quality_is_honest() {
+    // Mutation caught: the proxy omits `nimproxy_usage_observations_total`,
+    // does not record the terminal disconnected-stream result, or exposes a
+    // request/model/client/error label instead of the closed field/result pair.
+    let mock = start_mock().await;
+    let proxy = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            stream_idle_secs: 1,
+            strict_passthrough: true,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+    let cookie = login(&proxy).await;
+
+    // A successful buffered response makes all five usage fields measured,
+    // including a measured zero. This is a distinct finalization path from
+    // the ordinary streamed response below.
+    mock.state.push(Behavior::ExactResponse {
+        content_type: "application/json".into(),
+        body: r#"{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":2,"total_tokens":2,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":1}}}"#.into(),
+    });
+    client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("buffered-measured", false))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    // Measured: prompt, completion, and reasoning arrive in the ordinary
+    // completed stream. Total and cached are absent.
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("measured", true))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    // Unavailable: a valid buffered response carries no usage object.
+    mock.state.push(Behavior::ExactResponse {
+        content_type: "application/json".into(),
+        body: r#"{"choices":[]}"#.into(),
+    });
+    client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("unavailable", false))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    // Estimated: one successful nonterminal SSE event has no measured usage.
+    mock.state.push(Behavior::ExactResponse {
+        content_type: "text/event-stream".into(),
+        body:
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}]}\n\ndata: [DONE]\n\n"
+                .into(),
+    });
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("estimated", true))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    // Invalid: a present non-object usage value invalidates exactly the five
+    // bounded usage fields without turning any of them into zero.
+    mock.state.push(Behavior::ExactResponse {
+        content_type: "application/json".into(),
+        body: r#"{"choices":[],"usage":[]}"#.into(),
+    });
+    client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("invalid", false))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    // Final accounting must also happen when the downstream disconnects after
+    // its first streamed chunk, not only on the completed-stream path.
+    mock.state.push(Behavior::Hang);
+    let mut disconnected = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("disconnect", true))
+        .send()
+        .await
+        .unwrap();
+    assert!(disconnected.chunk().await.unwrap().is_some());
+    drop(disconnected);
+    let disconnect_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let request_rows = metrics(&proxy).await;
+        if request_rows.lines().any(|line| {
+            line == r#"nimproxy_requests_total{client="local",model="mock/model-a",path="/v1/chat/completions",status="disconnect"} 1"#
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < disconnect_deadline,
+            "disconnect never finalized in request metrics: {request_rows}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // The idle timeout finalizes a successfully opened but stalled upstream
+    // stream as unavailable rather than leaving its observations unrecorded.
+    mock.state.push(Behavior::Hang);
+    let stalled = client()
+        .post(proxy.url("/v1/chat/completions"))
+        .json(&chat_body("idle-stall", true))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        read_sse(stalled).await.contains("stalled"),
+        "idle-stalled upstream stream must return a terminal proxy error"
+    );
+
+    // A nominal completed response with an unterminated final SSE event is
+    // still a truncated observation, not measured or estimated usage.
+    mock.state.push(Behavior::ExactResponse {
+        content_type: "text/event-stream".into(),
+        body: "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}"
+            .into(),
+    });
+    read_sse(
+        client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body("unterminated", true))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    let exposition = metrics(&proxy).await;
+    assert_eq!(
+        exposition
+            .lines()
+            .filter(|line| line.starts_with("# HELP nimproxy_usage_observations_total"))
+            .collect::<Vec<_>>(),
+        vec!["# HELP nimproxy_usage_observations_total Final classified upstream usage observations by field and result."],
+        "usage observation HELP contract is exact"
+    );
+    assert_eq!(
+        exposition
+            .lines()
+            .filter(|line| line.starts_with("# TYPE nimproxy_usage_observations_total"))
+            .collect::<Vec<_>>(),
+        vec!["# TYPE nimproxy_usage_observations_total counter"],
+        "usage observation TYPE contract is exact"
+    );
+    assert_eq!(
+        usage_observation_counter_lines(&exposition),
+        BTreeSet::from([
+            r#"nimproxy_usage_observations_total{field="prompt_tokens",result="measured"} 2"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="prompt_tokens",result="unavailable"} 5"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="prompt_tokens",result="invalid"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="completion_tokens",result="measured"} 2"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="completion_tokens",result="estimated"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="completion_tokens",result="unavailable"} 4"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="completion_tokens",result="invalid"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="total_tokens",result="measured"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="total_tokens",result="unavailable"} 6"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="total_tokens",result="invalid"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="cached_tokens",result="measured"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="cached_tokens",result="unavailable"} 6"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="cached_tokens",result="invalid"} 1"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="reasoning_tokens",result="measured"} 2"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="reasoning_tokens",result="unavailable"} 5"#.to_owned(),
+            r#"nimproxy_usage_observations_total{field="reasoning_tokens",result="invalid"} 1"#.to_owned(),
+        ]),
+        "every finalized success/disconnect/stall/unterminated path has exactly one of the closed five-field results"
+    );
+
+    // The existing typed dashboard payload carries registry series directly;
+    // no observation-availability API field is added for this UI state.
+    let now: serde_json::Value = client()
+        .get(proxy.url("/api/dashboard/now"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(now.get("observation_availability").is_none());
+    assert!(
+        now["metrics"].as_array().unwrap().iter().any(|metric| {
+            metric["metric"] == "nimproxy_usage_observations_total"
+                && metric["labels"]
+                    == serde_json::json!({"field":"completion_tokens","result":"estimated"})
+                && metric["value"] == 1.0
+        }),
+        "dashboard must consume the existing metrics payload, not an invented API field: {now}"
+    );
+
+    // A failed final response is excluded entirely: it must not synthesize an
+    // observation result merely because the request reached the proxy.
+    let no_success_mock = start_mock().await;
+    let no_success_proxy = start_proxy_with(
+        &no_success_mock.url,
+        StoreOpts {
+            strict_passthrough: true,
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+    no_success_mock.state.push(Behavior::BadRequest);
+    assert_eq!(
+        client()
+            .post(no_success_proxy.url("/v1/chat/completions"))
+            .json(&chat_body("failed", false))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    assert!(
+        usage_observation_counter_lines(&metrics(&no_success_proxy).await).is_empty(),
+        "non-successful responses are excluded from finalized observations"
+    );
+
+    // The pre-observation retry response is likewise excluded; only its final
+    // successful attempt leaves the five literal final results.
+    let retry_mock = start_mock().await;
+    let retry_proxy = start_proxy(&retry_mock.url, &[]).await;
+    retry_mock.state.push(Behavior::RateLimited(0));
+    retry_mock.state.push(Behavior::Ok);
+    read_sse(
+        client()
+            .post(retry_proxy.url("/v1/chat/completions"))
+            .json(&chat_body("retry", true))
+            .send()
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        usage_observation_counter_lines(&metrics(&retry_proxy).await),
+        BTreeSet::from([
+            r#"nimproxy_usage_observations_total{field="prompt_tokens",result="measured"} 1"#
+                .to_owned(),
+            r#"nimproxy_usage_observations_total{field="completion_tokens",result="measured"} 1"#
+                .to_owned(),
+            r#"nimproxy_usage_observations_total{field="total_tokens",result="unavailable"} 1"#
+                .to_owned(),
+            r#"nimproxy_usage_observations_total{field="cached_tokens",result="unavailable"} 1"#
+                .to_owned(),
+            r#"nimproxy_usage_observations_total{field="reasoning_tokens",result="measured"} 1"#
+                .to_owned(),
+        ]),
+        "pre-observation retry responses do not add observation counters"
+    );
 }
 
 #[tokio::test]
@@ -926,11 +3274,29 @@ async fn login_handles_malformed_urlencoded_without_panic() {
         .unwrap();
     // No panic / connection reset: a clean 401 login page with the error.
     assert_eq!(resp.status(), 401);
-    assert!(resp
-        .text()
+    let html = resp.text().await.unwrap();
+    assert!(html.contains(r#"data-error-code="invalid_credentials""#));
+    let login_js = client()
+        .get(proxy.url("/assets/public/login.js"))
+        .send()
         .await
         .unwrap()
-        .contains("Incorrect username or password"));
+        .text()
+        .await
+        .unwrap();
+    assert!(login_js.contains("login.error.invalid_credentials"));
+    let catalog: serde_json::Value = client()
+        .get(proxy.url("/assets/public/locales/en-US.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        catalog["messages"]["login.error.invalid_credentials"],
+        "Incorrect username or password."
+    );
 }
 
 /// Repeated failed logins trip the throttle: a burst past the failure cap
@@ -1047,9 +3413,9 @@ async fn overloaded_requests_are_shed_with_503() {
 }
 
 /// An unreachable upstream exercises the connection-error arm: the lane is
-/// benched with status "connect" and the request fails fast at the deadline.
+/// put in cooldown with status "connect" and the request fails fast at the deadline.
 #[tokio::test]
-async fn upstream_connection_error_is_benched() {
+async fn upstream_connection_error_enters_cooldown() {
     // Nothing listens on port 1 → every connect attempt fails.
     let proxy = start_proxy_with(
         "http://127.0.0.1:1",
@@ -1071,8 +3437,8 @@ async fn upstream_connection_error_is_benched() {
 
     let metrics = metrics(&proxy).await;
     assert!(
-        metrics.contains(r#"nimproxy_lane_benched_total{lane="0",status="connect"}"#),
-        "connection error benched the lane: {metrics}"
+        metrics.contains(r#"nimproxy_lane_cooldown_total{lane="0",status="connect"}"#),
+        "connection error put the lane in cooldown: {metrics}"
     );
 }
 
@@ -1091,9 +3457,10 @@ async fn history_records_snapshots_and_survives_restart() {
     assert_eq!(r.status(), 200);
     tokio::time::sleep(Duration::from_millis(2500)).await;
 
-    // Snapshots land on disk at DATA_DIR/history.jsonl (harness-managed dir).
-    let jsonl = proxy.data_dir.join("history.jsonl");
-    let raw = std::fs::read_to_string(&jsonl).expect("history.jsonl written");
+    // Canonical records land at the separate v1 path; experimental history is
+    // never written or read by the new runtime.
+    let jsonl = proxy.data_dir.join("history-v1.jsonl");
+    let raw = std::fs::read_to_string(&jsonl).expect("history-v1.jsonl written");
     let lines: Vec<&str> = raw.lines().filter(|l| !l.is_empty()).collect();
     assert!(lines.len() >= 2, "sampler ran: {} snapshots", lines.len());
     let records: Vec<serde_json::Value> = lines
@@ -1106,18 +3473,19 @@ async fn history_records_snapshots_and_survives_restart() {
     );
     assert!(
         records.iter().any(|value| {
-            value["v"] == 2
-                && value["boot"].is_string()
+            value["format"] == "nimproxy-history"
+                && value["v"] == 1
+                && value["boot_id"].is_string()
                 && value["capacity"]["capacity_rpm"] == 120
-                && value["m"]
-                    .as_str()
-                    .is_some_and(|metrics| metrics.contains("nimproxy"))
+                && value["state"]
+                    .as_array()
+                    .is_some_and(|state| !state.is_empty())
         }),
-        "v2 snapshots carry metrics and contemporaneous capacity: {raw}"
+        "canonical samples carry normalized metrics and contemporaneous capacity: {raw}"
     );
     let before = records
         .iter()
-        .filter(|value| value["m"].is_string())
+        .filter(|value| value["kind"] == "sample")
         .count();
 
     // Restart on the SAME data dir: history reloads into the normalized index
@@ -1180,6 +3548,159 @@ async fn dashboard_history_combines_process_epochs() {
 }
 
 #[tokio::test]
+async fn dashboard_history_reports_completeness() {
+    let mock = start_mock().await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let record = |kind: &str, timestamp: u64, boot_id: &str, state: &str| {
+        format!(
+            "{{\"format\":\"nimproxy-history\",\"v\":1,\"kind\":\"{kind}\",\"timestamp\":{timestamp},\"boot_id\":\"{boot_id}\",\"capacity\":{{\"capacity_rpm\":80,\"enabled_keys\":2,\"key_rpms\":[40,40]}}{state}}}\n"
+        )
+    };
+    let sample = |timestamp, boot_id, value| {
+        record(
+            "sample",
+            timestamp,
+            boot_id,
+            &format!(
+                ",\"state\":[{{\"kind\":\"counter\",\"metric\":\"nimproxy_requests_total\",\"labels\":{{\"client\":\"synthetic-client\"}},\"value\":{value}}}]"
+            ),
+        )
+    };
+    let configured_dir = |dir: &std::path::Path| {
+        std::fs::write(
+            dir.join("config.json"),
+            serde_json::to_vec_pretty(&StoreOpts::default().json(&mock.url)).unwrap(),
+        )
+        .unwrap();
+    };
+    let assert_wire_order = |body: &str, object: &str, keys: &[&str]| {
+        let prefix = format!("\"{object}\":{{");
+        let payload = body
+            .split_once(&prefix)
+            .map(|(_, payload)| payload)
+            .unwrap_or("");
+        let positions: Vec<_> = keys
+            .iter()
+            .map(|key| payload.find(&format!("\"{key}\":")))
+            .collect();
+        assert!(
+            positions.iter().all(Option::is_some),
+            "{object} lacks locked wire keys {keys:?}: {body}"
+        );
+        let positions: Vec<_> = positions.into_iter().flatten().collect();
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{object} keys are not in locked ASCII wire order: {body}"
+        );
+    };
+
+    let data_dir = scratch_data_dir();
+    configured_dir(&data_dir);
+    let valid_history = format!(
+        "{}{}",
+        record("boot", now - 3, "boot-a", ""),
+        sample(now - 2, "boot-a", 2.0),
+    );
+    std::fs::write(data_dir.join("history-v1.jsonl"), valid_history).unwrap();
+    let proxy = start_proxy_in(data_dir, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+    let cookie = login(&proxy).await;
+    let response = client()
+        .get(proxy.url(&format!(
+            "/api/dashboard?from={}&to={}&points=1000",
+            now - 3,
+            now - 1,
+        )))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let raw = response.text().await.unwrap();
+    assert_wire_order(
+        &raw,
+        "window",
+        &[
+            "available_from",
+            "available_to",
+            "complete",
+            "default_window_days",
+            "effective_from",
+            "effective_to",
+            "following_now",
+            "requested_from",
+            "requested_to",
+            "retention_days",
+        ],
+    );
+    assert_wire_order(
+        &raw,
+        "diagnostics",
+        &[
+            "excluded_epochs",
+            "excluded_records",
+            "normalized_series",
+            "skipped_metric_lines",
+            "valid_checkpoints",
+            "valid_samples",
+        ],
+    );
+    let range: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(range["window"]["complete"], true, "valid epoch is complete");
+    assert_eq!(
+        range["diagnostics"],
+        serde_json::json!({
+            "excluded_epochs": 0,
+            "excluded_records": 0,
+            "normalized_series": 1,
+            "skipped_metric_lines": 0,
+            "valid_checkpoints": 0,
+            "valid_samples": 1,
+        }),
+        "valid stream diagnostics are exact"
+    );
+
+    let damaged_dir = scratch_data_dir();
+    configured_dir(&damaged_dir);
+    let damaged_history = format!(
+        "{}{}{{not-json}}\n{}{}",
+        record("boot", now - 7, "boot-a", ""),
+        sample(now - 6, "boot-a", 2.0),
+        record("boot", now - 4, "boot-b", ""),
+        sample(now - 3, "boot-b", 7.0),
+    );
+    std::fs::write(damaged_dir.join("history-v1.jsonl"), damaged_history).unwrap();
+    let recovered = start_proxy_in(damaged_dir, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+    let recovered_cookie = login(&recovered).await;
+    let recovered_range =
+        dashboard_range(&recovered, &recovered_cookie, now - 7, now - 2, 1000).await;
+    assert_eq!(recovered_range["window"]["complete"], false);
+    assert_eq!(
+        recovered_range["diagnostics"],
+        serde_json::json!({
+            "excluded_epochs": 1,
+            "excluded_records": 3,
+            "normalized_series": 1,
+            "skipped_metric_lines": 0,
+            "valid_checkpoints": 0,
+            "valid_samples": 1,
+        })
+    );
+    let recovered_total = recovered_range["totals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| {
+            value["metric"] == "nimproxy_requests_total"
+                && value["labels"]["client"] == "synthetic-client"
+        })
+        .and_then(|value| value["value"].as_f64());
+    assert_eq!(recovered_total, Some(7.0));
+}
+
+#[tokio::test]
 async fn dashboard_tail_rolls_into_persisted_history_once() {
     let mock = start_mock().await;
     let proxy = start_proxy(&mock.url, &[("HISTORY_SAMPLE_SECS", "2")]).await;
@@ -1224,7 +3745,7 @@ async fn dashboard_tail_rolls_into_persisted_history_once() {
 }
 
 #[tokio::test]
-async fn legacy_history_infers_counter_reset() {
+async fn experimental_legacy_history_is_ignored_without_mutation() {
     let mock = start_mock().await;
     let data_dir = scratch_data_dir();
     std::fs::write(
@@ -1250,15 +3771,30 @@ async fn legacy_history_infers_counter_reset() {
     )
     .unwrap();
 
+    let legacy_before = std::fs::read(data_dir.join("history.jsonl")).unwrap();
     let proxy = start_proxy_in(data_dir, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
     let cookie = login(&proxy).await;
-    let range = dashboard_range(&proxy, &cookie, 1, 4_102_444_800, 1000).await;
+    let range = dashboard_range(&proxy, &cookie, 1, now.saturating_sub(1), 1000).await;
     assert_eq!(
         successful_chat_requests(&range["totals"]),
-        19.0,
-        "legacy epochs contribute 10 + 5 + 4 requests: {range}"
+        0.0,
+        "legacy values are not imported into canonical history: {range}"
     );
-    assert_eq!(range["diagnostics"]["legacy_resets_inferred"], 1);
+    assert_eq!(
+        range["diagnostics"],
+        serde_json::json!({
+            "excluded_epochs": 0,
+            "excluded_records": 0,
+            "normalized_series": 0,
+            "skipped_metric_lines": 0,
+            "valid_checkpoints": 0,
+            "valid_samples": 0,
+        })
+    );
+    assert_eq!(
+        std::fs::read(proxy.data_dir.join("history.jsonl")).unwrap(),
+        legacy_before
+    );
 }
 
 #[tokio::test]
@@ -1435,7 +3971,7 @@ async fn dashboard_now_contract_uses_current_pool_config_and_registry() {
 }
 
 #[tokio::test]
-async fn retention_change_prunes_queries_and_disk() {
+async fn legacy_retention_fixture_is_not_migrated_or_compacted() {
     let mock = start_mock().await;
     let data_dir = scratch_data_dir();
     std::fs::write(
@@ -1466,6 +4002,7 @@ async fn retention_change_prunes_queries_and_disk() {
     )
     .unwrap();
 
+    let legacy_before = std::fs::read(data_dir.join("history.jsonl")).unwrap();
     let proxy = start_proxy_in(data_dir, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
     let cookie = login(&proxy).await;
     let (status, body) = post_json(
@@ -1481,49 +4018,12 @@ async fn retention_change_prunes_queries_and_disk() {
     .await;
     assert_eq!(status, 200, "{body}");
 
-    let query = |proxy: &support::Proxy, cookie: &str| {
-        let url = proxy.url("/api/dashboard?from=1&to=4102444800&points=100");
-        let cookie = cookie.to_owned();
-        async move {
-            client()
-                .get(url)
-                .header("cookie", cookie)
-                .send()
-                .await
-                .unwrap()
-                .json::<serde_json::Value>()
-                .await
-                .unwrap()
-        }
-    };
-    let metric = |body: &serde_json::Value| {
-        body["totals"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|row| row["metric"] == "fixture_requests_total")
-            .and_then(|row| row["value"].as_f64())
-            .unwrap()
-    };
-
-    let pruned = query(&proxy, &cookie).await;
-    assert_eq!(pruned["window"]["available_from"], retained_one);
-    assert_eq!(metric(&pruned), 20.0);
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while api_config(&proxy, &cookie).await["server"]["history"]["compaction_pending"] == true {
-        assert!(
-            Instant::now() < deadline,
-            "history compaction did not finish"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-
     let proxy = restart(proxy, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
-    let cookie = login(&proxy).await;
-    let reloaded = query(&proxy, &cookie).await;
-    assert_eq!(reloaded["window"]["available_from"], retained_one);
-    assert_eq!(metric(&reloaded), 20.0);
+    assert_eq!(
+        std::fs::read(proxy.data_dir.join("history.jsonl")).unwrap(),
+        legacy_before,
+        "Task 11 neither imports nor compacts experimental history"
+    );
 }
 
 #[tokio::test]
@@ -1549,12 +4049,21 @@ async fn dashboard_and_config_are_served_to_authenticated_users() {
     assert_eq!(dash.status(), 200);
     let html = dash.text().await.unwrap();
     assert!(html.contains("NIM"));
-    assert!(html.contains("/api/dashboard/now"));
     assert!(html.contains("data-range=\"default\""));
     assert!(html.contains("data-range=\"all-retained\""));
-    assert!(!html.contains("fetch('/metrics')"));
-    assert!(!html.contains("/api/history?"));
-    assert!(!html.contains("/dash/config.json"));
+    let dashboard_js = client()
+        .get(proxy.url("/assets/operator/dashboard.js"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(dashboard_js.contains("/api/dashboard/now"));
+    assert!(!dashboard_js.contains("fetch('/metrics')"));
+    assert!(!dashboard_js.contains("/api/history?"));
+    assert!(!dashboard_js.contains("/dash/config.json"));
 
     let now: serde_json::Value = client()
         .get(proxy.url("/api/dashboard/now"))
@@ -1589,22 +4098,35 @@ async fn dashboard_history_settings_markup() {
     let proxy = start_proxy(&mock.url, &[]).await;
     let cookie = login(&proxy).await;
 
-    let html = client()
-        .get(proxy.url("/"))
-        .header("cookie", cookie)
+    let settings_js = client()
+        .get(proxy.url("/assets/operator/settings.js"))
+        .header("cookie", &cookie)
         .send()
         .await
         .unwrap()
         .text()
         .await
         .unwrap();
-    assert!(html.contains("History &amp; dashboard"));
-    assert!(html.contains("sv-default-days"));
-    assert!(html.contains("sv-retention-days"));
-    assert!(html.contains("sv-slo"));
-    assert!(html.contains("/api/settings/history"));
-    assert!(!html.contains("Pricing &amp; history"));
-    assert!(!html.contains("const SLO = 0.999"));
+    let catalog: serde_json::Value = client()
+        .get(proxy.url("/assets/operator/locales/en-US.json"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(settings_js.contains(r#"data-i18n="settings.server.history.heading""#));
+    assert_eq!(
+        catalog["messages"]["settings.server.history.heading"],
+        "History & dashboard"
+    );
+    assert!(settings_js.contains("sv-default-days"));
+    assert!(settings_js.contains("sv-retention-days"));
+    assert!(settings_js.contains("sv-slo"));
+    assert!(settings_js.contains("/api/settings/history"));
+    assert!(!settings_js.contains("Pricing &amp; history"));
+    assert!(!settings_js.contains("const SLO = 0.999"));
 }
 
 #[tokio::test]
@@ -1613,22 +4135,32 @@ async fn dashboard_range_state_guards_markup() {
     let proxy = start_proxy(&mock.url, &[]).await;
     let cookie = login(&proxy).await;
 
-    let html = client()
-        .get(proxy.url("/"))
-        .header("cookie", cookie)
+    let shared_js = client()
+        .get(proxy.url("/assets/operator/shared.js"))
+        .header("cookie", &cookie)
         .send()
         .await
         .unwrap()
         .text()
         .await
         .unwrap();
-    assert!(html.contains("let rangeRequestGeneration = 0"));
-    assert!(html.contains("const generation = ++rangeRequestGeneration"));
-    assert!(html.contains("generation !== rangeRequestGeneration"));
-    assert!(!html.contains("mode.kind === 'fixed' && historyChanged"));
-    assert!(html.contains("let frozenHasTraffic = false"));
+    let dashboard_js = client()
+        .get(proxy.url("/assets/operator/dashboard.js"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let scripts = shared_js + &dashboard_js;
+    assert!(scripts.contains("let rangeRequestGeneration = 0"));
+    assert!(scripts.contains("const generation = ++rangeRequestGeneration"));
+    assert!(scripts.contains("generation !== rangeRequestGeneration"));
+    assert!(!scripts.contains("mode.kind === 'fixed' && historyChanged"));
+    assert!(scripts.contains("let frozenHasTraffic = false"));
     assert!(
-        html.contains("if (mode.kind !== 'following' || !rangeData || !samples.length) return;")
+        scripts.contains("if (mode.kind !== 'following' || !rangeData || !samples.length) return;")
     );
 }
 
@@ -1638,44 +4170,76 @@ async fn dashboard_pause_traffic_is_derived_from_rendered_samples() {
     let proxy = start_proxy(&mock.url, &[]).await;
     let cookie = login(&proxy).await;
 
-    let html = client()
-        .get(proxy.url("/"))
-        .header("cookie", cookie)
+    let shared_js = client()
+        .get(proxy.url("/assets/operator/shared.js"))
+        .header("cookie", &cookie)
         .send()
         .await
         .unwrap()
         .text()
         .await
         .unwrap();
-    assert!(html.contains("function hasSelectedRequestTraffic(selectedSamples)"));
-    assert!(html.contains("row => row.name === 'nimproxy_requests_total' && +row.value > 0"));
-    assert!(html.contains("frozenHasTraffic = hasSelectedRequestTraffic(samples);"));
-    assert!(html.contains(
+    let dashboard_js = client()
+        .get(proxy.url("/assets/operator/dashboard.js"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let scripts = shared_js + &dashboard_js;
+    assert!(scripts.contains("function hasSelectedRequestTraffic(selectedSamples)"));
+    assert!(scripts.contains("row => row.name === 'nimproxy_requests_total' && +row.value > 0"));
+    assert!(scripts.contains("frozenHasTraffic = hasSelectedRequestTraffic(samples);"));
+    assert!(scripts.contains(
         "const hasTraffic = mode.paused ? frozenHasTraffic : hasSelectedRequestTraffic(samples);"
     ));
-    assert!(!html.contains("const acceptedTail = nowData?.tail"));
+    assert!(!scripts.contains("const acceptedTail = nowData?.tail"));
 }
 
 #[tokio::test]
-async fn dashboard_historical_provisioning_has_no_guessed_lane_size() {
+async fn dashboard_capacity_history_has_no_guessed_key_size() {
     let mock = start_mock().await;
     let proxy = start_proxy(&mock.url, &[]).await;
     let cookie = login(&proxy).await;
 
-    let html = client()
-        .get(proxy.url("/"))
-        .header("cookie", cookie)
+    let catalog: serde_json::Value = client()
+        .get(proxy.url("/assets/operator/locales/en-US.json"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        catalog["messages"]["dashboard.capacity.history.shortfall"],
+        "Peak shortfall · rpm"
+    );
+    assert!(
+        catalog["messages"]["dashboard.capacity.history.utilization"]
+            .as_str()
+            .unwrap()
+            .contains("of capacity at the time")
+    );
+    assert!(
+        catalog["messages"]["dashboard.capacity.history.no_data.other"]
+            .as_str()
+            .unwrap()
+            .contains("with no capacity data")
+    );
+    let dashboard_js = client()
+        .get(proxy.url("/assets/operator/dashboard.js"))
+        .header("cookie", &cookie)
         .send()
         .await
         .unwrap()
         .text()
         .await
         .unwrap();
-    assert!(html.contains("rpm short at peak"));
-    assert!(html.contains("vs contemporaneous capacity"));
-    assert!(html.contains("legacy interval"));
-    assert!(!html.contains("const moreKeys"));
-    assert!(!html.contains("MORE KEY"));
+    assert!(!dashboard_js.contains("const moreKeys"));
+    assert!(!dashboard_js.contains("MORE KEY"));
 }
 
 #[tokio::test]
@@ -1788,6 +4352,256 @@ async fn corrupt_or_future_store_refuses_to_start() {
     expect_refuses_to_start(future).await;
 }
 
+/// Rejected canonical history degrades to in-memory history without changing
+/// the configured store or canonical bytes.
+#[tokio::test]
+async fn history_startup_degrades_to_memory_without_mutating_canonical() {
+    let mock = start_mock().await;
+    let canonical_data_dir = scratch_data_dir();
+    std::fs::write(
+        canonical_data_dir.join("config.json"),
+        serde_json::to_vec_pretty(&StoreOpts::default().json(&mock.url)).unwrap(),
+    )
+    .unwrap();
+    let canonical_proxy =
+        start_proxy_in(canonical_data_dir, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+    let canonical_cookie = login(&canonical_proxy).await;
+    let canonical_config = api_config(&canonical_proxy, &canonical_cookie).await;
+    assert_eq!(
+        canonical_config["server"]["history"]["persistence"], "ok",
+        "history-startup:canonical: canonical persistence is healthy"
+    );
+    assert!(
+        metrics(&canonical_proxy)
+            .await
+            .lines()
+            .any(|line| line == "nimproxy_history_persistence_degraded 0"),
+        "history-startup:canonical: canonical persistence gauge is zero"
+    );
+    canonical_proxy.terminate();
+    for (name, contents) in [
+        ("empty", b"".as_slice()),
+        (
+            "future",
+            b"{\"format\":\"nimproxy-history\",\"v\":2,\"kind\":\"boot\",\"timestamp\":1,\"boot_id\":\"future\",\"capacity\":{\"capacity_rpm\":80,\"enabled_keys\":2,\"key_rpms\":[40,40]}}\n",
+        ),
+    ] {
+        let data_dir = scratch_data_dir();
+        std::fs::write(
+            data_dir.join("config.json"),
+            serde_json::to_vec_pretty(&StoreOpts::default().json(&mock.url)).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(data_dir.join("history-v1.jsonl"), contents).unwrap();
+
+        let config_before = std::fs::read(data_dir.join("config.json")).unwrap();
+        let history_before = std::fs::read(data_dir.join("history-v1.jsonl")).unwrap();
+        let proxy = start_proxy_in(data_dir, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+        let cookie = login(&proxy).await;
+        let config = api_config(&proxy, &cookie).await;
+        assert_eq!(
+            config["server"]["history"]["persistence"],
+            "degraded",
+            "history-startup:{name}: rejected canonical persistence is degraded"
+        );
+        assert!(
+            metrics(&proxy)
+                .await
+                .lines()
+                .any(|line| line == "nimproxy_history_persistence_degraded 1"),
+            "history-startup:{name}: rejected canonical persistence gauge is one"
+        );
+        let response = client()
+            .post(proxy.url("/v1/chat/completions"))
+            .json(&chat_body(&format!("history startup {name}"), false))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200, "history-startup:{name}: /v1 remains available");
+        assert_eq!(
+            std::fs::read(proxy.data_dir.join("config.json")).unwrap(),
+            config_before,
+            "history-startup:{name}: config bytes remain unchanged"
+        );
+        assert_eq!(
+            std::fs::read(proxy.data_dir.join("history-v1.jsonl")).unwrap(),
+            history_before,
+            "history-startup:{name}: canonical bytes remain unchanged"
+        );
+        proxy.terminate();
+    }
+}
+
+/// `history.jsonl` is deliberately opaque upgrade-reset evidence. Startup
+/// emits one bounded path-and-size warning while leaving its bytes untouched.
+#[tokio::test]
+async fn legacy_history_is_warned_once_without_parsing_or_mutating_it() {
+    let mock = start_mock().await;
+    let data_dir = scratch_data_dir();
+    std::fs::write(
+        data_dir.join("config.json"),
+        serde_json::to_vec_pretty(&StoreOpts::default().json(&mock.url)).unwrap(),
+    )
+    .unwrap();
+    let legacy = data_dir.join("history.jsonl");
+    let legacy_bytes = b"not canonical and never parsed\n";
+    std::fs::write(&legacy, legacy_bytes).unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"))
+        .env_clear()
+        .current_dir(std::env::temp_dir())
+        .env("PORT", port.to_string())
+        .env("DATA_DIR", &data_dir)
+        .env("RUST_LOG", "nim_proxy=warn")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if client()
+            .get(format!("http://127.0.0.1:{port}/health"))
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success())
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "proxy did not become healthy");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    child.kill().unwrap();
+    let output = child.wait_with_output().unwrap();
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let legacy_display = legacy.display().to_string();
+    assert_eq!(output.matches(&legacy_display).count(), 1, "{output}");
+    assert!(output.contains(&legacy_bytes.len().to_string()), "{output}");
+    assert_eq!(std::fs::read(&legacy).unwrap(), legacy_bytes);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[tokio::test]
+async fn stale_canonical_temporaries_are_counted_once_without_inspection_or_deletion() {
+    let mock = start_mock().await;
+    let data_dir = scratch_data_dir();
+    std::fs::write(
+        data_dir.join("config.json"),
+        serde_json::to_vec_pretty(&StoreOpts::default().json(&mock.url)).unwrap(),
+    )
+    .unwrap();
+    let stale = data_dir.join("history-v1.jsonl.tmp-crash-evidence");
+    let stale_bytes = b"partial canonical temporary";
+    std::fs::write(&stale, stale_bytes).unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_nim-proxy"))
+        .env_clear()
+        .current_dir(std::env::temp_dir())
+        .env("PORT", port.to_string())
+        .env("DATA_DIR", &data_dir)
+        .env("RUST_LOG", "nim_proxy=warn")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if client()
+            .get(format!("http://127.0.0.1:{port}/health"))
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success())
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "proxy did not become healthy");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    child.kill().unwrap();
+    let output = child.wait_with_output().unwrap();
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output
+            .matches("stale canonical history temporaries")
+            .count(),
+        1,
+        "{output}"
+    );
+    assert!(!output.contains(&stale.display().to_string()), "{output}");
+    assert_eq!(std::fs::read(&stale).unwrap(), stale_bytes);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[tokio::test]
+async fn api_config_history_file_bytes_reports_canonical_history() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[("HISTORY_SAMPLE_SECS", "3600")]).await;
+    let cookie = login(&proxy).await;
+    let configured = api_config(&proxy, &cookie).await;
+    let canonical_bytes = std::fs::metadata(proxy.data_dir.join("history-v1.jsonl"))
+        .unwrap()
+        .len();
+    assert!(canonical_bytes > 0);
+    assert_eq!(
+        configured["server"]["history"]["file_bytes"],
+        canonical_bytes
+    );
+    assert!(!proxy.data_dir.join("history.jsonl").exists());
+}
+
+#[tokio::test]
+async fn invalid_noncanonical_and_uninstalled_durable_locales_refuse_to_start() {
+    let mock = start_mock().await;
+    for (scope, class, locale) in [
+        ("default", "invalid", "en_US"),
+        ("default", "noncanonical", "EN-us"),
+        ("default", "uninstalled", "fr-FR"),
+        ("user", "invalid", "en_US"),
+        ("user", "noncanonical", "EN-us"),
+        ("user", "uninstalled", "fr-FR"),
+    ] {
+        let data_dir = scratch_data_dir();
+        let mut store = StoreOpts::default().json(&mock.url);
+        match scope {
+            "default" => {
+                store
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("default_locale".into(), serde_json::json!(locale));
+            }
+            "user" => {
+                store["users"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("locale".into(), serde_json::json!(locale));
+            }
+            _ => unreachable!(),
+        }
+        std::fs::write(
+            data_dir.join("config.json"),
+            serde_json::to_vec_pretty(&store).unwrap(),
+        )
+        .unwrap();
+        expect_refuses_to_start(data_dir).await;
+        eprintln!("locale-store:startup:{scope}:{class}: refused {locale}");
+    }
+}
+
 /// The wizard's single POST claims the proxy: creates the superuser, writes a
 /// 0600 store, mints a session, closes /setup (404), and opens /v1.
 #[tokio::test]
@@ -1812,6 +4626,17 @@ async fn setup_wizard_claims_the_proxy() {
         & 0o777;
     assert_eq!(mode, 0o600, "config store must be 0600");
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let history_mode = std::fs::metadata(proxy.data_dir.join("history-v1.jsonl"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(history_mode, 0o600, "canonical history file must be 0600");
+    }
+
     // The wizard is gone once the proxy is claimed.
     assert_eq!(
         client()
@@ -1828,7 +4653,11 @@ async fn setup_wizard_claims_the_proxy() {
         .send()
         .await
         .unwrap();
-    assert_eq!(post_setup.status(), 404, "POST /setup 404 after claim");
+    assert_eq!(
+        post_setup.status(),
+        409,
+        "POST /setup conflicts after claim"
+    );
     let post_validate = client()
         .post(proxy.url("/setup/validate-key"))
         .json(&serde_json::json!({"key": "k"}))
@@ -1837,8 +4666,8 @@ async fn setup_wizard_claims_the_proxy() {
         .unwrap();
     assert_eq!(
         post_validate.status(),
-        404,
-        "POST /setup/validate-key 404 after claim"
+        409,
+        "POST /setup/validate-key conflicts after claim"
     );
 
     // The /v1 setup gate has lifted: it no longer answers 503 setup_required.
@@ -1853,6 +4682,363 @@ async fn setup_wizard_claims_the_proxy() {
     assert_eq!(r.status(), 401, "keyed /v1 with no client key fails closed");
     let v: serde_json::Value = r.json().await.unwrap();
     assert_eq!(v["error"]["code"], "unauthorized");
+}
+
+/// Every rejection from the JSON control plane keeps the same typed envelope
+/// and leaves the durable config store untouched. Removing the narrow
+/// extractors or `/api` fallbacks makes one or more rows answer Axum's plain
+/// text defaults instead.
+#[tokio::test]
+async fn control_plane_rejections_are_typed() {
+    struct RejectionCase {
+        method: reqwest::Method,
+        path: &'static str,
+        content_type: Option<&'static str>,
+        body: &'static str,
+        status: reqwest::StatusCode,
+        code: &'static str,
+        message: &'static str,
+        oversized: bool,
+    }
+
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let cookie = login(&proxy).await;
+    let before = std::fs::read(proxy.data_dir.join("config.json")).unwrap();
+    let cases = [
+        RejectionCase {
+            method: reqwest::Method::POST,
+            path: "/api/settings/upstream",
+            content_type: Some("application/json"),
+            body: "{",
+            status: reqwest::StatusCode::BAD_REQUEST,
+            code: "invalid_json",
+            message: "invalid JSON",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::POST,
+            path: "/api/settings/upstream",
+            content_type: None,
+            body: r#"{"base_url":"http://example.invalid"}"#,
+            status: reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            code: "unsupported_media_type",
+            message: "Content-Type must be application/json",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::POST,
+            path: "/api/settings/upstream",
+            content_type: Some("text/plain"),
+            body: r#"{"base_url":"http://example.invalid"}"#,
+            status: reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            code: "unsupported_media_type",
+            message: "Content-Type must be application/json",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::POST,
+            path: "/api/settings/upstream",
+            content_type: Some("application/json"),
+            body: "",
+            status: reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+            code: "body_too_large",
+            message: "request body is too large",
+            oversized: true,
+        },
+        RejectionCase {
+            method: reqwest::Method::GET,
+            path: "/api/dashboard?from=not-a-timestamp",
+            content_type: None,
+            body: "",
+            status: reqwest::StatusCode::BAD_REQUEST,
+            code: "invalid_query",
+            message: "invalid query",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::GET,
+            path: "/api/not-a-route",
+            content_type: None,
+            body: "",
+            status: reqwest::StatusCode::NOT_FOUND,
+            code: "not_found",
+            message: "not found",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::PUT,
+            path: "/api/dashboard",
+            content_type: None,
+            body: "",
+            status: reqwest::StatusCode::METHOD_NOT_ALLOWED,
+            code: "method_not_allowed",
+            message: "method not allowed",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::POST,
+            path: "/setup",
+            content_type: Some("application/json"),
+            body: r#"{"username":"another","password":"long-enough-password"}"#,
+            status: reqwest::StatusCode::CONFLICT,
+            code: "setup_complete",
+            message: "setup is already complete",
+            oversized: false,
+        },
+        RejectionCase {
+            method: reqwest::Method::POST,
+            path: "/setup/validate-key",
+            content_type: Some("application/json"),
+            body: r#"{"key":"another"}"#,
+            status: reqwest::StatusCode::CONFLICT,
+            code: "setup_complete",
+            message: "setup is already complete",
+            oversized: false,
+        },
+    ];
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let body = if case.oversized {
+            "x".repeat(64 * 1024 * 1024 + 1)
+        } else {
+            case.body.to_owned()
+        };
+        let mut request = client()
+            .request(case.method.clone(), proxy.url(case.path))
+            .body(body);
+        if case.path.starts_with("/api/") {
+            request = request.header("cookie", &cookie);
+        }
+        if let Some(content_type) = case.content_type {
+            request = request.header("content-type", content_type);
+        }
+
+        let response = request.send().await.unwrap();
+        let mut errors = Vec::new();
+        if response.status() != case.status {
+            errors.push(format!("status {:?}", response.status()));
+        }
+        match response.headers().get(CONTENT_TYPE) {
+            Some(content_type) if content_type == "application/json" => {}
+            Some(content_type) => errors.push(format!("content-type {content_type:?}")),
+            None => errors.push("content-type missing".to_owned()),
+        }
+        let body = response.bytes().await.unwrap();
+        let expected = format!(
+            r#"{{"error":{{"code":"{}","message":"{}","type":"proxy_error"}}}}"#,
+            case.code, case.message
+        );
+        if body.as_ref() != expected.as_bytes() {
+            errors.push(format!("body {:?}", String::from_utf8_lossy(&body)));
+        }
+        if std::fs::read(proxy.data_dir.join("config.json")).unwrap() != before {
+            errors.push("config.json changed".to_owned());
+        }
+        if !errors.is_empty() {
+            failures.push(format!(
+                "{} {}: {}",
+                case.method,
+                case.path,
+                errors.join(", ")
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "rejection failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The raw-request setup handlers phase-check first, but while setup remains
+/// open their manual `ApiJson` call must preserve the typed extractor errors.
+#[tokio::test]
+async fn open_setup_posts_keep_typed_extractor_rejections() {
+    struct OpenCase {
+        content_type: Option<&'static str>,
+        body: &'static str,
+        status: reqwest::StatusCode,
+        code: &'static str,
+        message: &'static str,
+        oversized: bool,
+    }
+
+    let proxy = start_proxy_fresh().await;
+    let before = std::fs::read(proxy.data_dir.join("config.json")).ok();
+    let cases = [
+        OpenCase {
+            content_type: Some("application/json"),
+            body: "{",
+            status: reqwest::StatusCode::BAD_REQUEST,
+            code: "invalid_json",
+            message: "invalid JSON",
+            oversized: false,
+        },
+        OpenCase {
+            content_type: None,
+            body: r#"{"key":"k"}"#,
+            status: reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            code: "unsupported_media_type",
+            message: "Content-Type must be application/json",
+            oversized: false,
+        },
+        OpenCase {
+            content_type: Some("text/plain"),
+            body: r#"{"key":"k"}"#,
+            status: reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            code: "unsupported_media_type",
+            message: "Content-Type must be application/json",
+            oversized: false,
+        },
+        OpenCase {
+            content_type: Some("application/json"),
+            body: "",
+            status: reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+            code: "body_too_large",
+            message: "request body is too large",
+            oversized: true,
+        },
+    ];
+
+    for path in ["/setup", "/setup/validate-key"] {
+        for case in &cases {
+            let body = if case.oversized {
+                "x".repeat(64 * 1024 * 1024 + 1)
+            } else {
+                case.body.to_owned()
+            };
+            let mut request = client().post(proxy.url(path)).body(body);
+            if let Some(content_type) = case.content_type {
+                request = request.header(CONTENT_TYPE, content_type);
+            }
+            assert_exact_api_error(
+                request.send().await.unwrap(),
+                case.status,
+                case.code,
+                case.message,
+            )
+            .await;
+            assert_eq!(
+                std::fs::read(proxy.data_dir.join("config.json")).ok(),
+                before
+            );
+        }
+    }
+}
+
+/// An unknown `/api/*` path is still an operator-surface request: it must not
+/// disclose its typed fallback before the setup/session gate has run.
+#[tokio::test]
+async fn unknown_control_plane_paths_are_gated_before_fallback() {
+    let fresh = start_proxy_fresh().await;
+    let before_fresh = std::fs::read(fresh.data_dir.join("config.json")).ok();
+    assert_exact_api_error(
+        client()
+            .get(fresh.url("/api/not-a-route"))
+            .send()
+            .await
+            .unwrap(),
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        "setup_required",
+        "first-time setup has not been completed; open the dashboard to create the superuser",
+    )
+    .await;
+    assert_eq!(
+        std::fs::read(fresh.data_dir.join("config.json")).ok(),
+        before_fresh
+    );
+
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let before = std::fs::read(proxy.data_dir.join("config.json")).unwrap();
+    assert_exact_api_error(
+        client()
+            .get(proxy.url("/api/not-a-route"))
+            .send()
+            .await
+            .unwrap(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "unauthorized",
+        "authentication required (session cookie, or Authorization: Bearer <username>:<password>)",
+    )
+    .await;
+    assert_eq!(
+        std::fs::read(proxy.data_dir.join("config.json")).unwrap(),
+        before
+    );
+
+    let cookie = login(&proxy).await;
+    assert_exact_api_error(
+        client()
+            .get(proxy.url("/api/not-a-route"))
+            .header("cookie", cookie)
+            .send()
+            .await
+            .unwrap(),
+        reqwest::StatusCode::NOT_FOUND,
+        "not_found",
+        "not found",
+    )
+    .await;
+    assert_eq!(
+        std::fs::read(proxy.data_dir.join("config.json")).unwrap(),
+        before
+    );
+}
+
+/// Once claimed, setup POSTs reject before they inspect headers or buffer a
+/// body, so the closed phase always has one stable conflict result.
+#[tokio::test]
+async fn closed_setup_posts_win_before_body_rejections() {
+    struct ClosedCase {
+        content_type: Option<&'static str>,
+        body: &'static str,
+    }
+
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let before = std::fs::read(proxy.data_dir.join("config.json")).unwrap();
+    let cases = [
+        ClosedCase {
+            content_type: Some("application/json"),
+            body: "{",
+        },
+        ClosedCase {
+            content_type: None,
+            body: r#"{"key":"k"}"#,
+        },
+        ClosedCase {
+            content_type: Some("text/plain"),
+            body: r#"{"key":"k"}"#,
+        },
+    ];
+
+    for path in ["/setup", "/setup/validate-key"] {
+        for case in &cases {
+            let mut request = client().post(proxy.url(path)).body(case.body);
+            if let Some(content_type) = case.content_type {
+                request = request.header("content-type", content_type);
+            }
+            assert_exact_api_error(
+                request.send().await.unwrap(),
+                reqwest::StatusCode::CONFLICT,
+                "setup_complete",
+                "setup is already complete",
+            )
+            .await;
+            assert_eq!(
+                std::fs::read(proxy.data_dir.join("config.json")).unwrap(),
+                before
+            );
+        }
+        assert_closed_setup_rejects_oversized_body(&proxy, path).await;
+        assert_eq!(
+            std::fs::read(proxy.data_dir.join("config.json")).unwrap(),
+            before
+        );
+    }
 }
 
 /// The claim persists: after a restart on the same data dir, the created user
@@ -2155,12 +5341,360 @@ async fn dashboard_sends_security_headers() {
         csp.contains("connect-src 'self'"),
         "blocks cross-origin exfil"
     );
-    assert!(
-        csp.contains("font-src https://fonts.gstatic.com"),
-        "dashboard webfonts are allowed, and only from Google's font host"
+    assert_eq!(
+        csp,
+        "default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; \
+         connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     );
+    assert!(!csp.contains("unsafe-inline"));
+    assert!(!csp.contains("http:"));
+    assert!(!csp.contains("https:"));
     assert_eq!(h["x-content-type-options"], "nosniff");
     assert_eq!(h["x-frame-options"], "DENY");
+}
+
+#[derive(Clone, Copy, Debug)]
+enum PresentationActor {
+    BeforeSetup,
+    Anonymous,
+    Authenticated,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PresentationRoute {
+    content_type: Option<&'static str>,
+    path: &'static str,
+    statuses: [u16; 3],
+}
+
+#[tokio::test]
+async fn presentation_assets_are_gated() {
+    const CSP: &str = "default-src 'none'; img-src 'self' data:; style-src 'self'; \
+        script-src 'self'; connect-src 'self'; frame-ancestors 'none'; \
+        base-uri 'none'; form-action 'self'";
+    const PAGE_ROUTES: &[PresentationRoute] = &[
+        PresentationRoute {
+            content_type: Some("text/html; charset=utf-8"),
+            path: "/",
+            statuses: [302, 302, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/html; charset=utf-8"),
+            path: "/dash",
+            statuses: [302, 302, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/html; charset=utf-8"),
+            path: "/login",
+            statuses: [302, 200, 302],
+        },
+        PresentationRoute {
+            content_type: Some("text/html; charset=utf-8"),
+            path: "/setup",
+            statuses: [200, 404, 404],
+        },
+    ];
+    const PUBLIC_ASSETS: &[PresentationRoute] = &[
+        PresentationRoute {
+            content_type: Some("text/css; charset=utf-8"),
+            path: "/assets/public/public.css",
+            statuses: [200, 200, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/javascript; charset=utf-8"),
+            path: "/assets/public/setup.js",
+            statuses: [200, 200, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/javascript; charset=utf-8"),
+            path: "/assets/public/login.js",
+            statuses: [200, 200, 200],
+        },
+    ];
+    const OPERATOR_ASSETS: &[PresentationRoute] = &[
+        PresentationRoute {
+            content_type: Some("text/css; charset=utf-8"),
+            path: "/assets/operator/operator.css",
+            statuses: [503, 401, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/javascript; charset=utf-8"),
+            path: "/assets/operator/shared.js",
+            statuses: [503, 401, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/javascript; charset=utf-8"),
+            path: "/assets/operator/dashboard.js",
+            statuses: [503, 401, 200],
+        },
+        PresentationRoute {
+            content_type: Some("text/javascript; charset=utf-8"),
+            path: "/assets/operator/settings.js",
+            statuses: [503, 401, 200],
+        },
+    ];
+
+    let before_setup = start_proxy_fresh().await;
+    let mock = start_mock().await;
+    let configured = start_proxy_with(
+        &mock.url,
+        StoreOpts {
+            clients: vec![(
+                "presentation-private-client".into(),
+                "presentation-private-secret".into(),
+            )],
+            nim_keys: vec![("presentation-private-nim-key".into(), 40)],
+            ..Default::default()
+        },
+        &[],
+    )
+    .await;
+    let cookie = login(&configured).await;
+    let actors = [
+        (PresentationActor::BeforeSetup, &before_setup, None),
+        (PresentationActor::Anonymous, &configured, None),
+        (
+            PresentationActor::Authenticated,
+            &configured,
+            Some(cookie.as_str()),
+        ),
+    ];
+    let mut public_bodies: std::collections::HashMap<&str, Vec<u8>> =
+        std::collections::HashMap::new();
+
+    for route in PAGE_ROUTES
+        .iter()
+        .chain(PUBLIC_ASSETS)
+        .chain(OPERATOR_ASSETS)
+    {
+        for (actor_index, (actor, proxy, cookie)) in actors.iter().enumerate() {
+            let mut request = no_redirect_client().get(proxy.url(route.path));
+            if PAGE_ROUTES.iter().any(|page| page.path == route.path) {
+                request = request.header("accept", "text/html");
+            }
+            if let Some(cookie) = cookie {
+                request = request.header("cookie", *cookie);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(
+                response.status().as_u16(),
+                route.statuses[actor_index],
+                "presentation-assets:status: GET {} actor={actor:?}",
+                route.path
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("cache-control")
+                    .and_then(|value| value.to_str().ok()),
+                Some("no-store"),
+                "presentation-assets:no-store: GET {} actor={actor:?}",
+                route.path
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("content-security-policy")
+                    .and_then(|value| value.to_str().ok()),
+                Some(CSP),
+                "presentation-assets:csp: GET {} actor={actor:?}",
+                route.path
+            );
+            if response.status().is_success() {
+                assert_eq!(
+                    response
+                        .headers()
+                        .get(CONTENT_TYPE)
+                        .and_then(|value| value.to_str().ok()),
+                    route.content_type,
+                    "presentation-assets:content-type: GET {} actor={actor:?}",
+                    route.path
+                );
+            }
+            let body = response.bytes().await.unwrap().to_vec();
+            if PUBLIC_ASSETS.iter().any(|public| public.path == route.path) {
+                if let Some(first) = public_bodies.get(route.path) {
+                    assert_eq!(
+                        &body, first,
+                        "presentation-assets:public-byte-isolation: GET {} actor={actor:?}",
+                        route.path
+                    );
+                } else {
+                    public_bodies.insert(route.path, body.clone());
+                }
+                let text = String::from_utf8_lossy(&body);
+                for forbidden in [
+                    "settings.",
+                    "presentation-private-client",
+                    "presentation-private-secret",
+                    "presentation-private-nim-key",
+                    TEST_PASSWORD,
+                ] {
+                    assert!(
+                        !text.contains(forbidden),
+                        "presentation-assets:public-byte-isolation: GET {} contains {forbidden:?}",
+                        route.path
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn locale_catalog_routes_are_gated() {
+    const CSP: &str = "default-src 'none'; img-src 'self' data:; style-src 'self'; \
+        script-src 'self'; connect-src 'self'; frame-ancestors 'none'; \
+        base-uri 'none'; form-action 'self'";
+    const ROUTES: &[PresentationRoute] = &[
+        PresentationRoute {
+            content_type: Some("application/json"),
+            path: "/api/locale-bootstrap",
+            statuses: [200, 200, 200],
+        },
+        PresentationRoute {
+            content_type: Some("application/json"),
+            path: "/assets/public/locales/en-US.json",
+            statuses: [200, 200, 200],
+        },
+        PresentationRoute {
+            content_type: Some("application/json"),
+            path: "/assets/operator/locales/en-US.json",
+            statuses: [503, 401, 200],
+        },
+        PresentationRoute {
+            content_type: None,
+            path: "/assets/public/locales/en-XA.json",
+            statuses: [404, 404, 404],
+        },
+        PresentationRoute {
+            content_type: None,
+            path: "/assets/operator/locales/en-XA.json",
+            statuses: [503, 401, 404],
+        },
+        PresentationRoute {
+            content_type: None,
+            path: "/assets/public/locales/fr-FR.json",
+            statuses: [404, 404, 404],
+        },
+        PresentationRoute {
+            content_type: None,
+            path: "/assets/operator/locales/fr-FR.json",
+            statuses: [503, 401, 404],
+        },
+    ];
+
+    let before_setup = start_proxy_fresh().await;
+    let mock = start_mock().await;
+    let configured = start_proxy(&mock.url, &[]).await;
+    let cookie = login(&configured).await;
+    let actors = [
+        (PresentationActor::BeforeSetup, &before_setup, None),
+        (PresentationActor::Anonymous, &configured, None),
+        (
+            PresentationActor::Authenticated,
+            &configured,
+            Some(cookie.as_str()),
+        ),
+    ];
+    let public_catalog = include_str!("fixtures/locales/public-en-US.json");
+    let source: serde_json::Value =
+        serde_json::from_str(include_str!("../src/web/locales/en-US.json"))
+            .expect("canonical authoring catalog");
+    let operator_messages: std::collections::BTreeMap<String, String> = source["messages"]
+        .as_object()
+        .expect("authoring messages")
+        .iter()
+        .map(|(id, message)| {
+            (
+                id.clone(),
+                message["en"]
+                    .as_str()
+                    .expect("authoring message text")
+                    .to_owned(),
+            )
+        })
+        .collect();
+    let operator_catalog = serde_json::to_string(&serde_json::json!({
+        "locale": "en-US",
+        "messages": operator_messages,
+    }))
+    .expect("operator projection");
+
+    for route in ROUTES {
+        for (actor_index, (actor, proxy, cookie)) in actors.iter().enumerate() {
+            let mut request = no_redirect_client().get(proxy.url(route.path));
+            if let Some(cookie) = cookie {
+                request = request.header("cookie", *cookie);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(
+                response.status().as_u16(),
+                route.statuses[actor_index],
+                "locale-routes:status: GET {} actor={actor:?}",
+                route.path
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("cache-control")
+                    .and_then(|value| value.to_str().ok()),
+                Some("no-store"),
+                "locale-routes:no-store: GET {} actor={actor:?}",
+                route.path
+            );
+            assert_eq!(
+                response
+                    .headers()
+                    .get("content-security-policy")
+                    .and_then(|value| value.to_str().ok()),
+                Some(CSP),
+                "locale-routes:csp: GET {} actor={actor:?}",
+                route.path
+            );
+            if response.status().is_success() {
+                assert_eq!(
+                    response
+                        .headers()
+                        .get(CONTENT_TYPE)
+                        .and_then(|value| value.to_str().ok()),
+                    route.content_type,
+                    "locale-routes:content-type: GET {} actor={actor:?}",
+                    route.path
+                );
+                let body = response.text().await.unwrap();
+                if route.path == "/api/locale-bootstrap" {
+                    assert_eq!(
+                        body, r#"{"installed_locales":["en-US"],"server_default":"en-US"}"#,
+                        "locale-routes:bootstrap-bytes"
+                    );
+                } else {
+                    let expected = if route.path.contains("/public/") {
+                        public_catalog
+                    } else {
+                        operator_catalog.as_str()
+                    };
+                    assert_eq!(
+                        body, expected,
+                        "locale-routes:exact-projection: GET {}",
+                        route.path
+                    );
+                    let catalog: serde_json::Value =
+                        serde_json::from_str(&body).expect("catalog JSON");
+                    assert_eq!(catalog["locale"], "en-US");
+                    let messages = catalog["messages"].as_object().expect("plain messages");
+                    assert_eq!(
+                        messages.get("common.app_name"),
+                        Some(&serde_json::Value::String("NIM Proxy".into()))
+                    );
+                    assert!(
+                        messages.values().all(serde_json::Value::is_string),
+                        "locale-routes:plain-strings"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -2181,10 +5715,10 @@ async fn worker_exhaustion_governs_the_model_and_spares_the_lane() {
     assert_eq!(v["choices"][0]["message"]["content"], "hello world");
     assert_eq!(mock.state.hit_count(), 2, "one exhausted try, one success");
     // The retry waited out the governor's ~2s drain gap, not the 10s default
-    // lane bench a plain 429-without-Retry-After would have earned.
+    // lane cooldown a plain 429-without-Retry-After would have earned.
     assert!(
         started.elapsed() < Duration::from_secs(8),
-        "retry took {:?} — looks like a lane bench, not a model drain gap",
+        "retry took {:?} — looks like a lane cooldown, not a model drain gap",
         started.elapsed()
     );
 
@@ -2194,8 +5728,8 @@ async fn worker_exhaustion_governs_the_model_and_spares_the_lane() {
         "exhaustion counted: {metrics}"
     );
     assert!(
-        !metrics.contains("nimproxy_lane_benched_total"),
-        "worker exhaustion must never bench a lane: {metrics}"
+        !metrics.contains("nimproxy_lane_cooldown_total"),
+        "worker exhaustion must never cool down a lane: {metrics}"
     );
     assert!(
         metrics.contains(r#"nimproxy_model_limit{model="mock/model-a"} 1"#),
@@ -2231,8 +5765,8 @@ async fn worker_exhaustion_streaming_retries_inside_the_stream() {
         "exhaustion counted: {metrics}"
     );
     assert!(
-        !metrics.contains("nimproxy_lane_benched_total"),
-        "worker exhaustion must never bench a lane: {metrics}"
+        !metrics.contains("nimproxy_lane_cooldown_total"),
+        "worker exhaustion must never cool down a lane: {metrics}"
     );
 }
 
@@ -2268,6 +5802,789 @@ async fn post_json(
     let status = resp.status();
     let v = resp.json().await.unwrap_or_default();
     (status, v)
+}
+
+fn locale_store_bytes(proxy: &support::Proxy) -> Vec<u8> {
+    std::fs::read(proxy.data_dir.join("config.json"))
+        .expect("locale-preferences: durable config.json")
+}
+
+async fn locale_post(
+    proxy: &support::Proxy,
+    cookie: Option<&str>,
+    path: &str,
+    body: &serde_json::Value,
+) -> (reqwest::StatusCode, Option<String>, Vec<u8>) {
+    let mut request = client().post(proxy.url(path)).json(body);
+    if let Some(cookie) = cookie {
+        request = request.header("cookie", cookie);
+    }
+    let response = request.send().await.unwrap();
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let bytes = response.bytes().await.unwrap().to_vec();
+    (status, content_type, bytes)
+}
+
+async fn locale_post_raw(
+    proxy: &support::Proxy,
+    cookie: Option<&str>,
+    path: &str,
+    content_type: Option<&str>,
+    body: &str,
+) -> (reqwest::StatusCode, Option<String>, Vec<u8>) {
+    let mut request = client().post(proxy.url(path)).body(body.to_owned());
+    if let Some(cookie) = cookie {
+        request = request.header("cookie", cookie);
+    }
+    if let Some(content_type) = content_type {
+        request = request.header(CONTENT_TYPE, content_type);
+    }
+    let response = request.send().await.unwrap();
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let bytes = response.bytes().await.unwrap().to_vec();
+    (status, content_type, bytes)
+}
+
+async fn locale_config_revision(proxy: &support::Proxy, cookie: &str) -> u64 {
+    dashboard_now(proxy, cookie).await["config_revision"]
+        .as_u64()
+        .expect("locale-preferences: numeric config revision")
+}
+
+fn locale_response_code(bytes: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value["error"]["code"].as_str().map(str::to_owned)
+}
+
+fn locale_response_type(bytes: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value["error"]["type"].as_str().map(str::to_owned)
+}
+
+fn locale_response_message(bytes: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value["error"]["message"].as_str().map(str::to_owned)
+}
+
+fn record_locale_response(
+    failures: &mut Vec<String>,
+    label: &str,
+    status: reqwest::StatusCode,
+    content_type: Option<&str>,
+    bytes: &[u8],
+    expected_status: reqwest::StatusCode,
+    expected_code: Option<&str>,
+) {
+    if status != expected_status {
+        failures.push(format!(
+            "{label}: status {status}, expected {expected_status}"
+        ));
+    }
+    if content_type != Some("application/json") {
+        failures.push(format!(
+            "{label}: content-type {content_type:?}, expected application/json"
+        ));
+    }
+    match expected_code {
+        Some(code) => {
+            if locale_response_code(bytes).as_deref() != Some(code) {
+                failures.push(format!(
+                    "{label}: code {:?}, expected {code}; body={}",
+                    locale_response_code(bytes),
+                    String::from_utf8_lossy(bytes)
+                ));
+            }
+            if locale_response_type(bytes).as_deref() != Some("proxy_error") {
+                failures.push(format!(
+                    "{label}: error type {:?}, expected proxy_error",
+                    locale_response_type(bytes)
+                ));
+            }
+        }
+        None => {
+            if bytes != br#"{"ok":true}"# {
+                failures.push(format!(
+                    "{label}: success bytes {}, expected {{\"ok\":true}}",
+                    String::from_utf8_lossy(bytes)
+                ));
+            }
+        }
+    }
+}
+
+async fn locale_config_body(proxy: &support::Proxy, cookie: &str) -> (u16, String) {
+    let response = client()
+        .get(proxy.url("/api/config"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap();
+    (status, body)
+}
+
+fn record_only_user_locale_changed(
+    failures: &mut Vec<String>,
+    label: &str,
+    before_bytes: &[u8],
+    after_bytes: &[u8],
+    username: &str,
+    expected_locale: Option<&str>,
+) {
+    let before: serde_json::Value =
+        serde_json::from_slice(before_bytes).expect("locale-preferences: before store JSON");
+    let after: serde_json::Value =
+        serde_json::from_slice(after_bytes).expect("locale-preferences: after store JSON");
+    let mut expected = before.clone();
+    let users = expected["users"]
+        .as_array_mut()
+        .expect("locale-preferences: users array");
+    let caller = users
+        .iter_mut()
+        .find(|entry| entry["username"] == username)
+        .unwrap_or_else(|| panic!("locale-preferences: missing caller {username}"));
+    match expected_locale {
+        Some(locale) => {
+            caller
+                .as_object_mut()
+                .expect("locale-preferences: user object")
+                .insert("locale".into(), serde_json::json!(locale));
+        }
+        None => {
+            caller
+                .as_object_mut()
+                .expect("locale-preferences: user object")
+                .remove("locale");
+        }
+    }
+    if after["users"] != expected["users"] {
+        failures.push(format!(
+            "{label}: complete users array changed outside authenticated caller; before={} after={} expected={}",
+            before["users"], after["users"], expected["users"]
+        ));
+    }
+    if after != expected {
+        failures.push(format!(
+            "{label}: persisted store changed outside the caller locale; before={} after={} expected={expected}",
+            String::from_utf8_lossy(before_bytes),
+            String::from_utf8_lossy(after_bytes),
+        ));
+    }
+}
+
+#[tokio::test]
+async fn locale_preferences_are_fail_closed() {
+    let mock = start_mock().await;
+    let opts = support::StoreOpts {
+        extra_users: vec![
+            ("locale-admin".into(), "admin".into()),
+            ("locale-user".into(), "user".into()),
+        ],
+        ..Default::default()
+    };
+    let data_dir = scratch_data_dir();
+    let mut store = opts.json(&mock.url);
+    // Complete v1 document immediately before locale fields were added. Keep
+    // every older additive default explicit so the first locale save can be
+    // compared as exactly one schema addition.
+    store.as_object_mut().unwrap().insert(
+        "dashboard".into(),
+        serde_json::json!({
+            "default_window_days": 30,
+            "slo_target_percent": 99.9,
+        }),
+    );
+    store.as_object_mut().unwrap().insert(
+        "governor".into(),
+        serde_json::json!({
+            "enabled": true,
+            "overrides": {},
+        }),
+    );
+    store
+        .as_object_mut()
+        .unwrap()
+        .insert("history".into(), serde_json::json!({"days": 30}));
+    store["limits"]
+        .as_object_mut()
+        .unwrap()
+        .insert("models_ttl_secs".into(), serde_json::json!(600));
+    std::fs::write(
+        data_dir.join("config.json"),
+        serde_json::to_vec_pretty(&store).unwrap(),
+    )
+    .unwrap();
+    let proxy = start_proxy_in(data_dir, &[]).await;
+    let superuser = login(&proxy).await;
+    let admin = login_as(&proxy, "locale-admin").await;
+    let user = login_as(&proxy, "locale-user").await;
+    let mut failures = Vec::new();
+    let mut rejection_byte_checks = 0;
+
+    // GET /api/config is real server output, not a test-side Rust-wire copy.
+    let (super_status, super_body) = locale_config_body(&proxy, &superuser).await;
+    if super_status != 200 {
+        failures.push(format!("locale-config: superuser status {super_status}"));
+    }
+    let super_json: serde_json::Value =
+        serde_json::from_str(&super_body).unwrap_or(serde_json::Value::Null);
+    if super_json.get("locale") != Some(&serde_json::Value::Null) {
+        failures.push(format!(
+            "locale-config: absent superuser override must be null: {super_body}"
+        ));
+    }
+    if super_json["server"]["default_locale"] != "en-US" {
+        failures.push(format!(
+            "locale-config: admin server.default_locale missing: {super_body}"
+        ));
+    }
+    let client_keys_at = super_body.find("\"client_keys\"").unwrap_or(usize::MAX);
+    let locale_at = super_body.find("\"locale\"").unwrap_or(usize::MAX);
+    let mode_at = super_body.find("\"mode\"").unwrap_or(usize::MAX);
+    if !(client_keys_at < locale_at && locale_at < mode_at) {
+        failures.push(format!(
+            "locale-config: top-level wire order must be client_keys, locale, mode: {super_body}"
+        ));
+    }
+    let base_url_at = super_body.find("\"base_url\"").unwrap_or(usize::MAX);
+    let dashboard_at = super_body.find("\"dashboard\"").unwrap_or(usize::MAX);
+    let default_locale_at = super_body.find("\"default_locale\"").unwrap_or(usize::MAX);
+    let governor_at = super_body.find("\"governor\"").unwrap_or(usize::MAX);
+    if !(base_url_at < dashboard_at
+        && dashboard_at < default_locale_at
+        && default_locale_at < governor_at)
+    {
+        failures.push(format!(
+            "locale-config: server wire order must be base_url, dashboard, default_locale, governor: {super_body}"
+        ));
+    }
+
+    let (user_status, user_body) = locale_config_body(&proxy, &user).await;
+    if user_status != 200 {
+        failures.push(format!("locale-config: user status {user_status}"));
+    }
+    let user_json: serde_json::Value =
+        serde_json::from_str(&user_body).unwrap_or(serde_json::Value::Null);
+    if user_json.get("locale") != Some(&serde_json::Value::Null) {
+        failures.push(format!(
+            "locale-config: absent user override must be null: {user_body}"
+        ));
+    }
+    if user_json.get("server").is_some() {
+        failures.push("locale-config: ordinary user received admin server section".into());
+    }
+
+    let bootstrap = client()
+        .get(proxy.url("/api/locale-bootstrap"))
+        .send()
+        .await
+        .unwrap();
+    let bootstrap_status = bootstrap.status();
+    let bootstrap_bytes = bootstrap.bytes().await.unwrap();
+    if bootstrap_status != 200
+        || bootstrap_bytes.as_ref()
+            != br#"{"installed_locales":["en-US"],"server_default":"en-US"}"#
+    {
+        failures.push(format!(
+            "locale-bootstrap: persisted default not reflected exactly: status={bootstrap_status} body={}",
+            String::from_utf8_lossy(&bootstrap_bytes)
+        ));
+    }
+
+    // Server-default authorization is checked before any mutation.
+    for (label, cookie, expected_status, expected_code) in [
+        (
+            "anonymous-server-default",
+            None,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "unauthorized",
+        ),
+        (
+            "ordinary-user-server-default",
+            Some(user.as_str()),
+            reqwest::StatusCode::FORBIDDEN,
+            "forbidden",
+        ),
+    ] {
+        let before = locale_store_bytes(&proxy);
+        let (status, content_type, body) = locale_post(
+            &proxy,
+            cookie,
+            "/api/settings/locale",
+            &serde_json::json!({"locale": "en-US"}),
+        )
+        .await;
+        record_locale_response(
+            &mut failures,
+            label,
+            status,
+            content_type.as_deref(),
+            &body,
+            expected_status,
+            Some(expected_code),
+        );
+        if locale_store_bytes(&proxy) != before {
+            failures.push(format!("{label}: rejected mutation changed config.json"));
+        }
+        rejection_byte_checks += 1;
+    }
+    for (
+        actor,
+        cookie,
+        expected_status,
+        expected_code,
+        expected_message,
+    ) in [
+        (
+            "anonymous",
+            None,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "authentication required (session cookie, or Authorization: Bearer <username>:<password>)",
+        ),
+        (
+            "ordinary-user",
+            Some(user.as_str()),
+            reqwest::StatusCode::FORBIDDEN,
+            "forbidden",
+            "server settings require an admin",
+        ),
+    ] {
+        for (shape, content_type, request_body) in [
+            ("malformed-json", Some("application/json"), "{"),
+            (
+                "wrong-media-type",
+                Some("text/plain"),
+                r#"{"locale":"en-US"}"#,
+            ),
+        ] {
+            let label = format!("{actor}-server-default-{shape}");
+            let before = locale_store_bytes(&proxy);
+            let (status, content_type, body) = locale_post_raw(
+                &proxy,
+                cookie,
+                "/api/settings/locale",
+                content_type,
+                request_body,
+            )
+            .await;
+            record_locale_response(
+                &mut failures,
+                &label,
+                status,
+                content_type.as_deref(),
+                &body,
+                expected_status,
+                Some(expected_code),
+            );
+            if locale_response_message(&body).as_deref() != Some(expected_message) {
+                failures.push(format!(
+                    "{label}: message {:?}, expected {expected_message:?}",
+                    locale_response_message(&body)
+                ));
+            }
+            if locale_store_bytes(&proxy) != before {
+                failures.push(format!("{label}: rejected body changed config.json"));
+            }
+            rejection_byte_checks += 1;
+        }
+    }
+    let before = locale_store_bytes(&proxy);
+    let (status, content_type, body) = locale_post(
+        &proxy,
+        None,
+        "/api/settings/account",
+        &serde_json::json!({"action": "locale", "locale": "en-US"}),
+    )
+    .await;
+    record_locale_response(
+        &mut failures,
+        "anonymous-user-override",
+        status,
+        content_type.as_deref(),
+        &body,
+        reqwest::StatusCode::UNAUTHORIZED,
+        Some("unauthorized"),
+    );
+    if locale_store_bytes(&proxy) != before {
+        failures.push("anonymous-user-override: rejected mutation changed config.json".into());
+    }
+    rejection_byte_checks += 1;
+
+    // Every boundary row goes through each real mutation endpoint. Valid but
+    // uninstalled tags are distinguished from syntactically invalid tags.
+    let syntax_rows = [
+        ("empty", ""),
+        ("whitespace", " "),
+        ("one-letter-language", "e"),
+        ("underscore", "en_US"),
+        ("trailing-separator", "en-"),
+        ("private-use", "x-private"),
+        ("four-letter-language", "abcd"),
+        ("three-letter-script", "zh-Abc"),
+        ("five-letter-script", "zh-Abcde"),
+        ("three-letter-alpha-region", "en-USA"),
+        ("one-digit-region", "en-1"),
+        ("two-digit-region", "en-12"),
+        ("four-digit-region", "en-1234"),
+        ("extension", "en-u-ca"),
+        ("padded", " en-US "),
+        ("non-ascii", "fr-ÉR"),
+        ("variant", "sl-rozaj"),
+        ("extra-subtag", "zh-Hans-CN-extra"),
+    ];
+    let uninstalled_rows = [
+        ("two-letter-language", "eN", "en"),
+        ("three-letter-language", "eNg", "eng"),
+        ("script", "zH-hAnS", "zh-Hans"),
+        ("alpha-region", "pT-bR", "pt-BR"),
+        ("numeric-region", "eS-419", "es-419"),
+        ("script-region", "zH-hAnS-cN", "zh-Hans-CN"),
+        ("test-pseudolocale", "eN-xA", "en-XA"),
+    ];
+    for (path, cookie, surface) in [
+        ("/api/settings/locale", superuser.as_str(), "server-default"),
+        ("/api/settings/account", user.as_str(), "user-override"),
+    ] {
+        for (row, locale) in syntax_rows {
+            let before = locale_store_bytes(&proxy);
+            let request = if path.ends_with("/account") {
+                serde_json::json!({"action": "locale", "locale": locale})
+            } else {
+                serde_json::json!({"locale": locale})
+            };
+            let (status, content_type, body) =
+                locale_post(&proxy, Some(cookie), path, &request).await;
+            let label = format!("{surface}-invalid-{row}");
+            record_locale_response(
+                &mut failures,
+                &label,
+                status,
+                content_type.as_deref(),
+                &body,
+                reqwest::StatusCode::BAD_REQUEST,
+                Some("invalid_locale"),
+            );
+            if locale_store_bytes(&proxy) != before {
+                failures.push(format!("{label}: rejected mutation changed config.json"));
+            }
+            rejection_byte_checks += 1;
+        }
+        for (row, locale, canonical) in uninstalled_rows {
+            let before = locale_store_bytes(&proxy);
+            let request = if path.ends_with("/account") {
+                serde_json::json!({"action": "locale", "locale": locale})
+            } else {
+                serde_json::json!({"locale": locale})
+            };
+            let (status, content_type, body) =
+                locale_post(&proxy, Some(cookie), path, &request).await;
+            let label = format!("{surface}-uninstalled-{row}");
+            record_locale_response(
+                &mut failures,
+                &label,
+                status,
+                content_type.as_deref(),
+                &body,
+                reqwest::StatusCode::BAD_REQUEST,
+                Some("locale_not_installed"),
+            );
+            let expected_message = format!("locale {canonical} is not installed");
+            if locale_response_message(&body).as_deref() != Some(expected_message.as_str()) {
+                failures.push(format!(
+                    "{label}: canonical locale message {:?}, expected {expected_message:?}",
+                    locale_response_message(&body)
+                ));
+            }
+            if locale_store_bytes(&proxy) != before {
+                failures.push(format!("{label}: rejected mutation changed config.json"));
+            }
+            rejection_byte_checks += 1;
+        }
+    }
+
+    let before = locale_store_bytes(&proxy);
+    let (status, content_type, body) = locale_post(
+        &proxy,
+        Some(&user),
+        "/api/settings/account",
+        &serde_json::json!({"action": "unknown", "locale": "en-US"}),
+    )
+    .await;
+    record_locale_response(
+        &mut failures,
+        "user-override-invalid-action",
+        status,
+        content_type.as_deref(),
+        &body,
+        reqwest::StatusCode::BAD_REQUEST,
+        Some("invalid_action"),
+    );
+    if locale_store_bytes(&proxy) != before {
+        failures.push("user-override-invalid-action: changed config.json".into());
+    }
+    rejection_byte_checks += 1;
+
+    // Both existing admin roles may set the default. Mixed case is
+    // canonicalized before the durable write. The fixture began as a
+    // pre-locale v1 document, so compare the complete store and prove that
+    // each role reaches commit even when the canonical value is idempotent.
+    let before_server_default = locale_store_bytes(&proxy);
+    let mut expected_server_default: serde_json::Value =
+        serde_json::from_slice(&before_server_default).unwrap();
+    expected_server_default
+        .as_object_mut()
+        .expect("locale-preferences: config object")
+        .insert("default_locale".into(), serde_json::json!("en-US"));
+    for (label, cookie, locale) in [
+        ("admin-server-default", admin.as_str(), "EN-us"),
+        ("superuser-server-default", superuser.as_str(), "en-US"),
+    ] {
+        let revision_before = locale_config_revision(&proxy, cookie).await;
+        let (status, content_type, body) = locale_post(
+            &proxy,
+            Some(cookie),
+            "/api/settings/locale",
+            &serde_json::json!({"locale": locale}),
+        )
+        .await;
+        record_locale_response(
+            &mut failures,
+            label,
+            status,
+            content_type.as_deref(),
+            &body,
+            reqwest::StatusCode::OK,
+            None,
+        );
+        let revision_after = locale_config_revision(&proxy, cookie).await;
+        if revision_after <= revision_before {
+            failures.push(format!(
+                "{label}: config revision did not advance across commit: before={revision_before} after={revision_after}"
+            ));
+        }
+        let stored: serde_json::Value =
+            serde_json::from_slice(&locale_store_bytes(&proxy)).unwrap();
+        if stored != expected_server_default {
+            failures.push(format!(
+                "{label}: complete store changed outside canonical default_locale; before={} after={stored} expected={expected_server_default}",
+                String::from_utf8_lossy(&before_server_default)
+            ));
+        }
+    }
+
+    // Every authenticated role may set and clear only its own preference,
+    // without supplying a password. Compare the complete persisted document,
+    // including the full users array, after each caller-scoped mutation.
+    for (actor, username, cookie, is_admin) in [
+        ("ordinary-user", "locale-user", user.as_str(), false),
+        ("admin", "locale-admin", admin.as_str(), true),
+        ("superuser", "root", superuser.as_str(), true),
+    ] {
+        let set_label = format!("{actor}-override-set");
+        let before_set = locale_store_bytes(&proxy);
+        let (status, content_type, body) = locale_post(
+            &proxy,
+            Some(cookie),
+            "/api/settings/account",
+            &serde_json::json!({"action": "locale", "locale": "EN-us"}),
+        )
+        .await;
+        record_locale_response(
+            &mut failures,
+            &set_label,
+            status,
+            content_type.as_deref(),
+            &body,
+            reqwest::StatusCode::OK,
+            None,
+        );
+        let after_set = locale_store_bytes(&proxy);
+        record_only_user_locale_changed(
+            &mut failures,
+            &set_label,
+            &before_set,
+            &after_set,
+            username,
+            Some("en-US"),
+        );
+
+        let (configured_status, configured_body) = locale_config_body(&proxy, cookie).await;
+        let configured: serde_json::Value =
+            serde_json::from_str(&configured_body).unwrap_or_default();
+        if configured_status != 200 || configured["locale"] != "en-US" {
+            failures.push(format!(
+                "{set_label}: caller /api/config did not expose canonical en-US: status={configured_status} body={configured_body}"
+            ));
+        }
+        if is_admin && configured["server"]["default_locale"] != "en-US" {
+            failures.push(format!(
+                "{set_label}: admin /api/config must expose server.default_locale plus its own locale: {configured_body}"
+            ));
+        }
+
+        let clear_label = format!("{actor}-override-clear");
+        let before_clear = locale_store_bytes(&proxy);
+        let (status, content_type, body) = locale_post(
+            &proxy,
+            Some(cookie),
+            "/api/settings/account",
+            &serde_json::json!({"action": "locale", "locale": null}),
+        )
+        .await;
+        record_locale_response(
+            &mut failures,
+            &clear_label,
+            status,
+            content_type.as_deref(),
+            &body,
+            reqwest::StatusCode::OK,
+            None,
+        );
+        let after_clear = locale_store_bytes(&proxy);
+        record_only_user_locale_changed(
+            &mut failures,
+            &clear_label,
+            &before_clear,
+            &after_clear,
+            username,
+            None,
+        );
+
+        let (configured_status, configured_body) = locale_config_body(&proxy, cookie).await;
+        let configured: serde_json::Value =
+            serde_json::from_str(&configured_body).unwrap_or_default();
+        if configured_status != 200 || configured.get("locale") != Some(&serde_json::Value::Null) {
+            failures.push(format!(
+                "{clear_label}: caller /api/config locale is not null: status={configured_status} body={configured_body}"
+            ));
+        }
+        if is_admin && configured["server"]["default_locale"] != "en-US" {
+            failures.push(format!(
+                "{clear_label}: admin /api/config lost server.default_locale: {configured_body}"
+            ));
+        }
+    }
+
+    if rejection_byte_checks != 58 {
+        failures.push(format!(
+            "locale-preferences: executed {rejection_byte_checks} rejection byte checks, expected 58"
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "locale-preferences failures ({}) after {rejection_byte_checks} rejection byte checks:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[tokio::test]
+async fn account_rejects_duplicate_known_fields_without_mutating_the_store() {
+    let mock = start_mock().await;
+    let cases = [
+        (
+            "duplicate-current-password",
+            r#"{"current_password":"wrong-password","current_password":"test-password-1","new_password":"replacement-password"}"#,
+        ),
+        (
+            "duplicate-new-password",
+            r#"{"current_password":"test-password-1","new_password":"replacement-password-a","new_password":"replacement-password-b"}"#,
+        ),
+        (
+            "duplicate-action",
+            r#"{"action":"unknown","action":"locale","locale":"en-US"}"#,
+        ),
+        (
+            "duplicate-locale",
+            r#"{"action":"locale","locale":null,"locale":"en-US"}"#,
+        ),
+    ];
+    let mut failures = Vec::new();
+
+    for (label, body) in cases {
+        let proxy = start_proxy(&mock.url, &[]).await;
+        let cookie = login(&proxy).await;
+        let before = locale_store_bytes(&proxy);
+        let (status, content_type, response) = locale_post_raw(
+            &proxy,
+            Some(&cookie),
+            "/api/settings/account",
+            Some("application/json"),
+            body,
+        )
+        .await;
+        record_locale_response(
+            &mut failures,
+            label,
+            status,
+            content_type.as_deref(),
+            &response,
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            Some("invalid_json"),
+        );
+        if locale_response_message(&response).as_deref() != Some("invalid JSON") {
+            failures.push(format!(
+                "{label}: message {:?}, expected \"invalid JSON\"",
+                locale_response_message(&response)
+            ));
+        }
+        if locale_store_bytes(&proxy) != before {
+            failures.push(format!("{label}: rejected request changed config.json"));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "account duplicate-field failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[tokio::test]
+async fn account_password_change_still_ignores_unknown_fields() {
+    let mock = start_mock().await;
+    let proxy = start_proxy(&mock.url, &[]).await;
+    let cookie = login(&proxy).await;
+    let before: serde_json::Value = serde_json::from_slice(&locale_store_bytes(&proxy)).unwrap();
+    let (status, content_type, response) = locale_post_raw(
+        &proxy,
+        Some(&cookie),
+        "/api/settings/account",
+        Some("application/json"),
+        r#"{"current_password":"test-password-1","new_password":"replacement-password","legacy_extension":{"nested":true}}"#,
+    )
+    .await;
+    let mut failures = Vec::new();
+    record_locale_response(
+        &mut failures,
+        "password-unknown-field",
+        status,
+        content_type.as_deref(),
+        &response,
+        reqwest::StatusCode::OK,
+        None,
+    );
+    let after: serde_json::Value = serde_json::from_slice(&locale_store_bytes(&proxy)).unwrap();
+    if after["users"][0]["password_hash"] == before["users"][0]["password_hash"] {
+        failures.push("password-unknown-field: password hash did not change".into());
+    }
+    assert!(
+        failures.is_empty(),
+        "password unknown-field compatibility failures:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[tokio::test]
@@ -2339,10 +6656,6 @@ async fn user_role_is_denied_server_settings_and_foreign_keys() {
                 "stream_idle_secs": 300, "request_timeout_secs": 300,
                 "max_inflight": 512, "strict_passthrough": false
             }),
-        ),
-        (
-            "/api/settings/pricing",
-            serde_json::json!({"ref_price_in": 1.0, "ref_price_out": 2.0}),
         ),
         (
             "/api/settings/governor",
@@ -2968,22 +7281,14 @@ async fn governor_settings_reflect_and_persist() {
     );
 }
 
-/// Pricing and dashboard history settings save through the same pipeline and
-/// reflect in /api/config; invalid candidates leave every value unchanged.
+/// Dashboard history settings save through the shared pipeline and reflect in
+/// /api/config; invalid candidates leave every value unchanged.
 #[tokio::test]
-async fn pricing_and_history_settings_reflect_in_api_config() {
+async fn history_settings_reflect_in_api_config() {
     let mock = start_mock().await;
     let proxy = start_proxy(&mock.url, &[]).await;
     let root = support::login(&proxy).await;
 
-    let (status, v) = post_json(
-        &proxy,
-        &root,
-        "/api/settings/pricing",
-        serde_json::json!({"ref_price_in": 1.25, "ref_price_out": 3.5}),
-    )
-    .await;
-    assert_eq!(status, 200, "{v}");
     let (status, v) = post_json(
         &proxy,
         &root,
@@ -2998,8 +7303,6 @@ async fn pricing_and_history_settings_reflect_in_api_config() {
     assert_eq!(status, 200, "{v}");
 
     let cfg = api_config(&proxy, &root).await;
-    assert_eq!(cfg["server"]["pricing"]["ref_price_in"], 1.25);
-    assert_eq!(cfg["server"]["pricing"]["ref_price_out"], 3.5);
     assert_eq!(cfg["server"]["history"]["days"], 45);
     assert_eq!(cfg["server"]["dashboard"]["default_window_days"], 30);
     assert_eq!(cfg["server"]["dashboard"]["slo_target_percent"], 99.5);
@@ -3020,15 +7323,6 @@ async fn pricing_and_history_settings_reflect_in_api_config() {
     assert_eq!(cfg["server"]["history"]["days"], 45);
     assert_eq!(cfg["server"]["dashboard"]["default_window_days"], 30);
     assert_eq!(cfg["server"]["dashboard"]["slo_target_percent"], 99.5);
-
-    let (status, v) = post_json(
-        &proxy,
-        &root,
-        "/api/settings/pricing",
-        serde_json::json!({"ref_price_in": -1.0, "ref_price_out": 3.5}),
-    )
-    .await;
-    assert_eq!(status, 400, "negative prices must be refused: {v}");
 }
 
 /// The limits endpoint enforces the shared rulebook (heartbeat < max_wait)
@@ -3182,13 +7476,25 @@ async fn setup_double_claim_is_rejected_with_409() {
         client().post(proxy.url("/setup")).json(&body).send(),
         client().post(proxy.url("/setup")).json(&body).send(),
     );
-    let mut statuses = [a.unwrap().status().as_u16(), b.unwrap().status().as_u16()];
-    statuses.sort_unstable();
-    assert_eq!(
-        statuses,
-        [200, 409],
-        "exactly one claim wins, the other 409s"
-    );
+    let (a, b) = (a.unwrap(), b.unwrap());
+    let (success, conflict) = if a.status() == reqwest::StatusCode::OK {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    assert_eq!(success.status(), reqwest::StatusCode::OK);
+    assert_exact_api_error(
+        conflict,
+        reqwest::StatusCode::CONFLICT,
+        "setup_complete",
+        "setup is already complete",
+    )
+    .await;
+    let stored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(proxy.data_dir.join("config.json")).unwrap())
+            .unwrap();
+    assert_eq!(stored["users"].as_array().unwrap().len(), 1);
+    assert_eq!(stored["users"][0]["username"], "admin");
 }
 
 /// A lockout-recovery store (users hand-emptied) keeps orphan-owned client

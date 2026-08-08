@@ -16,14 +16,14 @@ use futures_util::StreamExt;
 
 /// One scripted response for the next chat-completions request. The queue is
 /// consumed front-to-back; when empty, `Ok` is the default.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Behavior {
     /// Respond normally (stream or JSON per the request's `stream` flag).
     Ok,
     /// 429 with this Retry-After (seconds).
     RateLimited(u64),
     /// 429 carrying NIM's worker-exhaustion signature — model-scoped, so the
-    /// proxy must back off the model (governor), never bench the lane.
+    /// proxy must back off the model (governor), never cool down the lane.
     WorkerExhausted,
     /// A retryable server error.
     ServerError(u16),
@@ -45,6 +45,8 @@ pub enum Behavior {
     /// Buffered response with an unknown `finish_reason` — exercises the
     /// server-side clamp that collapses odd values to `other`.
     OddFinish,
+    /// A fixed upstream response for an exact proxy-boundary assertion.
+    ExactResponse { content_type: String, body: String },
 }
 
 pub struct Hit {
@@ -164,6 +166,11 @@ async fn mock_chat(
             "usage": {"prompt_tokens": 11, "completion_tokens": 2}
         }))
         .into_response(),
+        Behavior::ExactResponse { content_type, body } => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(body))
+            .unwrap(),
         Behavior::Hang => {
             let stream = futures_util::stream::once(async {
                 Ok::<_, std::io::Error>(Bytes::from("data: {\"choices\":[]}\n\n"))
@@ -204,7 +211,7 @@ async fn mock_chat(
             // a request that offers tools gets a tool_calls response, otherwise
             // a normal stop. Usage always carries reasoning-token details.
             let offers_tools = parsed.get("tools").is_some();
-            let usage = "\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":3}}";
+            let usage = "\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":2}}";
             if wants_stream {
                 let mut chunks: Vec<Result<Bytes, std::io::Error>> = Vec::new();
                 if offers_tools {
@@ -233,14 +240,14 @@ async fn mock_chat(
                     "choices": [{"index": 0, "message": {"role": "assistant", "tool_calls": [
                         {"index": 0, "id": "c1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}}
                     ]}, "finish_reason": "tool_calls"}],
-                    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "completion_tokens_details": {"reasoning_tokens": 3}}
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "completion_tokens_details": {"reasoning_tokens": 2}}
                 }))
                 .into_response()
             } else {
                 axum::Json(serde_json::json!({
                     "id": "mock-1", "object": "chat.completion",
                     "choices": [{"index": 0, "message": {"role": "assistant", "content": "hello world"}, "finish_reason": "stop"}],
-                    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "completion_tokens_details": {"reasoning_tokens": 3}}
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "completion_tokens_details": {"reasoning_tokens": 2}}
                 }))
                 .into_response()
             }
@@ -513,6 +520,12 @@ fn base_cmd(port: u16, data_dir: &std::path::Path) -> std::process::Command {
 /// non-zero without ever becoming healthy — used for boot-posture tests
 /// (corrupt store, future version, unwritable DATA_DIR).
 pub async fn expect_refuses_to_start(data_dir: std::path::PathBuf) {
+    let store_path = data_dir.join("config.json");
+    let store_before = if data_dir.is_absolute() && store_path.is_file() {
+        Some(std::fs::read(&store_path).expect("read startup-refusal store snapshot"))
+    } else {
+        None
+    };
     let port = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap().port()
@@ -526,6 +539,14 @@ pub async fn expect_refuses_to_start(data_dir: std::path::PathBuf) {
                 !status.success(),
                 "proxy should exit non-zero, got {status:?}"
             );
+            if let Some(before) = store_before {
+                assert_eq!(
+                    std::fs::read(&store_path)
+                        .expect("startup refusal must retain the existing config store"),
+                    before,
+                    "failed startup changed config.json bytes"
+                );
+            }
             let _ = std::fs::remove_dir_all(&data_dir);
             return;
         }

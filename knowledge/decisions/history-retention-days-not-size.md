@@ -43,15 +43,19 @@ a fixed bytes-per-day ratio.
 
 ## Consequences
 
-- `history.jsonl` lives in `DATA_DIR` (the Docker volume). If history-file
-  persistence fails after the config store is usable, the index can continue
-  in memory with a warning; an unusable config/data directory remains a hard
-  boot error.
+- Canonical `history-v1.jsonl` lives in `DATA_DIR` (the Docker volume).
+  Experimental `history.jsonl` remains opaque legacy evidence and is never a
+  retention input or target. If canonical persistence fails after the config
+  store is usable, the index can continue in memory with a warning; an
+  unusable config/data directory remains a hard boot error.
 - The knob lives in the [config store](ui-managed-config-store.md), not the
   retired `HISTORY_DAYS` env var, and is tunable live in Settings.
-- Lowering retention trims the visible index immediately and atomically
-  compacts the file in the background, preserving the pre-cutoff baseline and
-  boot marker required for exact first-window deltas.
+- Lowering finite retention trims the visible index immediately and schedules
+  atomic background compaction. Safe replacement preserves the pre-cutoff full
+  sample and owning boot required for exact first-window deltas. Recovery
+  evidence intersecting the retained window, or a live epoch without a full
+  sample, defers replacement and keeps it pending; `0` cancels finite work and
+  retains canonical history without a cutoff.
 - Five-minute samples bound event-time precision. The dashboard combines
   persisted rollups with a revision-bound current tail rather than a
   browser-only recent-history ring

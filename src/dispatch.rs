@@ -6,7 +6,7 @@
 //! The dispatcher is the only `Pool::reserve` caller in the app, and it holds
 //! the [`PoolHandle`] read lock across each reserve — so a settings-driven
 //! pool swap (which takes the write lock) can never interleave with a grant.
-//! Grants carry the `Arc<Pool>` that made them (see [`Slot`]) so bench and
+//! Grants carry the `Arc<Pool>` that made them (see [`Slot`]) so cooldown and
 //! release always land on the granting pool; a late op on a retired pool is
 //! benign because nothing consults it anymore.
 
@@ -26,7 +26,7 @@ use crate::pool::{Pool, PoolHandle, Reservation};
 const GRANT_GAP: Duration = Duration::from_millis(25);
 
 /// A granted reservation: the key to send with, and the pool that granted it
-/// so follow-up bench/release ops route to the right generation.
+/// so follow-up cooldown/release ops route to the right generation.
 pub struct Slot {
     pub pool: Arc<Pool>,
     pub lane: usize,

@@ -52,6 +52,14 @@ cargo fmt                                     # (CI runs `cargo fmt --check`)
 cargo clippy --all-targets -- -D warnings    # zero warnings — warnings are errors
 ```
 
+If you changed a handler, a response type in `src/api.rs`, or the crate
+version, regenerate the committed OpenAPI spec and commit it — CI regenerates
+it too and fails on any difference:
+
+```sh
+UPDATE_OPENAPI=1 cargo test --test openapi   # rewrites openapi.json
+```
+
 CI enforces more on every PR, most of it reproducible locally: line coverage
 ≥90% (`cargo llvm-cov`), a build against the declared MSRV
 (`cargo +1.87 check --locked --all-targets`), `cargo deny check` (advisories,

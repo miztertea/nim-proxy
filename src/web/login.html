@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title data-i18n-text="login.document.title">NIM Proxy — Sign in</title>
+<link id="presentation-stylesheet" rel="stylesheet" href="/assets/public/public.css">
+</head>
+<body class="login-page" data-error-code="{{error_code}}" hidden>
+<main>
+<form class="login-card" method="post" action="/login">
+  <h1 data-i18n="common.app_name">NIM Proxy</h1>
+  <p class="login-sub" data-i18n="login.prompt">Sign in to the dashboard.</p>
+  <p class="login-error" id="login-error" hidden></p>
+  <label for="login-username" data-i18n="login.username.placeholder">Username</label>
+  <input id="login-username" type="text" name="username" placeholder="Username" autofocus autocomplete="username" data-i18n-attr="placeholder:login.username.placeholder">
+  <label for="login-password" data-i18n="login.password.placeholder">Password</label>
+  <input id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" data-i18n-attr="placeholder:login.password.placeholder">
+  <button type="submit" data-i18n="login.submit">Sign in</button>
+</form>
+</main>
+<script src="/assets/public/login.js"></script>
+</body>
+</html>

@@ -52,9 +52,11 @@ Option 3. New metrics, split by the label that makes them useful:
 - **Global enum** — `nimproxy_tool_choice_total` `{mode}`.
 
 Request shape is read from the already-parsed body at `Ctx` construction, so no
-second deserialize. `SseScan` was broadened to parse only the events that carry
-`usage`, a concrete `finish_reason`, or `tool_calls` (plain content deltas are
-still skipped). `finish_reason` and `tool_choice` are clamped to known enums.
+second deserialize. Response quality uses the private typed
+[NIM observations](../architecture/nim-observations.md) component for both
+buffered JSON and bounded SSE frames, then records only validated final
+observations. Finish labels remain bounded to known values plus `other`;
+invalid or unavailable numeric observations are omitted from existing metrics.
 
 ## Consequences
 
@@ -64,9 +66,10 @@ still skipped). `finish_reason` and `tool_choice` are clamped to known enums.
   Clients view that fingerprints each agent's tool intensity, conversation
   depth, and sampling.
 - Cardinality stays bounded by construction: no client-controlled free-text
-  reaches a label; params live in histogram buckets; enums are clamped. Verified
-  by unit tests (`finish_label`, `tool_choice_mode`, `SseScan`) and an e2e that
-  asserts the `stream` label is only ever `true`/`false`.
+  reaches a label; params live in histogram buckets; enums are clamped. The
+  typed observer controls and exact-byte proxy E2E cover bounded response
+  classification; request-shape tests continue to assert that `stream` is only
+  ever `true`/`false`.
 - Privacy posture is explicit and documented: **counts and sizes, never
   message content.** Nothing that could carry prompt text is recorded.
 - Shape is labeled by *client*, not *model* — the harness determines tool use

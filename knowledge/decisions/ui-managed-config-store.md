@@ -53,7 +53,7 @@ And one risk to accept or design around: an unconfigured instance is
 
 ### JSON file, not SQLite
 
-`DATA_DIR/config.json` (sibling of `history.jsonl` — the compose volume
+`DATA_DIR/config.json` (sibling of canonical `history-v1.jsonl` — the compose volume
 already covers it, zero compose changes). The store is **kilobytes,
 read-mostly, single-writer** (the settings handlers), and fully
 **snapshot-cached in memory** (`RwLock<Arc<Config>>`, one snapshot per
@@ -70,6 +70,14 @@ Forward compatibility is a `version: u32` field (`1` today) plus
 `version` the build doesn't understand refuses to boot rather than silently
 dropping unknown keys.
 
+Locale preferences use that additive v1 policy. A current store without
+`default_locale` reads as `en-US`, and the next ordinary atomic save writes the
+field; each user may carry an optional canonical `locale`, omitted when the
+user follows the server default. Boot and every settings write validate both
+levels against the locale-v1 tag grammar and the compiled production registry.
+A corrupt, non-canonical, or syntactically valid but uninstalled durable locale
+therefore refuses boot instead of silently selecting another catalog.
+
 **Revisit triggers** (any one flips the answer to SQLite): per-user usage
 accounting or quotas (per-request writes), audit logging, hundreds of users,
 or a second concurrent writer.
@@ -83,6 +91,12 @@ keys, own NIM keys. Dashboards are identical for every role — only the
 Settings surface differs, and it is **filtered server-side** in
 `GET /api/config` (hidden sections are absent from the payload, not hidden by
 CSS), so DOM tampering reveals empty containers, not data.
+
+Every authenticated role may set or clear only its own display-locale
+preference through the account endpoint, without re-entering a password.
+Admin and superuser roles may also change the server default. Both mutations
+reuse the same candidate → validate → persist → publish transaction as every
+other setting; rejection changes no durable bytes.
 
 Each NIM key and each client key carries `owner: <username>`. Users see only
 their own key rows; admins see all rows (masked, owner-labeled) to manage the
@@ -100,11 +114,11 @@ identity mechanics.
 
 ### No encryption at rest
 
-The **`/data` volume is the trust boundary.** NIM keys already sat there in
-`history.jsonl`'s directory and in `.env` in plaintext; anyone who can read the
-volume already had the keys. Encrypting the store would need a key to live
-*somewhere* — another env var, another file on the same volume — which moves
-the problem without solving it. The proportionate hardening is **0600
+The **`/data` volume is the trust boundary.** The same deployment principal
+controls that volume and the `.env` where NIM keys previously lived in
+plaintext. Encrypting the store would need a key to live *somewhere* — another
+env var or another file under the same deployment boundary — which moves the
+problem without solving it. The proportionate hardening is **0600
 permissions + atomic writes** (tmp + `fsync` + `rename` + dir `fsync`), which
 the credential store needs anyway (unlike telemetry, a torn write here loses
 logins). Client API-key secrets get defense-in-depth for free: they're
